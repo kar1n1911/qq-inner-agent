@@ -1,0 +1,62 @@
+{
+  "provider": {
+    "kind": "openai",
+    "baseUrl": "https://api.deepseek.com",
+    "model": "deepseek-flash",
+    "maxTokens": 1600,
+    "tokenParameter": "max_tokens",
+    "timeoutSeconds": 60,
+    "retries": 2,
+    "requestsPerHour": 120,
+    "anthropicAuth": "x-api-key",
+    "workspaceId": "",
+    "thinking": "disabled"
+  },
+  "onebot": {
+    "url": "ws://127.0.0.1:3001/",
+    "selfId": "",
+    "heartbeatSeconds": 30,
+    "requestTimeoutSeconds": 12,
+    "reconnectMaxSeconds": 60
+  },
+  "agent": {
+    "name": "Luma",
+    "persona": "You are a thoughtful AI participant in a QQ conversation. Be helpful, concise, curious, and honest. Match the language and tone of the conversation. Never invent personal experiences or claim to be human.",
+    "aliases": [
+      "Luma"
+    ],
+    "allowedGroups": [],
+    "allowedUsers": [],
+    "ignoredUsers": [],
+    "proactive": true,
+    "dryRun": false,
+    "threshold": 4.09,
+    "interruptThreshold": 4.8,
+    "system1Probability": 0,
+    "proactiveTone": false,
+    "pauseSeconds": 45,
+    "debounceSeconds": 3,
+    "minThinkIntervalSeconds": 15,
+    "proactiveCooldownSeconds": 180,
+    "maxProactivePerHour": 6,
+    "maxMessagesPerHour": 30,
+    "activeWindowSeconds": 900,
+    "thoughtTtlSeconds": 1800,
+    "thoughtLimit": 12,
+    "historyLimit": 24,
+    "maxInputChars": 2000,
+    "maxOutputChars": 800,
+    "maxConcurrentChats": 2,
+    "maxActiveChats": 64,
+    "quietHours": {
+      "start": 23,
+      "end": 8,
+      "timezone": "Europe/Stockholm"
+    }
+  },
+  "storage": {
+    "directory": "data",
+    "retentionDays": 30,
+    "maxMessagesPerChat": 500
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "qq-inner-agent",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Persistent QQ conversational agent inspired by Inner Thoughts (CHI 2025)",
+  "engines": { "node": ">=22.13.0" },
+  "scripts": { "start": "./agent start", "test": "node --test test/*.test.mjs" }
+}

@@ -1,0 +1,14 @@
+.runtime/
+__pycache__/
+*.py[cod]
+config.json
+secrets.json
+data/
+*.log
+.agent.lock
+.dashboard.lock
+.settings-write
+dashboard.json
+dashboard-ca.crt
+dashboard-ca.srl
+*.tmp

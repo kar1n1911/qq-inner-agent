@@ -1,0 +1,18 @@
+# Verification — 2026-09-30
+
+- 23 tests passed, 0 failures (`./agent test`).
+- Dashboard tests cover authenticated access, origin and CSRF checks, secret redaction, configuration validation, stale revisions, and interrupted-save recovery.
+- A process-level test verifies live configuration reload, rejection of invalid edits, and recovery without changing the agent PID.
+- Both model API adapters exercised against real local HTTP mock endpoints.
+- OneBot transport exercised against a local WebSocket mock: authentication, request correlation, sending text segments, heartbeat timeout, reconnection, and duplicate-event suppression.
+- Decision tests cover turn allocation, interruption threshold, withholding, retained ideas, quiet hours, cooldowns, chat isolation, stale responses, dry-run mode, invalid model output, API budgets, and ambiguous delivery outcomes.
+- A regression test verifies that the DeepSeek profile never uses an unrelated OpenAI or Anthropic environment key.
+- Live SnowLuma OneBot authentication succeeded; the test account reported online.
+- The installed user service reported `onebotConnected: true`, `qqOnline: true`, and `mode: waiting_for_setup` during verification. SnowLuma and the dashboard were subsequently stopped at the owner's request.
+- User-service lingering is enabled. The service can survive logout; the GUI QQ session and host still need to remain available.
+- Single-instance protection rejected a second foreground start with exit code 75.
+- Local configuration and secrets have mode `0600`; the data directory has mode `0700`.
+- The agent's separate Node runtime has no Linux file capabilities.
+- Python setup scripts and shell launcher passed syntax checks. The generated service unit loaded successfully after correcting WorkingDirectory formatting.
+
+Not yet verified: a live DeepSeek completion or an actual QQ reply from this program. No DeepSeek key or selected chat IDs have been provided. No real QQ messages were sent during verification, and no paid model calls were made. Use `./agent setup`, followed by `./agent check --api`, to complete local configuration and verify provider access.
