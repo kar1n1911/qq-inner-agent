@@ -1,4 +1,6 @@
+import { startI18n, setLanguage, translate } from './i18n.mjs';
 const $ = id => document.getElementById(id);
+startI18n();
 let csrf = '', saved = null, dirty = false, polling = false, logs = [], online = false;
 const get = (obj, key) => key.split('.').reduce((o, k) => o?.[k], obj);
 const set = (obj, key, value) => { const parts = key.split('.'); const end = parts.pop(); parts.reduce((o,k) => o[k], obj)[end] = value; };
@@ -20,6 +22,8 @@ function page(name) {
 }
 function populate(data) {
   saved = data;
+  setLanguage(data.config.ui.language);
+  $('interface-language').value = data.config.ui.language;
   for (const input of document.querySelectorAll('[data-config]')) {
     const value = get(data.config, input.dataset.config);
     if (input.type === 'checkbox') input.checked = value;
@@ -52,7 +56,7 @@ function renderLogs() {
   const filter = $('log-filter').value.toLowerCase();
   const lines = logs.map(x => `${new Date(x.time).toLocaleTimeString()}  ${x.event}  ${JSON.stringify(Object.fromEntries(Object.entries(x).filter(([k]) => !['time','event'].includes(k))))}`).filter(x => x.toLowerCase().includes(filter));
   const output = $('log-output'), atBottom = output.scrollHeight - output.scrollTop - output.clientHeight < 40;
-  output.textContent = lines.join('\n') || 'No matching events yet.';
+  output.textContent = lines.join('\n') || translate('No matching events yet.');
   if (atBottom) output.scrollTop = output.scrollHeight;
 }
 async function refresh() {
@@ -104,6 +108,19 @@ $('login-form').addEventListener('submit', async e => {
   finally { b.disabled = false; }
 });
 document.querySelectorAll('[data-page]').forEach(b => b.addEventListener('click', () => page(b.dataset.page)));
+for (const selector of ['#interface-language', '[data-config="ui.language"]']) {
+  document.querySelector(selector).addEventListener('change', e => {
+    const language = e.target.value; setLanguage(language);
+    $('interface-language').value = language;
+    document.querySelector('[data-config="ui.language"]').value = language;
+    if (saved) {
+      if ($('use-advanced').checked) {
+        try { const c = JSON.parse($('advanced-json').value); c.ui = { ...c.ui, language }; $('advanced-json').value = JSON.stringify(c, null, 2); } catch {}
+      }
+      changed();
+    }
+  });
+}
 $('logout').addEventListener('click', async () => { try { await api('/api/logout', { method: 'POST', body: '{}' }); } finally { signedOut(); } });
 $('refresh').addEventListener('click', refresh);
 $('config-form').addEventListener('input', () => { changed(); $('threshold-output').textContent = Number(document.querySelector('[data-config="agent.threshold"]').value).toFixed(2); });
@@ -175,7 +192,7 @@ async function refreshDebug() {
   try {
     const d = await api('/api/debug/receive');
     $('debug-receive-status').textContent = `${d.state}${d.account ? ' · QQ ' + d.account : ''} · ${d.events.length} events${d.until && d.state === 'listening' ? ' · ' + Math.max(0, Math.ceil((d.until - Date.now()) / 1000)) + 's remaining' : ''}${d.error ? ' · ' + d.error : ''}`;
-    $('debug-events').textContent = d.events.length ? d.events.map(e => `${e.receivedAt} · ${e.postType} · ${e.chatType} · ${e.types.join(', ')}\n${e.text || '(attachment without text)'}`).join('\n\n') : 'No events captured. If the test finishes empty, check self-message reporting and the bridge event connection.';
+    $('debug-events').textContent = d.events.length ? d.events.map(e => `${e.receivedAt} · ${e.postType} · ${e.chatType} · ${e.types.join(', ')}\n${e.text || '(attachment without text)'}`).join('\n\n') : translate('No events captured. If the test finishes empty, check self-message reporting and the bridge event connection.');
     $('debug-receive').disabled = ['connecting', 'listening'].includes(d.state);
   } catch (e) { $('debug-receive-status').textContent = e.message; }
 }

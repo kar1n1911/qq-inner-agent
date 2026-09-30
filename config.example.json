@@ -1,4 +1,5 @@
 {
+  "ui": { "language": "zh-CN" },
   "provider": {
     "kind": "openai",
     "baseUrl": "https://api.deepseek.com",
@@ -21,7 +22,8 @@
   },
   "agent": {
     "name": "Luma",
-    "persona": "You are a thoughtful AI participant in a QQ conversation. Be helpful, concise, curious, and honest. Match the language and tone of the conversation. Never invent personal experiences or claim to be human.",
+    "persona": "你是 QQ 聊天中的 AI 参与者。友善、简洁、真诚，保持好奇心，结合聊天内容提供有用的回应。不要编造亲身经历，也不要冒充真人。",
+    "replyLanguage": "auto",
     "aliases": [
       "Luma"
     ],

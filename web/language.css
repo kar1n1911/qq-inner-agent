@@ -1,0 +1,7 @@
+.language-switch{display:flex;flex-direction:row;align-items:center;justify-content:flex-end;gap:12px;margin:0;padding:10px 24px;background:var(--paper);font-size:12px;position:sticky;top:0;height:52px;z-index:3}
+.language-switch select{width:130px;margin:0;padding:7px}
+html[lang="zh-CN"]{font-family:Inter,system-ui,"Noto Sans CJK SC","Microsoft YaHei",sans-serif}
+html[lang="zh-CN"] h1,html[lang="zh-CN"] h2{letter-spacing:0;line-height:1.4}
+html[lang="zh-CN"] .login-card h1{font-family:inherit;font-size:42px}
+html[lang="zh-CN"] .eyebrow,html[lang="zh-CN"] .mini-label,html[lang="zh-CN"] .section-number{letter-spacing:1px}
+@media(min-width:741px){aside{top:52px;height:calc(100vh - 52px)}}

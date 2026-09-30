@@ -1,6 +1,7 @@
 # Verification — 2026-09-30
 
-- 33 tests passed, 0 failures (`./agent test`).
+- 37 tests passed, 0 failures (`./agent test`).
+- Language tests validate independent interface/reply settings, Chinese prompt contracts, translated UI messages, and selected reply-language instructions in the actual engine pipeline. Browser QA uses an isolated configuration to check Chinese/English switching and saving, without live model calls or QQ messages.
 - Activity schedule tests cover exact minute boundaries, time zones, overnight intervals, invalid schedules, direct-request suppression, queued-work cutoff, and a response crossing into inactive hours. Model-list tests verify provider URL/authentication selection, deduplication, and failure handling without inference.
 - QQ dashboard diagnostic tests cover fixed self-account sending, capture of multiple self-message formats, filtering other accounts/senders, credential redaction, bounded capture, timeout/stop cleanup, and authenticated/CSRF-protected routes. Real self-chat delivery and bridge self-event reporting still require a live QQ bridge.
 - NapCat-shaped forward WebSocket mock tests cover array and CQ-string events, group mentions, private replies, contact lists, lifecycle/heartbeat events, self-message filtering, and rejection of invalid tokens after upgrade. Live NapCat login and message delivery remain unverified.

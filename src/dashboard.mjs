@@ -71,9 +71,9 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
     try {
       if (!hosts.has(req.headers.host)) throw fail(403, 'Unknown dashboard address');
       const url = new URL(req.url, 'http://localhost');
-      if (req.method === 'GET' && ['/', '/app.js', '/style.css', '/favicon.svg'].includes(url.pathname)) {
+      if (req.method === 'GET' && ['/', '/app.js', '/i18n.mjs', '/style.css', '/language.css', '/favicon.svg'].includes(url.pathname)) {
         const name = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);
-        const type = { 'index.html': 'text/html; charset=utf-8', 'app.js': 'text/javascript; charset=utf-8', 'style.css': 'text/css; charset=utf-8', 'favicon.svg': 'image/svg+xml' }[name];
+        const type = { 'index.html': 'text/html; charset=utf-8', 'app.js': 'text/javascript; charset=utf-8', 'i18n.mjs': 'text/javascript; charset=utf-8', 'style.css': 'text/css; charset=utf-8', 'language.css': 'text/css; charset=utf-8', 'favicon.svg': 'image/svg+xml' }[name];
         res.writeHead(200, { 'Content-Type': type }); res.end(fs.readFileSync(path.join(root, 'web', name))); return;
       }
       const origin = req.headers.origin;
@@ -141,7 +141,7 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
           const c = loadConfig(root); if (!c.apiKey || !c.provider.model) throw fail(400, 'Save an API key and model first');
           store = new Store(path.join(c.dataDir, 'agent.sqlite'));
           const p = new Provider(c.provider, c.apiKey, store);
-          const response = await p.json('Return only {"ok":true}.', { test: 'API connectivity only; no QQ content' });
+          const response = await p.json('只返回 JSON：{"ok":true}。', { test: '仅测试 API 连通性，不包含 QQ 聊天内容' });
           if (response.ok !== true) throw fail(502, 'Unexpected model response');
           json(res, 200, { ok: true, message: 'API authentication and JSON response verified. No QQ message sent.' });
         } catch (e) { throw fail(e.status || 502, e.code || 'Model test failed'); }

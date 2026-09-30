@@ -2,12 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 export const defaults = {
+  ui: { language: 'zh-CN' },
   provider: { kind: 'openai', baseUrl: 'https://api.openai.com/v1', model: '',
     maxTokens: 1600, tokenParameter: 'max_completion_tokens', timeoutSeconds: 60,
     retries: 2, requestsPerHour: 120, anthropicAuth: 'x-api-key', workspaceId: '', thinking: null },
   onebot: { url: 'ws://127.0.0.1:3001/', selfId: '', heartbeatSeconds: 30,
     requestTimeoutSeconds: 12, reconnectMaxSeconds: 60 },
-  agent: { name: 'Luma', persona: 'You are a thoughtful AI participant in a QQ conversation. Be helpful, concise, curious, and honest. Match the language and tone of the conversation. Never invent personal experiences or claim to be human.',
+  agent: { name: 'Luma', persona: '你是 QQ 聊天中的 AI 参与者。友善、简洁、真诚，保持好奇心，结合聊天内容提供有用的回应。不要编造亲身经历，也不要冒充真人。', replyLanguage: 'auto',
     aliases: ['Luma'], allowedGroups: [], allowedUsers: [], ignoredUsers: [],
     proactive: true, dryRun: false, threshold: 4.09, interruptThreshold: 4.8,
     schedule: { enabled: false, activeStart: '08:00', inactiveStart: '23:00', timezone: 'Europe/Stockholm' },
@@ -30,6 +31,9 @@ export function merge(base, extra) {
   return result;
 }
 export function validate(c) {
+  if (c.agent.persona === 'You are a thoughtful AI participant in a QQ conversation. Be helpful, concise, curious, and honest. Match the language and tone of the conversation. Never invent personal experiences or claim to be human.') c.agent.persona = defaults.agent.persona;
+  if (!['zh-CN', 'en'].includes(c.ui.language)) throw Error('Invalid interface language');
+  if (!['auto', 'zh-CN', 'en'].includes(c.agent.replyLanguage)) throw Error('Invalid reply language');
   const schedule = c.agent.schedule;
   if (!schedule || typeof schedule.enabled !== 'boolean') throw Error('Invalid activity schedule');
   for (const k of ['activeStart', 'inactiveStart']) if (typeof schedule[k] !== 'string' || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(schedule[k])) throw Error(`Invalid schedule.${k}: use HH:MM`);

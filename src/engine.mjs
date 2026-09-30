@@ -1,6 +1,6 @@
 import { readiness } from './config.mjs';
 import { allowed, normalize, quiet, activeAt, select, repeated } from './policy.mjs';
-import { formation, evaluation, articulation } from './prompts.mjs';
+import { formation, evaluation, articulationFor } from './prompts.mjs';
 
 const criteria = new Set(['relevance', 'information_gap', 'expected_impact', 'urgency', 'coherence', 'originality', 'balance', 'dynamics']);
 const scoreOk = n => typeof n === 'number' && Number.isFinite(n) && n >= 1 && n <= 5;
@@ -125,7 +125,7 @@ export class Engine {
       this.store.decision(chat, 'withhold', selected?.adjusted || 0, [], now);
       this.finish(state, chat, id, version, trigger); return;
     }
-    const response = await this.provider.json(articulation, { persona: a.persona, name: a.name,
+    const response = await this.provider.json(articulationFor(a.replyLanguage), { persona: a.persona, name: a.name,
       history: payload.history, selectedIdea: selected.text, assertiveTone: a.proactiveTone, maxCharacters: a.maxOutputChars }, signal);
     if (typeof response.text !== 'string' || !response.text.trim() || /<\/?(?:think|analysis)>/i.test(response.text)) throw Object.assign(Error('Invalid articulation'), { code: 'invalid_articulation' });
     const text = [...response.text.trim()].slice(0, a.maxOutputChars).join('');

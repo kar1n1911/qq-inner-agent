@@ -87,6 +87,14 @@ Deliberate deviations: retrieval uses lexical similarity rather than embeddings;
 
 ## Participation settings
 
+### 语言设置 / Language
+
+控制台默认使用简体中文。页面顶部和“配置 → 语言设置”可切换 **简体中文 / English**；登录前的选择保存在当前浏览器，登录后使用已保存的界面语言。登录后点击“保存并应用”可保存界面和回复语言。回复语言可选 **跟随聊天语言、简体中文、English**，与界面语言相互独立。
+
+候选生成、评分和最终发言的系统提示词均使用中文；切换英文界面不会把提示词改成英文。JSON 字段名、协议标识、模型 ID 和原始日志保持不变。默认角色说明也改为中文，升级时仅替换原版英文默认角色说明，自定义角色设定保持原样。
+
+The dashboard defaults to Simplified Chinese, with an English option. Save interface and reply-language preferences under Configuration → Language settings. System prompts remain Chinese for either interface language. Replies can follow the conversation or use a fixed Chinese/English language. Existing custom personas and conversation content are not translated.
+
 In **Configuration → Active and inactive times**, enable the daily schedule, choose **Active from**, **Inactive from**, and an IANA time zone (for example `Europe/Stockholm`). The active interval includes its start and excludes its end. Overnight windows such as 22:00–06:00 work too. Disable the schedule for 24-hour availability; equal start/end times are rejected. While inactive, the agent skips incoming messages and pauses all automatic replies, including mentions and private messages. Queued work is discarded at the cutoff, and an in-flight response cannot be sent after inactive hours begin. Connections and manual diagnostics remain available. Quiet hours are a separate restriction on proactive replies within active hours.
 
 In **Choose a model**, click **Load available models** after saving your provider URL, API format, and key. Select a returned ID or enter one manually in **Model & API**, then **Save & apply**. Listing models does not generate a completion. The list uses the provider's first returned page (up to 500 IDs); gateways without a model-list API and models omitted from that page can use manual entry. DeepSeek uses its [models endpoint](https://api-docs.deepseek.com/api/list-models/) for both API formats; Anthropic-compatible providers use their [Messages API model-list route](https://platform.claude.com/docs/en/api/models).

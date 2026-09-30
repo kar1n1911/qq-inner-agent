@@ -40,7 +40,7 @@ if (action === 'add-memory') {
         const store = new Store(path.join(c.dataDir, 'agent.sqlite'));
         try {
           const p = new Provider(c.provider, c.apiKey, store);
-          const result = await p.json('Return JSON only: {"ok":true}.', { test: 'connectivity only; no QQ messages or history' }, controller.signal);
+          const result = await p.json('只返回 JSON：{"ok":true}。', { test: '仅测试连通性，不包含 QQ 消息或历史记录' }, controller.signal);
           if (result.ok !== true) throw Error('unexpected_model_response');
           console.log('Model API authentication and JSON response verified. No QQ message sent.');
         } finally { store.close(); }
