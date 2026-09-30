@@ -1,5 +1,5 @@
 import { readiness } from './config.mjs';
-import { allowed, normalize, quiet, select, repeated } from './policy.mjs';
+import { allowed, normalize, quiet, activeAt, select, repeated } from './policy.mjs';
 import { formation, evaluation, articulation } from './prompts.mjs';
 
 const criteria = new Set(['relevance', 'information_gap', 'expected_impact', 'urgency', 'coherence', 'originality', 'balance', 'dynamics']);
@@ -22,6 +22,7 @@ export class Engine {
   }
   ingest(event) {
     const a = this.config.agent, now = this.now();
+    if (!activeAt(now, a.schedule)) return;
     const m = normalize(event, this.transport.selfId, a, now);
     if (!m) return;
     const state = this.state(m.chat);
@@ -43,6 +44,10 @@ export class Engine {
   }
   tick() {
     const now = this.now(), a = this.config.agent;
+    if (!activeAt(now, a.schedule)) {
+      for (const state of this.chats.values()) { state.version++; state.pending = false; state.pauseDone = true; }
+      return;
+    }
     for (const [chat, state] of this.chats) {
       if (!state.busy && now - state.lastHuman > a.activeWindowSeconds) this.chats.delete(chat);
     }
@@ -67,7 +72,7 @@ export class Engine {
   }
   async cycle(chat, trigger = 'message') {
     const state = this.chats.get(chat), a = this.config.agent, now = this.now();
-    if (!state || !allowed(chat, a)) return;
+    if (!state || !allowed(chat, a) || !activeAt(now, a.schedule)) return;
     const version = state.version, id = state.lastId;
     const hint = trigger === 'pause' ? 'open' : state.hint;
     state.lastThink = now; this.lastCycle = now;
@@ -92,7 +97,7 @@ export class Engine {
       const existing = this.store.reservoir(chat, now, a.thoughtTtlSeconds, a.thoughtLimit);
       if (!existing.some(x => x.text === thought.text)) this.store.addThought(chat, thought, now);
     }
-    if (version !== state.version) return; // new context: retain ideas, reevaluate next cycle
+    if (version !== state.version || !activeAt(this.now(), a.schedule)) return; // obsolete context or schedule
     const candidates = this.store.reservoir(chat, now, a.thoughtTtlSeconds, a.thoughtLimit);
     if (!candidates.length) { this.finish(state, chat, id, version, trigger); return; }
     const result = await this.provider.json(evaluation, { ...payload, retainedIdeas: undefined, candidates,
@@ -109,7 +114,7 @@ export class Engine {
     });
     if (!rated.length) throw Object.assign(Error('Invalid ratings'), { code: 'invalid_ratings' });
     for (const r of rated) this.store.score(r.id, r.motivation);
-    if (version !== state.version) return;
+    if (version !== state.version || !activeAt(this.now(), a.schedule)) return;
     // Explicit @mentions take precedence over the model's turn prediction.
     const allocation = hint === 'self' || hint === 'other' ? hint : formed.allocation;
     const turnsSilent = history.slice(history.findLastIndex(x => x.self) + 1).filter(x => !x.self).length;
@@ -124,7 +129,7 @@ export class Engine {
       history: payload.history, selectedIdea: selected.text, assertiveTone: a.proactiveTone, maxCharacters: a.maxOutputChars }, signal);
     if (typeof response.text !== 'string' || !response.text.trim() || /<\/?(?:think|analysis)>/i.test(response.text)) throw Object.assign(Error('Invalid articulation'), { code: 'invalid_articulation' });
     const text = [...response.text.trim()].slice(0, a.maxOutputChars).join('');
-    if (version !== state.version || this.now() - state.lastHuman > a.activeWindowSeconds || signal.aborted) return;
+    if (version !== state.version || this.now() - state.lastHuman > a.activeWindowSeconds || signal.aborted || !activeAt(this.now(), a.schedule)) return;
     if (!this.transport.connected || !this.transport.online) throw Object.assign(Error('Offline'), { code: 'qq_offline' });
     if ((proactive && quiet(this.now(), a.quietHours)) || repeated(text, history)) {
       this.store.use(selected.id); this.finish(state, chat, id, version, trigger); return;

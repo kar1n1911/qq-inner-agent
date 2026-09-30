@@ -87,6 +87,10 @@ Deliberate deviations: retrieval uses lexical similarity rather than embeddings;
 
 ## Participation settings
 
+In **Configuration → Active and inactive times**, enable the daily schedule, choose **Active from**, **Inactive from**, and an IANA time zone (for example `Europe/Stockholm`). The active interval includes its start and excludes its end. Overnight windows such as 22:00–06:00 work too. Disable the schedule for 24-hour availability; equal start/end times are rejected. While inactive, the agent skips incoming messages and pauses all automatic replies, including mentions and private messages. Queued work is discarded at the cutoff, and an in-flight response cannot be sent after inactive hours begin. Connections and manual diagnostics remain available. Quiet hours are a separate restriction on proactive replies within active hours.
+
+In **Choose a model**, click **Load available models** after saving your provider URL, API format, and key. Select a returned ID or enter one manually in **Model & API**, then **Save & apply**. Listing models does not generate a completion. The list uses the provider's first returned page (up to 500 IDs); gateways without a model-list API and models omitted from that page can use manual entry. DeepSeek uses its [models endpoint](https://api-docs.deepseek.com/api/list-models/) for both API formats; Anthropic-compatible providers use their [Messages API model-list route](https://platform.claude.com/docs/en/api/models).
+
 Use the dashboard to save and apply settings live, or edit `config.json` locally. The agent checks for changes every second; invalid edits leave the previous configuration running. `config.example.json` shows all defaults.
 
 | Setting | Default | Effect |

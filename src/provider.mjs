@@ -16,6 +16,20 @@ export function parseObject(text) {
   if (!result || Array.isArray(result) || typeof result !== 'object') throw new ProviderError('invalid_json_object');
   return result;
 }
+export async function listModels(c, key, fetcher = globalThis.fetch) {
+  if (!key) throw new ProviderError('save_api_key_first');
+  const deepseek = new URL(c.baseUrl).hostname === 'api.deepseek.com';
+  const url = deepseek ? 'https://api.deepseek.com/models' : endpoint(c.baseUrl, c.kind).replace(/\/(chat\/completions|messages)$/, '/models');
+  const headers = c.kind === 'anthropic' && !deepseek
+    ? { [c.anthropicAuth === 'bearer' ? 'Authorization' : 'x-api-key']: c.anthropicAuth === 'bearer' ? `Bearer ${key}` : key, 'anthropic-version': '2023-06-01' }
+    : { Authorization: `Bearer ${key}` };
+  if (c.kind === 'anthropic' && !deepseek && c.workspaceId) headers['anthropic-workspace-id'] = c.workspaceId;
+  const response = await fetcher(url, { headers, redirect: 'error', signal: AbortSignal.timeout(15000) });
+  if (!response.ok) { await response.body?.cancel(); throw new ProviderError(`models_http_${response.status}`); }
+  const data = await response.json();
+  if (!Array.isArray(data.data)) throw new ProviderError('invalid_model_list');
+  return [...new Set(data.data.filter(m => typeof m?.id === 'string' && m.id.length <= 200).map(m => m.id))].slice(0, 500).sort();
+}
 export class Provider {
   constructor(config, key, store, options = {}) {
     this.config = config; this.key = key; this.store = store;

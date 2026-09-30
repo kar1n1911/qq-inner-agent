@@ -9,6 +9,14 @@ export function quiet(now, hours) {
   const h = Number(new Intl.DateTimeFormat('en-GB', { timeZone: hours.timezone, hour: '2-digit', hourCycle: 'h23' }).format(new Date(now * 1000)));
   return hours.start < hours.end ? h >= hours.start && h < hours.end : h >= hours.start || h < hours.end;
 }
+export function activeAt(now, schedule) {
+  if (!schedule?.enabled) return true;
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: schedule.timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(now * 1000));
+  const minute = Number(parts.find(p => p.type === 'hour').value) * 60 + Number(parts.find(p => p.type === 'minute').value);
+  const minutes = value => { const [h, m] = value.split(':').map(Number); return h * 60 + m; };
+  const start = minutes(schedule.activeStart), end = minutes(schedule.inactiveStart);
+  return start < end ? minute >= start && minute < end : minute >= start || minute < end;
+}
 function cqDecode(text) { return text.replace(/&#44;/g, ',').replace(/&#91;/g, '[').replace(/&#93;/g, ']').replace(/&amp;/g, '&'); }
 export function normalize(event, selfId, a, now) {
   if (event.post_type !== 'message' || !['group', 'private'].includes(event.message_type)) return null;

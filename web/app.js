@@ -68,8 +68,8 @@ async function refresh() {
     $('model-value').textContent = s?.model || saved?.config.provider.model || 'Not set';
     $('provider-detail').textContent = s?.provider === 'anthropic' ? 'Anthropic-compatible API' : 'OpenAI-compatible API';
     $('chat-value').textContent = saved ? saved.config.agent.allowedGroups.length + saved.config.agent.allowedUsers.length : '—';
-    $('mode-badge').textContent = state.serviceState !== 'active' ? 'Service stopped' : s?.mode === 'waiting_for_setup' ? 'Setup needed' : s?.mode === 'dry_run' ? 'Preview mode' : 'Agent active';
-    $('readiness').textContent = s?.missing?.length ? 'Complete setup: ' + s.missing.join(' + ') + '.' : 'The agent is ready to participate in enabled conversations.';
+    $('mode-badge').textContent = state.serviceState !== 'active' ? 'Service stopped' : s?.mode === 'waiting_for_setup' ? 'Setup needed' : s?.scheduleActive === false ? 'Inactive hours' : s?.mode === 'dry_run' ? 'Preview mode' : 'Agent active';
+    $('readiness').textContent = s?.missing?.length ? 'Complete setup: ' + s.missing.join(' + ') + '.' : s?.scheduleActive === false ? 'AI participation is paused until the next active window.' : 'The agent is ready to participate in enabled conversations.';
     const applied = fresh && s.appliedRevision === state.savedRevision && !s.reloading;
     $('applied-indicator').textContent = applied ? 'SETTINGS APPLIED' : state.serviceState !== 'active' ? 'SERVICE STOPPED' : 'APPLYING SETTINGS';
     if (!dirty) $('apply-status').textContent = s?.reloadError || (applied ? 'Saved settings are active' : state.serviceState !== 'active' ? 'Saved. Start the service to apply.' : 'Waiting for the agent to apply settings…');
@@ -150,6 +150,26 @@ $('load-contacts').addEventListener('click', async () => {
 $('log-filter').addEventListener('input', renderLogs); $('pause-logs').addEventListener('change', renderLogs);
 window.addEventListener('beforeunload', e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
 setInterval(refresh, 2000);
+$('load-models').addEventListener('click', async () => {
+  $('load-models').disabled = true; $('model-list-status').textContent = 'Loading models from the saved provider…';
+  try {
+    const r = await api('/api/models', { method: 'POST', body: '{}' });
+    $('model-choice').replaceChildren(element('option', 'Choose a model…')); $('model-choice').firstChild.value = '';
+    for (const id of r.models) { const option = element('option', id); option.value = id; $('model-choice').append(option); }
+    $('model-list-status').textContent = `${r.models.length} models returned. Select one and save to apply. Manual entry is also available.`;
+  } catch (e) { $('model-list-status').textContent = `${e.message}. You can enter the model ID manually below.`; }
+  finally { $('load-models').disabled = false; }
+});
+$('model-choice').addEventListener('change', () => {
+  if ($('model-choice').value) {
+    document.querySelector('[data-config="provider.model"]').value = $('model-choice').value;
+    if ($('use-advanced').checked) {
+      try { const c = JSON.parse($('advanced-json').value); c.provider.model = $('model-choice').value; $('advanced-json').value = JSON.stringify(c, null, 2); }
+      catch { notice('Fix the advanced JSON before saving the selected model.', true); }
+    }
+    changed();
+  }
+});
 async function refreshDebug() {
   if (!csrf || document.hidden) return;
   try {

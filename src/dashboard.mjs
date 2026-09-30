@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { loadConfig } from './config.mjs';
 import { publicSettings, saveSettings, readJson, recoverSettings } from './settings.mjs';
-import { Provider } from './provider.mjs';
+import { Provider, listModels } from './provider.mjs';
 import { Store } from './store.mjs';
 import { OneBot } from './onebot.mjs';
 import { Diagnostics } from './diagnostics.mjs';
@@ -98,6 +98,11 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
       if (!session || session.expires < Date.now()) { if (id) sessions.delete(id); throw fail(401, 'Sign in required'); }
       if (req.method !== 'GET' && !equal(req.headers['x-csrf-token'] || '', session.csrf)) throw fail(403, 'Session verification failed; sign in again.');
       if (url.pathname === '/api/session' && req.method === 'GET') { json(res, 200, { csrf: session.csrf }); return; }
+      if (url.pathname === '/api/models' && req.method === 'POST') {
+        try { const c = loadConfig(root); json(res, 200, { models: await listModels(c.provider, c.apiKey) }); }
+        catch (e) { json(res, 502, { error: e instanceof Error && e.code ? e.code : 'model_list_unavailable_use_manual_entry' }); }
+        return;
+      }
       if (url.pathname === '/api/debug/receive' && req.method === 'GET') { json(res, 200, diagnostics.status()); return; }
       if (req.method === 'POST' && ['/api/debug/send', '/api/debug/receive', '/api/debug/stop'].includes(url.pathname)) {
         try {

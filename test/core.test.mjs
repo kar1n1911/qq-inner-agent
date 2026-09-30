@@ -5,11 +5,63 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Store, similarity } from '../src/store.mjs';
-import { normalize, select, quiet } from '../src/policy.mjs';
-import { Provider, endpoint, parseObject } from '../src/provider.mjs';
+import { normalize, select, quiet, activeAt } from '../src/policy.mjs';
+import { Provider, endpoint, parseObject, listModels } from '../src/provider.mjs';
 import { Engine } from '../src/engine.mjs';
 
 const now = 1_000_000;
+test('activity schedule validates, uses local minutes, and supports overnight windows', () => {
+  const schedule = { enabled: true, activeStart: '08:30', inactiveStart: '22:00', timezone: 'UTC' };
+  const ts = t => Date.parse(`2026-01-01T${t}:00Z`) / 1000;
+  assert.equal(activeAt(ts('08:29'), schedule), false);
+  assert.equal(activeAt(ts('08:30'), schedule), true);
+  assert.equal(activeAt(ts('22:00'), schedule), false);
+  assert.equal(activeAt(ts('07:30'), { ...schedule, timezone: 'Europe/Stockholm' }), true);
+  assert.equal(activeAt(ts('23:00'), { ...schedule, activeStart: '22:00', inactiveStart: '06:00' }), true);
+  assert.equal(activeAt(ts('05:59'), { ...schedule, activeStart: '22:00', inactiveStart: '06:00' }), true);
+  assert.equal(activeAt(ts('06:00'), { ...schedule, activeStart: '22:00', inactiveStart: '06:00' }), false);
+  assert.equal(activeAt(ts('00:00'), { ...schedule, enabled: false }), true);
+  assert.throws(() => validate(merge(defaults, { agent: { schedule: { activeStart: '24:00' } } })));
+  assert.throws(() => validate(merge(defaults, { agent: { schedule: { activeStart: '23:00' } } })));
+  assert.throws(() => validate(merge(defaults, { agent: { schedule: { timezone: 'not/a-zone' } } })));
+});
+test('inactive schedule suppresses direct requests and drops queued work at cutoff', async () => {
+  const f = fixture();
+  try {
+    f.engine.ingest(event('scheduled', 'Hello', true));
+    f.c.agent.schedule = { enabled: true, activeStart: '00:00', inactiveStart: '00:01', timezone: 'UTC' };
+    f.engine.tick(); await f.engine.cycle('group:10');
+    assert.equal(f.calls.length, 0); assert.equal(f.sent.length, 0);
+    assert.equal(f.engine.chats.get('group:10').pending, false);
+    f.engine.ingest(event('inactive-message', 'Do not queue me', true));
+    assert.equal(f.engine.chats.get('group:10').lastId, 'scheduled');
+  } finally { f.store.close(); }
+});
+test('crossing into inactive hours during generation prevents sending', async () => {
+  const f = fixture(); let clock = now;
+  f.engine.now = () => clock;
+  f.c.agent.schedule = { enabled: true, activeStart: '13:00', inactiveStart: '14:00', timezone: 'UTC' };
+  const original = f.provider.json;
+  f.provider.json = async (...args) => { const value = await original(...args); if (args[0].includes('TASK: ARTICULATE')) clock += 3600; return value; };
+  try { f.engine.ingest(event()); await f.engine.cycle('group:10'); assert.equal(f.calls.length, 3); assert.equal(f.sent.length, 0); }
+  finally { f.store.close(); }
+});
+test('model listing uses saved provider paths and authentication without inference', async () => {
+  for (const [kind, baseUrl, url, auth] of [
+    ['openai', 'https://gateway.example/v1/chat/completions', 'https://gateway.example/v1/models', 'Authorization'],
+    ['anthropic', 'https://gateway.example', 'https://gateway.example/v1/models', 'x-api-key'],
+    ['anthropic', 'https://api.deepseek.com/anthropic', 'https://api.deepseek.com/models', 'Authorization'],
+  ]) {
+    const c = { ...defaults.provider, kind, baseUrl };
+    const models = await listModels(c, 'test-key', async (actual, opts) => {
+      assert.equal(actual, url); assert.ok(opts.headers[auth].includes('test-key')); assert.equal(opts.redirect, 'error');
+      return new Response(JSON.stringify({ data: [{ id: 'b' }, { id: 'a' }, { id: 'b' }, {}] }));
+    });
+    assert.deepEqual(models, ['a', 'b']);
+  }
+  await assert.rejects(listModels(defaults.provider, ''), /save_api_key/);
+  await assert.rejects(listModels(defaults.provider, 'key', async () => new Response('{}', { status: 404 })), /models_http_404/);
+});
 test('DeepSeek configuration never borrows an unrelated OpenAI/Anthropic API key', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-config-test-'));
   const keys = ['LLM_API_KEY', 'DEEPSEEK_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY'];

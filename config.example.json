@@ -29,6 +29,12 @@
     "allowedUsers": [],
     "ignoredUsers": [],
     "proactive": true,
+    "schedule": {
+      "enabled": false,
+      "activeStart": "08:00",
+      "inactiveStart": "23:00",
+      "timezone": "Europe/Stockholm"
+    },
     "dryRun": false,
     "threshold": 4.09,
     "interruptThreshold": 4.8,

@@ -10,6 +10,7 @@ export const defaults = {
   agent: { name: 'Luma', persona: 'You are a thoughtful AI participant in a QQ conversation. Be helpful, concise, curious, and honest. Match the language and tone of the conversation. Never invent personal experiences or claim to be human.',
     aliases: ['Luma'], allowedGroups: [], allowedUsers: [], ignoredUsers: [],
     proactive: true, dryRun: false, threshold: 4.09, interruptThreshold: 4.8,
+    schedule: { enabled: false, activeStart: '08:00', inactiveStart: '23:00', timezone: 'Europe/Stockholm' },
     system1Probability: 0, proactiveTone: false, pauseSeconds: 45,
     debounceSeconds: 3, minThinkIntervalSeconds: 15, proactiveCooldownSeconds: 180,
     maxProactivePerHour: 6, maxMessagesPerHour: 30, activeWindowSeconds: 900,
@@ -29,6 +30,12 @@ export function merge(base, extra) {
   return result;
 }
 export function validate(c) {
+  const schedule = c.agent.schedule;
+  if (!schedule || typeof schedule.enabled !== 'boolean') throw Error('Invalid activity schedule');
+  for (const k of ['activeStart', 'inactiveStart']) if (typeof schedule[k] !== 'string' || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(schedule[k])) throw Error(`Invalid schedule.${k}: use HH:MM`);
+  if (schedule.activeStart === schedule.inactiveStart) throw Error('Active and inactive start times must differ; disable the schedule for all-day activity');
+  if (typeof schedule.timezone !== 'string' || !schedule.timezone.trim()) throw Error('Invalid schedule timezone');
+  new Intl.DateTimeFormat('en', { timeZone: schedule.timezone }).format();
   if (!['openai', 'anthropic'].includes(c.provider.kind)) throw Error('provider.kind must be openai or anthropic');
   for (const [name, raw, schemes] of [['provider.baseUrl', c.provider.baseUrl, ['https:', 'http:']], ['onebot.url', c.onebot.url, ['ws:', 'wss:']]]) {
     const u = new URL(raw);
