@@ -12,6 +12,7 @@ import { publicSettings, saveSettings, readJson, recoverSettings } from './setti
 import { Provider } from './provider.mjs';
 import { Store } from './store.mjs';
 import { OneBot } from './onebot.mjs';
+import { Diagnostics } from './diagnostics.mjs';
 
 const exec = promisify(execFile), hash = s => createHash('sha256').update(s).digest();
 const equal = (a, b) => timingSafeEqual(hash(String(a)), hash(String(b)));
@@ -33,7 +34,8 @@ function tail(file, limit = 100) {
     return lines.filter(Boolean).slice(-limit).map(line => { try { return JSON.parse(line); } catch { return null; } }).filter(Boolean);
   } finally { fs.closeSync(fd); }
 }
-export function createDashboard({ root, settings, key, serviceControl, serviceStatus }) {
+export function createDashboard({ root, settings, key, serviceControl, serviceStatus, makeBot }) {
+  const diagnostics = new Diagnostics(() => loadConfig(root), makeBot);
   const sessions = new Map(), attempts = new Map(); let saving = false, testing = false;
   const origins = new Set(settings.origins), hosts = new Set([...origins].map(o => new URL(o).host));
   serviceControl ||= async action => { await exec('systemctl', ['--user', action, 'qq-inner-agent.service'], { timeout: 30000 }); };
@@ -96,6 +98,19 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
       if (!session || session.expires < Date.now()) { if (id) sessions.delete(id); throw fail(401, 'Sign in required'); }
       if (req.method !== 'GET' && !equal(req.headers['x-csrf-token'] || '', session.csrf)) throw fail(403, 'Session verification failed; sign in again.');
       if (url.pathname === '/api/session' && req.method === 'GET') { json(res, 200, { csrf: session.csrf }); return; }
+      if (url.pathname === '/api/debug/receive' && req.method === 'GET') { json(res, 200, diagnostics.status()); return; }
+      if (req.method === 'POST' && ['/api/debug/send', '/api/debug/receive', '/api/debug/stop'].includes(url.pathname)) {
+        try {
+          const result = url.pathname === '/api/debug/send' ? await diagnostics.send()
+            : url.pathname === '/api/debug/receive' ? await diagnostics.listen() : await diagnostics.stop();
+          json(res, 200, result);
+        } catch (e) {
+          const code = e.code || e.message;
+          json(res, 502, { error: /^[a-z0-9_]+$/.test(code) ? code : 'diagnostic_failed',
+            hint: 'Check bridge URL, token and QQ login. A failed or timed-out send is not retried; check QQ before trying again.' });
+        }
+        return;
+      }
       if (url.pathname === '/api/logout' && req.method === 'POST') {
         sessions.delete(id); res.setHeader('Set-Cookie', `qia_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secure ? '; Secure' : ''}`); json(res, 200, { ok: true }); return;
       }
@@ -146,7 +161,7 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
       throw fail(404, 'Not found');
     } catch (e) { if (!res.headersSent) json(res, e.status || 500, { error: e.status ? e.message : 'Dashboard operation failed' }); else res.end(); }
   };
-  return { handler, snapshot };
+  return { handler, snapshot, close: () => diagnostics.stop() };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -158,7 +173,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   fs.mkdirSync(path.dirname(keyFile), { recursive: true, mode: 0o700 });
   if (!fs.existsSync(keyFile)) fs.writeFileSync(keyFile, randomBytes(24).toString('base64url') + '\n', { mode: 0o600 });
   const key = fs.readFileSync(keyFile, 'utf8').trim();
-  const { handler } = createDashboard({ root, settings, key });
+  const { handler, close } = createDashboard({ root, settings, key });
   const servers = [];
   if (settings.tls) {
     const server = https.createServer({ key: fs.readFileSync(path.resolve(root, settings.tls.key)), cert: fs.readFileSync(path.resolve(root, settings.tls.cert)), minVersion: 'TLSv1.2' }, handler);
@@ -170,5 +185,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   if (settings.localPort) { const server = http.createServer(handler); server.listen(settings.localPort, '127.0.0.1'); servers.push(server); }
   for (const server of servers) { server.requestTimeout = 20000; server.headersTimeout = 10000; server.maxHeadersCount = 50; }
   console.log('Dashboard listening. Retrieve the access key with ./agent dashboard-key.');
-  for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { for (const s of servers) { s.close(); s.closeAllConnections(); } });
+  for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { close(); for (const s of servers) { s.close(); s.closeAllConnections(); } });
 }

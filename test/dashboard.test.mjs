@@ -44,6 +44,8 @@ test('HTTP dashboard authentication, CSRF, validated save, redaction and fixed s
   try {
     assert.equal((await request('/')).status, 200);
     assert.equal((await request('/api/config')).status, 401);
+    assert.equal((await request('/api/debug/receive')).status, 401);
+    assert.equal((await request('/api/debug/send', { method: 'POST', headers: { Origin: origin } })).status, 401);
     assert.equal((await request('/secrets.json')).status, 401);
     assert.equal((await request('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example' }, body: '{"key":"test-access-key"}' })).status, 403);
     const login = await request('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: origin }, body: '{"key":"test-access-key"}' });
@@ -54,6 +56,10 @@ test('HTTP dashboard authentication, CSRF, validated save, redaction and fixed s
     assert.ok(!JSON.stringify(s).includes('model-secret'));
     const changed = structuredClone(s.config); changed.agent.threshold = 4.3;
     const noCsrf = { ...headers }; delete noCsrf['X-CSRF-Token'];
+    assert.equal((await request('/api/debug/send', { method: 'POST', headers: noCsrf, body: '{}' })).status, 403);
+    assert.equal((await request('/api/debug/receive', { method: 'POST', headers: noCsrf, body: '{}' })).status, 403);
+    assert.equal((await (await request('/api/debug/receive', { headers })).json()).state, 'idle');
+    assert.equal((await request('/api/debug/stop', { method: 'POST', headers, body: '{}' })).status, 200);
     assert.equal((await request('/api/config', { method: 'PUT', headers: noCsrf, body: JSON.stringify({ revision: s.revision, config: changed }) })).status, 403);
     const save = await request('/api/config', { method: 'PUT', headers, body: JSON.stringify({ revision: s.revision, config: changed }) });
     assert.equal(save.status, 200); assert.equal((await save.json()).config.agent.threshold, 4.3);

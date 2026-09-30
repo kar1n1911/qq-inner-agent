@@ -137,6 +137,13 @@ Run `./agent test` for local verification. Tests use fictitious conversations an
 
 ## Remote web dashboard
 
+The Overview page includes two QQ diagnostics, independent of the model and chat allowlists:
+
+- **Send self-test message** sends one uniquely marked text message to the QQ account returned by the bridge's login API. A successful result means the bridge accepted the action; check QQ's self-chat to confirm delivery. The recipient and message cannot be overridden. Failed or uncertain sends are not retried automatically.
+- **Start receiving test** listens for 60 seconds. From that same QQ account, send several messages (text, image, voice, file, reply) to yourself or another chat. Enable **reportSelfMessage** on the bridge's WebSocket server first; some bridges do not emit self-chat events even when sending succeeds. The viewer accepts `message` and `message_sent` events only when both the account and sender match the logged-in account. It displays the last 30 events, text previews and segment types; it does not fetch attachments, invoke the AI, or write captures to disk. **Stop receiving** closes the diagnostic connection early. Starting a new test clears the previous capture.
+
+If receiving stays empty, check self-message reporting and that the URL carries events (use `/`, not `/api`). An empty capture is not a successful receiving test. Diagnostics use the saved connection settings, so save URL/token changes first. They can run while the agent service is stopped.
+
 The installed dashboard runs independently of the agent:
 
 - Local host: http://localhost:5097

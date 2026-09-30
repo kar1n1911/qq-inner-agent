@@ -1,6 +1,7 @@
 # Verification — 2026-09-30
 
-- 26 tests passed, 0 failures (`./agent test`).
+- 29 tests passed, 0 failures (`./agent test`).
+- QQ dashboard diagnostic tests cover fixed self-account sending, capture of multiple self-message formats, filtering other accounts/senders, credential redaction, bounded capture, timeout/stop cleanup, and authenticated/CSRF-protected routes. Real self-chat delivery and bridge self-event reporting still require a live QQ bridge.
 - NapCat-shaped forward WebSocket mock tests cover array and CQ-string events, group mentions, private replies, contact lists, lifecycle/heartbeat events, self-message filtering, and rejection of invalid tokens after upgrade. Live NapCat login and message delivery remain unverified.
 - Dashboard tests cover authenticated access, origin and CSRF checks, secret redaction, configuration validation, stale revisions, and interrupted-save recovery.
 - A process-level test verifies live configuration reload, rejection of invalid edits, and recovery without changing the agent PID.

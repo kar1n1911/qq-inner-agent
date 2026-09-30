@@ -150,4 +150,28 @@ $('load-contacts').addEventListener('click', async () => {
 $('log-filter').addEventListener('input', renderLogs); $('pause-logs').addEventListener('change', renderLogs);
 window.addEventListener('beforeunload', e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
 setInterval(refresh, 2000);
+async function refreshDebug() {
+  if (!csrf || document.hidden) return;
+  try {
+    const d = await api('/api/debug/receive');
+    $('debug-receive-status').textContent = `${d.state}${d.account ? ' · QQ ' + d.account : ''} · ${d.events.length} events${d.until && d.state === 'listening' ? ' · ' + Math.max(0, Math.ceil((d.until - Date.now()) / 1000)) + 's remaining' : ''}${d.error ? ' · ' + d.error : ''}`;
+    $('debug-events').textContent = d.events.length ? d.events.map(e => `${e.receivedAt} · ${e.postType} · ${e.chatType} · ${e.types.join(', ')}\n${e.text || '(attachment without text)'}`).join('\n\n') : 'No events captured. If the test finishes empty, check self-message reporting and the bridge event connection.';
+    $('debug-receive').disabled = ['connecting', 'listening'].includes(d.state);
+  } catch (e) { $('debug-receive-status').textContent = e.message; }
+}
+$('debug-send').addEventListener('click', async () => {
+  $('debug-send').disabled = true; $('debug-send-result').textContent = 'Sending to the connected account…';
+  try { const r = await api('/api/debug/send', { method: 'POST', body: '{}' }); $('debug-send-result').textContent = `QQ ${r.account} · message ${r.messageId ?? '(no ID returned)'} · ${r.message} ${r.text}`; }
+  catch (e) { $('debug-send-result').textContent = `${e.message}. Not retried. Check QQ before trying again.`; }
+  finally { $('debug-send').disabled = false; }
+});
+for (const [id, endpoint] of [['debug-receive', 'receive'], ['debug-stop', 'stop']]) {
+  $(id).addEventListener('click', async () => {
+    $(id).disabled = true;
+    try { await api('/api/debug/' + endpoint, { method: 'POST', body: '{}' }); await refreshDebug(); }
+    catch (e) { $('debug-receive-status').textContent = e.message; }
+    finally { $(id).disabled = false; }
+  });
+}
+setInterval(refreshDebug, 2000);
 boot().catch(() => signedOut());
