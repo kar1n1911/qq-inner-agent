@@ -64,7 +64,7 @@ async function refresh() {
     $('service-value').textContent = state.serviceState === 'active' ? 'Running' : state.serviceState === 'inactive' ? 'Stopped' : state.serviceState;
     $('service-detail').textContent = fresh ? `${s.activeChats} active conversations` : 'No recent agent heartbeat';
     $('qq-value').textContent = fresh && s.qqOnline ? 'Online' : 'Disconnected';
-    $('qq-detail').textContent = fresh && s.onebotConnected ? `Account ${s.selfId}` : 'Waiting for SnowLuma';
+    $('qq-detail').textContent = fresh && s.onebotConnected ? `Account ${s.selfId}` : 'Waiting for NapCat / SnowLuma';
     $('model-value').textContent = s?.model || saved?.config.provider.model || 'Not set';
     $('provider-detail').textContent = s?.provider === 'anthropic' ? 'Anthropic-compatible API' : 'OpenAI-compatible API';
     $('chat-value').textContent = saved ? saved.config.agent.allowedGroups.length + saved.config.agent.allowedUsers.length : '—';

@@ -20,7 +20,7 @@ function frame(data) {
   const header = Buffer.alloc(4); header[0] = 0x81; header[1] = 126; header.writeUInt16BE(body.length, 2);
   return Buffer.concat([header, body]);
 }
-async function mockServer(kind = 'openai') {
+async function mockServer(kind = 'openai', napcat = false) {
   const sockets = new Set(), requests = [], sends = [];
   let connections = 0, statusRequests = 0, ignoreHeartbeat = false;
   const server = http.createServer(async (req, res) => {
@@ -37,10 +37,16 @@ async function mockServer(kind = 'openai') {
     res.end(JSON.stringify(kind === 'openai' ? { choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(value) } }] } : { stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(value) }] }));
   });
   server.on('upgrade', (req, socket) => {
-    if (new URL(req.url, 'http://localhost').searchParams.get('access_token') !== 'local-test-token') { socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n'); return; }
+    const authorized = new URL(req.url, 'http://localhost').searchParams.get('access_token') === 'local-test-token';
+    if (!authorized && !napcat) { socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n'); return; }
     const accept = createHash('sha1').update(req.headers['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
     socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
     connections++; sockets.add(socket); socket.on('error', () => {}); socket.on('close', () => sockets.delete(socket));
+    if (!authorized) {
+      socket.write(frame({ status: 'failed', retcode: 1403, data: null, message: 'token validation failed' }));
+      socket.end(Buffer.from([0x88, 0])); return;
+    }
+    if (napcat) socket.write(frame({ post_type: 'meta_event', meta_event_type: 'lifecycle', sub_type: 'connect', self_id: 99, time: Math.floor(Date.now() / 1000) }));
     let buffer = Buffer.alloc(0);
     socket.on('data', chunk => {
       buffer = Buffer.concat([buffer, chunk]);
@@ -59,6 +65,8 @@ async function mockServer(kind = 'openai') {
         let result;
         if (message.action === 'get_login_info') result = { user_id: 99, nickname: 'Bot' };
         else if (message.action === 'get_status') { statusRequests++; if (ignoreHeartbeat) continue; result = { online: true, good: true }; }
+        else if (message.action === 'get_group_list') result = [{ group_id: 10, group_name: 'Test group' }];
+        else if (message.action === 'get_friend_list') result = [{ user_id: 20, nickname: 'Test friend' }];
         else if (message.action.startsWith('send_')) { sends.push(message); result = { message_id: 300 }; }
         else result = null;
         socket.write(frame({ status: 'ok', retcode: 0, data: result, echo: message.echo }));
@@ -110,4 +118,53 @@ test('WebSocket authentication rejection stays disconnected without recursion', 
   const running = bot.start(stop.signal);
   try { await sleep(200); assert.equal(bot.connected, false); await assert.rejects(() => bot.send('group:10', 'must not send')); }
   finally { stop.abort(); await running; await server.close(); }
+});
+
+for (const format of ['array', 'string']) test(`NapCat forward WebSocket: ${format} events, contacts, private replies and self-message filtering`, async () => {
+  const server = await mockServer('openai', true), store = new Store(':memory:');
+  const c = merge(defaults, { apiKey: 'local-model-key',
+    provider: { baseUrl: `http://127.0.0.1:${server.port}/v1`, model: 'mock', retries: 0 },
+    onebot: { url: `ws://127.0.0.1:${server.port}/`, requestTimeoutSeconds: 1 },
+    agent: { allowedGroups: ['10'], allowedUsers: ['20'], quietHours: null } });
+  const bot = new OneBot(c.onebot, 'local-test-token'), stop = new AbortController();
+  const engine = new Engine(c, store, new Provider(c.provider, c.apiKey, store), bot);
+  bot.on('event', event => engine.ingest(event));
+  const running = bot.start(stop.signal);
+  try {
+    await until(() => bot.connected && bot.online);
+    assert.equal(bot.selfId, '99');
+    assert.equal((await bot.call('get_group_list', {}))[0].group_id, 10);
+    assert.equal((await bot.call('get_friend_list', {}))[0].user_id, 20);
+    const base = { time: Math.floor(Date.now() / 1000), self_id: 99, post_type: 'message', user_id: 20, sender: { nickname: 'Friend', card: '' } };
+    const group = { ...base, message_type: 'group', sub_type: 'normal', group_id: 10, message_id: -101,
+      message: format === 'array' ? [{ type: 'at', data: { qq: '99' } }, { type: 'text', data: { text: 'Hi' } }] : '[CQ:at,qq=99] Hi' };
+    server.push(group); await until(() => engine.chats.has('group:10'));
+    assert.equal(engine.chats.get('group:10').hint, 'self');
+    server.push({ ...base, message_type: 'private', sub_type: 'friend', message_id: -102,
+      message: format === 'array' ? [{ type: 'text', data: { text: 'Where can we walk?' } }] : 'Where can we walk?' });
+    await until(() => engine.chats.has('private:20'));
+    await engine.cycle('private:20');
+    assert.equal(server.sends.length, 1);
+    assert.equal(server.sends[0].action, 'send_private_msg');
+    assert.equal(server.sends[0].params.user_id, 20);
+    assert.equal(server.sends[0].params.message[0].type, 'text');
+    const version = engine.chats.get('group:10').version;
+    server.push({ ...group, user_id: 99, message_id: -103 });
+    server.push({ ...group, post_type: 'message_sent', message_id: -104 });
+    server.push({ post_type: 'meta_event', meta_event_type: 'heartbeat', status: { online: true, good: true }, interval: 30000 });
+    await sleep(50);
+    assert.equal(engine.chats.get('group:10').version, version);
+  } finally { stop.abort(); await engine.stop(); await running; store.close(); await server.close(); }
+});
+
+test('NapCat token rejection after WebSocket upgrade remains disconnected', async () => {
+  const server = await mockServer('openai', true), stop = new AbortController();
+  const bot = new OneBot({ ...defaults.onebot, url: `ws://127.0.0.1:${server.port}/`, requestTimeoutSeconds: 1 }, 'wrong-token');
+  const running = bot.start(stop.signal);
+  try {
+    await until(() => server.connections > 0); await sleep(100);
+    assert.equal(bot.connected, false);
+    await assert.rejects(() => bot.send('private:20', 'must not send'));
+    assert.equal(server.sends.length, 0);
+  } finally { stop.abort(); await running; await server.close(); }
 });

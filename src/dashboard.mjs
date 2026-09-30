@@ -133,7 +133,7 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
         let timer;
         const ready = new Promise((resolve, reject) => {
           bot.on('status', s => { if (s === 'connected') resolve(); });
-          timer = setTimeout(() => reject(fail(503, 'QQ is not online. Connect it in SnowLuma first.')), 15000);
+          timer = setTimeout(() => reject(fail(503, 'QQ is not online. Check the NapCat / SnowLuma OneBot WebSocket URL, token, and QQ login.')), 15000);
         });
         const running = bot.start(stop.signal);
         try {

@@ -35,6 +35,14 @@ def main():
     config = json.loads((cpath if cpath.exists() else ROOT / 'config.example.json').read_text())
     secrets = json.loads(spath.read_text()) if spath.exists() else {}
     print('QQ Inner Agent — local setup\nOne account, separate memory per selected group/contact.\nRun ./agent contacts to list available IDs. API keys stay on this computer.')
+    print('QQ connection: NapCat or SnowLuma, using a forward OneBot v11 WebSocket server.')
+    b = config.setdefault('onebot', {})
+    b['url'] = ask('OneBot WebSocket URL (NapCat: ws://127.0.0.1:3001/)', b.get('url', 'ws://127.0.0.1:3001/'))
+    b['selfId'] = ask('QQ account ID (- detects the connected account)', b.get('selfId') or '-')
+    if b['selfId'] == '-': b['selfId'] = ''
+    value = getpass.getpass('OneBot access token (hidden; Enter keeps existing; - clears): ').strip()
+    if value == '-': secrets.pop('onebotToken', None)
+    elif value: secrets['onebotToken'] = value
     profile = ask('Provider: deepseek-openai / deepseek-anthropic / custom', 'deepseek-openai')
     p = config.setdefault('provider', {})
     if profile.startswith('deepseek-'):

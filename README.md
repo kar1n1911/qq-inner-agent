@@ -1,6 +1,6 @@
 # QQ Inner Agent
 
-A persistent conversational agent for one QQ account, connected through SnowLuma's OneBot v11 WebSocket. Each enabled group and private contact has its own context, memory, and pool of candidate contributions. DeepSeek is preconfigured; OpenAI-compatible Chat Completions and Anthropic-compatible Messages endpoints are supported.
+A persistent conversational agent for one QQ account, connected through NapCat or SnowLuma's forward OneBot v11 WebSocket. Each enabled group and private contact has its own context, memory, and pool of candidate contributions. DeepSeek is preconfigured; OpenAI-compatible Chat Completions and Anthropic-compatible Messages endpoints are supported.
 
 ## Finish setup
 
@@ -14,11 +14,24 @@ cd qq-inner-agent
 ./agent status
 ```
 
-Install the background service with `./agent install-service`. Setup restarts an installed service after saving changes. Before a key and chat IDs are entered, the running agent keeps trying to connect to SnowLuma but does not invoke the model or send QQ messages. Selecting a chat enables its new messages to be processed by the configured model provider. No old chat history is fetched from QQ.
+Install the background service with `./agent install-service`. Setup restarts an installed service after saving changes. Before a key and chat IDs are entered, the running agent keeps trying to connect to the QQ bridge but does not invoke the model or send QQ messages. Selecting a chat enables its new messages to be processed by the configured model provider. No old chat history is fetched from QQ.
 
-For another machine, install Node.js 22.13+ (or set `AGENT_NODE` to its executable), connect SnowLuma, configure `onebot.url`, `onebot.selfId`, and `secrets.json.onebotToken`, then run `./agent install-service`. The bundled `.runtime/node` on this machine is a separate copy without SnowLuma's tracing capability; this agent needs no elevated permissions.
+For another machine, install Node.js 22.13+ (or set `AGENT_NODE` to its executable), connect NapCat or SnowLuma, configure `onebot.url`, `onebot.selfId`, and `secrets.json.onebotToken` with `./agent setup`, then run `./agent install-service`. This agent needs no elevated permissions.
 
-QQ must be logged in, SnowLuma's hook must be connected, and the OneBot WebSocket must be running. The agent reconnects when these recover; it cannot log QQ in or repair the hook itself.
+QQ must be logged in through the chosen bridge, and its OneBot WebSocket server must be running. The agent reconnects when these recover; it cannot log QQ in or repair the bridge itself.
+
+## Connect NapCat
+
+1. Start NapCat and sign in to QQ. In NapCat WebUI, open **Network configuration → New → WebSocket server** (正向 WebSocket). The agent connects as a client; reverse WebSocket and HTTP-only endpoints are not supported.
+2. Enable the server on port `3001`, with **message format `array`**, a nonempty access token, and host `127.0.0.1` when both programs run directly on the same host. Keep event pushing enabled. The equivalent server entry is in [examples/napcat-websocket-server.json](examples/napcat-websocket-server.json); add it to NapCat's `network.websocketServers` list, replacing the token placeholder. It is a single server entry, not a complete NapCat configuration.
+3. Run `./agent setup` and enter `ws://127.0.0.1:3001/`, the same OneBot token, and optionally the QQ account ID. A blank account ID in the dashboard (or `-` in the wizard) detects the logged-in account. Alternatively, edit these under **Configuration → NapCat / SnowLuma** in the dashboard. Save before loading contacts.
+4. Run `./agent check` to verify the bridge and `./agent contacts` to list available IDs. Select chats and enter the model API key before starting participation.
+
+For NapCat in Docker with the agent on the host, bind the WebSocket server to `0.0.0.0` **inside the container** and publish `127.0.0.1:3001:3001`. The agent still connects to `ws://127.0.0.1:3001/`. For another machine, use a TLS WebSocket proxy (`wss://`) or an SSH tunnel to a local port. Plain `ws://` is accepted only for localhost. Port `3000` is normally HTTP, and NapCat's WebUI port is not the OneBot WebSocket endpoint.
+
+Use the root WebSocket path `/`, which carries both actions and events; NapCat's `/api` path does not deliver events. Both array and CQ-string message events are accepted; outgoing messages always use text segments. Self-message reports are ignored. NapCat and SnowLuma need separate ports if running together; configure the agent for one bridge at a time.
+
+Compatibility is based on NapCat's [network documentation](https://doc.napneko.icu/onebot/network), [configuration schema](https://github.com/NapNeko/NapCatQQ/blob/main/packages/napcat-onebot/config/config.ts), and [WebSocket implementation](https://github.com/NapNeko/NapCatQQ/blob/main/packages/napcat-onebot/network/websocket-server.ts). Automated mock tests cover authentication, login/status, contacts, mentions, private replies, self-message filtering, and both event formats. A live NapCat account has not yet been used for end-to-end verification.
 
 ## Everyday commands
 
@@ -110,7 +123,7 @@ Keys may instead be supplied via `LLM_API_KEY`, `DEEPSEEK_API_KEY`, `OPENAI_API_
 ## Troubleshooting
 
 - **`waiting_for_setup`**: run `./agent setup`; a key and at least one chat ID are needed.
-- **QQ disconnected/offline**: open QQ, sign in, and load its process in SnowLuma; the agent retries automatically. Use `./agent check` to verify the OneBot endpoint.
+- **QQ disconnected/offline**: sign in through NapCat or load QQ's process in SnowLuma, and enable its forward WebSocket server. Check the URL and token; the agent retries automatically. Use `./agent check` to verify the OneBot endpoint.
 - **`http_401_check_provider_config` / `http_403_check_provider_config`**: check the key and provider account. Authentication/configuration errors back off for five minutes.
 - **`http_400_check_provider_config` / `http_404_check_provider_config`**: check the base URL, model and `tokenParameter`.
 - **`output_truncated_increase_maxTokens`**: increase `provider.maxTokens`; use a model/configuration that can finish structured output within that budget.

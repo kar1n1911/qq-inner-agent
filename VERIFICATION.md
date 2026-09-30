@@ -1,6 +1,7 @@
 # Verification — 2026-09-30
 
-- 23 tests passed, 0 failures (`./agent test`).
+- 26 tests passed, 0 failures (`./agent test`).
+- NapCat-shaped forward WebSocket mock tests cover array and CQ-string events, group mentions, private replies, contact lists, lifecycle/heartbeat events, self-message filtering, and rejection of invalid tokens after upgrade. Live NapCat login and message delivery remain unverified.
 - Dashboard tests cover authenticated access, origin and CSRF checks, secret redaction, configuration validation, stale revisions, and interrupted-save recovery.
 - A process-level test verifies live configuration reload, rejection of invalid edits, and recovery without changing the agent PID.
 - Both model API adapters exercised against real local HTTP mock endpoints.
