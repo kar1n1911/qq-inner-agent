@@ -7,7 +7,7 @@ import { Provider } from './provider.mjs';
 import { OneBot } from './onebot.mjs';
 import { Engine } from './engine.mjs';
 import { revision } from './settings.mjs';
-import { allowed, activeAt } from './policy.mjs';
+import { allowed } from './policy.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 process.umask(0o077);
@@ -46,7 +46,8 @@ function status() {
   const missing = readiness(config);
   const data = { updatedAt: new Date().toISOString(), pid: process.pid, mode: missing.length ? 'waiting_for_setup' : config.agent.dryRun ? 'dry_run' : 'active',
     appliedRevision, reloading, reloadError,
-    scheduleActive: activeAt(Date.now() / 1000, config.agent.schedule),
+    scheduleActive: engine.available(Date.now() / 1000),
+    activityRhythm: engine.activity.snapshot(Date.now() / 1000),
     missing, onebotConnected: bot.connected, qqOnline: bot.online, selfId: bot.selfId,
     reconnects: bot.reconnects, activeChats: engine.chats.size, model: config.provider.model,
     provider: config.provider.kind, apiCallsThisRun: provider.calls, lastCycleAt: engine.lastCycle,

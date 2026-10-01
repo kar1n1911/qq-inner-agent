@@ -1,6 +1,26 @@
 // Only application-owned UI text is translated. Chat contents, model IDs, logs,
 // configuration editors and other user-provided values remain untouched.
 const pairs = `
+Without activity rhythm, all AI replies pause outside this window, including mentions and private messages. With rhythm enabled, this window shapes the next block probability. Overnight windows are supported. Quiet hours below separately suppress proactive replies.|未启用连续节奏时，作息外暂停所有回复（含私聊和 @）。启用连续节奏后，此时间表用于决定下一段的活跃概率。支持跨午夜时段。下方静默时段仍单独限制主动发言。
+Continuous activity rhythm|连续活跃与休息节奏
+Enable probabilistic activity blocks|启用概率性活跃时段
+Daytime activity probability|活跃时间内的活跃概率
+Inactive edge activity probability|非活跃时间两端的活跃概率
+Inactive center activity probability|非活跃时间中央的活跃概率
+Inactivity curve width|休息概率曲线宽度
+Minimum active block (seconds)|最短活跃时段（秒）
+Maximum active block (seconds)|最长活跃时段（秒）
+Minimum rest block (seconds)|最短休息时段（秒）
+Maximum rest block (seconds)|最长休息时段（秒）
+Active block|连续活跃中
+Rest block|连续休息中
+Next block selection|下次状态抽取时间
+Activity probability at selection|抽取时活跃概率
+Current curve probability|当前曲线活跃概率
+AI participation is paused by the activity schedule or rest block.|当前受作息或连续休息时段限制，暂不参与聊天。
+Overrides the strict schedule gate. Rest is most likely in the middle of inactive hours; activity is more likely near either edge. One state is shared by all chats until the block ends, including mentions and private replies. Quiet hours still restrict proactive messages. With the daily schedule disabled, the daytime probability applies all day.|替代严格的作息禁言。非活跃时间中央最容易休息，两端更容易活跃。所有聊天共用同一状态并保持到本段结束，私聊和 @ 也受限制。静默时段仍限制主动发言。关闭每日作息时，全天使用活跃时间内的概率。
+The probability selects the next block, not each message. Adjacent blocks may have the same state. Existing blocks survive restarts and may cross daily schedule boundaries; changing rhythm or schedule settings starts a new block.|概率用于抽取下一段状态，不对每条消息重复抽签。相邻时段可能保持同一状态。当前时段在重启后保留，也可跨越作息边界；修改节奏或作息配置会重新开始一段。
+
 Group observation period|入群观察期
 Observe before the first group message|群内首次发言前先观察
 Minimum observation time (seconds)|最少观察时间（秒）

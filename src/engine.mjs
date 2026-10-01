@@ -1,8 +1,9 @@
 import { readiness } from './config.mjs';
-import { allowed, normalize, quiet, activeAt, select, repeated } from './policy.mjs';
+import { allowed, normalize, quiet, select, repeated } from './policy.mjs';
 import { formation, evaluation, articulationFor, forecast } from './prompts.mjs';
 import { forecastResult, sendingProbability } from './sending.mjs';
 import { parseMemoryUpdates } from './memory.mjs';
+import { ActivityRhythm } from './activity.mjs';
 import { GroupOrientation } from './orientation.mjs';
 
 const criteria = new Set(['relevance', 'information_gap', 'expected_impact', 'urgency', 'coherence', 'originality', 'balance', 'dynamics']);
@@ -15,8 +16,10 @@ export class Engine {
     this.random = options.random || Math.random;
     this.chats = new Map(); this.running = new Set(); this.controller = new AbortController();
     this.lastError = null; this.lastCycle = 0;
+    this.activity = new ActivityRhythm(store, config.agent, options.activityRandom || Math.random);
     this.orientation = new GroupOrientation(store, config, provider, transport, this.now, this.controller.signal);
   }
+  available(now) { return this.activity.snapshot(now).active; }
   state(chat) {
     if (!this.chats.has(chat)) {
       if (this.chats.size >= this.config.agent.maxActiveChats) return null;
@@ -34,7 +37,7 @@ export class Engine {
       if (state && previous !== this.orientation.get(chat)?.epoch) { state.version++; state.pending = false; state.pauseDone = true; }
       return;
     }
-    if (!activeAt(now, a.schedule)) return;
+    if (!this.available(now)) return;
     const m = normalize(event, this.transport.selfId, a, now);
     if (!m) return;
     const state = this.state(m.chat);
@@ -59,7 +62,7 @@ export class Engine {
   }
   tick() {
     const now = this.now(), a = this.config.agent;
-    if (!activeAt(now, a.schedule)) {
+    if (!this.available(now)) {
       for (const state of this.chats.values()) { state.version++; state.pending = false; state.pauseDone = true; }
       return;
     }
@@ -87,16 +90,17 @@ export class Engine {
   }
   async cycle(chat, trigger = 'message') {
     const state = this.chats.get(chat), a = this.config.agent, now = this.now();
-    if (!state || !allowed(chat, a) || !activeAt(now, a.schedule)) return;
+    if (!state || !allowed(chat, a) || !this.available(now)) return;
     const version = state.version, id = state.lastId;
     if (!await this.orientation.beforeSpeak(chat)) { state.due = this.now() + 5; return; }
-    if (version !== state.version || this.controller.signal.aborted || !activeAt(this.now(), a.schedule)) return;
+    if (version !== state.version || this.controller.signal.aborted || !this.available(this.now())) return;
+    const activityStarted = this.activity.snapshot(this.now()).started;
     const orientationEpoch = this.orientation.get(chat)?.epoch;
     if (a.sending.enabled && this.store.assessment(chat, id)) { this.finish(state, chat, id, version, trigger, true); return; }
     const hint = trigger === 'pause' ? 'open' : state.hint;
     state.lastThink = now; this.lastCycle = now;
     const profile = this.store.learningState(chat);
-    const obsolete = () => version !== state.version || this.controller.signal.aborted || profile.epoch !== this.store.learningState(chat).epoch || orientationEpoch !== this.orientation.get(chat)?.epoch;
+    const obsolete = () => this.controller.signal.aborted || version !== state.version || activityStarted !== this.activity.snapshot(this.now()).started || profile.epoch !== this.store.learningState(chat).epoch || orientationEpoch !== this.orientation.get(chat)?.epoch;
     const history = this.store.history(chat, a.learning.enabled ? Math.max(a.historyLimit, a.learning.minMessages) : a.historyLimit);
     const last = history.filter(x => !x.self).at(-1);
     if (!last) return;
@@ -126,7 +130,7 @@ export class Engine {
     };
     const formed = await this.provider.json(formation, payload, signal);
     if (!Array.isArray(formed.candidates) || !['self', 'other', 'open'].includes(formed.allocation)) throw Object.assign(Error('Invalid formation'), { code: 'invalid_formation' });
-    if (obsolete() || !activeAt(this.now(), a.schedule)) return;
+    if (obsolete() || !this.available(this.now())) return;
     if (learnNow && formed.learning !== undefined) {
       try {
         const updates = parseMemoryUpdates(formed.learning.layers, history, chat, last.sender, a.memory);
@@ -144,7 +148,7 @@ export class Engine {
       const existing = this.store.reservoir(chat, now, a.thoughtTtlSeconds, a.thoughtLimit, last.sender);
       if (!existing.some(x => x.text === thought.text)) this.store.addThought(chat, thought, now);
     }
-    if (obsolete() || !activeAt(this.now(), a.schedule)) return; // obsolete context or schedule
+    if (obsolete() || !this.available(this.now())) return; // obsolete context or schedule
     const candidates = this.store.reservoir(chat, now, a.thoughtTtlSeconds, a.thoughtLimit, last.sender);
     if (!candidates.length) { this.finish(state, chat, id, version, trigger); return; }
     const result = await this.provider.json(evaluation, { ...payload, retainedIdeas: undefined, candidates,
@@ -161,7 +165,7 @@ export class Engine {
     });
     if (!rated.length) throw Object.assign(Error('Invalid ratings'), { code: 'invalid_ratings' });
     for (const r of rated) this.store.score(r.id, r.motivation);
-    if (obsolete() || !activeAt(this.now(), a.schedule)) return;
+    if (obsolete() || !this.available(this.now())) return;
     // Explicit @mentions take precedence over the model's turn prediction.
     const allocation = hint === 'self' || hint === 'other' ? hint : formed.allocation;
     const turnsSilent = history.slice(history.findLastIndex(x => x.self) + 1).filter(x => !x.self).length;
@@ -177,7 +181,7 @@ export class Engine {
       const timing = { proactive, age: Math.max(0, this.now() - state.lastHuman),
         ...this.store.sendingTiming(chat, this.now(), a.sending.recoverySeconds), score: selected.adjusted };
       prediction = forecastResult(await this.provider.json(forecast, { ...payload, retainedIdeas: undefined, selectedIdea: selected.text, timing }, signal));
-      if (obsolete() || !activeAt(this.now(), a.schedule)) return;
+      if (obsolete() || !this.available(this.now())) return;
       const gate = sendingProbability(a.sending, timing, prediction), draw = this.random();
       const admitted = !gate.veto && draw < gate.probability;
       this.store.assess(chat, id, this.now(), admitted ? 'admitted' : 'withheld', { ...gate, draw, timing, prediction });
@@ -197,7 +201,7 @@ export class Engine {
       throw Object.assign(Error('Invalid articulation'), { code: 'invalid_articulation' });
     }
     const text = [...response.text.trim()].slice(0, a.maxOutputChars).join('');
-    if (obsolete() || this.now() - state.lastHuman > a.activeWindowSeconds || !activeAt(this.now(), a.schedule)) {
+    if (obsolete() || this.now() - state.lastHuman > a.activeWindowSeconds || !this.available(this.now())) {
       this.store.assessmentStatus(chat, id, 'cancelled'); return;
     }
     if (!this.transport.connected || !this.transport.online) {

@@ -17,6 +17,8 @@ export const defaults = {
     sending: { enabled: true, proactiveProbability: 0.8, addressedProbability: 1,
       settleSeconds: 15, recoverySeconds: 300, burstScale: 6,
       maxNegativeProbability: 0.4, expectationSeconds: 300 },
+    rhythm: { enabled: false, dayProbability: 0.85, edgeProbability: 0.65, centerProbability: 0.02, sigma: 0.22,
+      activeMinSeconds: 300, activeMaxSeconds: 1200, restMinSeconds: 600, restMaxSeconds: 2400 },
     schedule: { enabled: false, activeStart: '08:00', inactiveStart: '23:00', timezone: 'Europe/Stockholm' },
     system1Probability: 0, proactiveTone: false, pauseSeconds: 45,
     debounceSeconds: 3, minThinkIntervalSeconds: 15, proactiveCooldownSeconds: 180,
@@ -42,6 +44,15 @@ export function validate(c) {
   if (!['zh-CN', 'en'].includes(c.ui.language)) throw Error('Invalid interface language');
   if (!['auto', 'zh-CN', 'en'].includes(c.agent.replyLanguage)) throw Error('Invalid reply language');
   const schedule = c.agent.schedule;
+  const rhythm = c.agent.rhythm;
+  if (!rhythm || typeof rhythm.enabled !== 'boolean') throw Error('Invalid activity rhythm');
+  for (const key of ['dayProbability', 'edgeProbability', 'centerProbability']) if (typeof rhythm[key] !== 'number' || !Number.isFinite(rhythm[key]) || rhythm[key] < 0 || rhythm[key] > 1) throw Error(`Invalid rhythm.${key}`);
+  if (rhythm.centerProbability > rhythm.edgeProbability) throw Error('Rhythm center probability must not exceed edge probability');
+  if (typeof rhythm.sigma !== 'number' || !Number.isFinite(rhythm.sigma) || rhythm.sigma < 0.05 || rhythm.sigma > 1) throw Error('Invalid rhythm.sigma');
+  for (const kind of ['active', 'rest']) {
+    for (const bound of ['Min', 'Max']) { const k = `${kind}${bound}Seconds`; if (!Number.isInteger(rhythm[k]) || rhythm[k] < 30 || rhythm[k] > 86400) throw Error(`Invalid rhythm.${k}`); }
+    if (rhythm[`${kind}MinSeconds`] > rhythm[`${kind}MaxSeconds`]) throw Error(`Invalid rhythm.${kind} duration range`);
+  }
   const observation = c.agent.observation;
   if (!observation || typeof observation.enabled !== 'boolean' || !['both','either'].includes(observation.thresholdMode)) throw Error('Invalid observation settings');
   for (const [key, min, max] of [['minSeconds',1,604800],['minMessages',1,10000],['historyLimit',1,100]]) if (!Number.isInteger(observation[key]) || observation[key] < min || observation[key] > max) throw Error(`Invalid observation.${key}`);

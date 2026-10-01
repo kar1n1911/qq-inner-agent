@@ -138,7 +138,26 @@ The dashboard defaults to Simplified Chinese, with an English option. Save inter
 
 ### Active and inactive times
 
-In **Configuration → Active and inactive times**, enable the daily schedule, choose **Active from**, **Inactive from**, and an IANA time zone (for example `Europe/Stockholm`). The active interval includes its start and excludes its end. Overnight windows such as 22:00–06:00 work too. Disable the schedule for 24-hour availability; equal start/end times are rejected. While inactive, the agent skips incoming messages and pauses all automatic replies, including mentions and private messages. Queued work is discarded at the cutoff, and an in-flight response cannot be sent after inactive hours begin. Connections and manual diagnostics remain available. Quiet hours are a separate restriction on proactive replies within active hours.
+In **Configuration → Active and inactive times**, enable the daily schedule, choose **Active from**, **Inactive from**, and an IANA time zone (for example `Europe/Stockholm`). The active interval includes its start and excludes its end. Overnight windows such as 22:00–06:00 work too. Disable the schedule for 24-hour availability; equal start/end times are rejected. With the activity rhythm below disabled, while inactive the agent skips incoming messages and pauses all automatic replies, including mentions and private messages. Queued work is discarded at the cutoff, and an in-flight response cannot be sent after inactive hours begin. Connections and manual diagnostics remain available. Quiet hours are a separate restriction on proactive replies within active hours.
+
+### Continuous activity rhythm / 连续活跃与休息节奏
+
+**Configuration → Continuous activity rhythm** enables probabilistic availability in place of the strict daily schedule gate. It is off by default to preserve existing schedules. All chats share one account-wide active/rest block, including direct mentions and private replies. The state and expiry persist in SQLite; polling, messages, and restarts do not reroll an unexpired block. Duration is sampled uniformly within the configured range. Adjacent blocks can choose the same state, so an uninterrupted run can exceed one block's maximum duration.
+
+| Setting (`agent.rhythm.*`) | Default | Meaning |
+| --- | --- | --- |
+| `dayProbability` | 0.85 | Chance of choosing an active block during the active window |
+| `edgeProbability` | 0.65 | Active-block probability at the edges of the inactive window |
+| `centerProbability` | 0.02 | Active-block probability at the middle of the inactive window |
+| `sigma` | 0.22 | Gaussian width relative to the entire inactive interval |
+| `activeMinSeconds` / `activeMaxSeconds` | 300 / 1200 | Active blocks last 5–20 minutes |
+| `restMinSeconds` / `restMaxSeconds` | 600 / 2400 | Rest blocks last 10–40 minutes |
+
+During inactive hours, let `x` be progress from 0 to 1 through that interval in the schedule's local time, wrapping midnight. With `g(x) = exp(-0.5 × ((x − 0.5) / sigma)²)`, activity probability is `edge − (edge − center) × (g(x) − g(0)) / (1 − g(0))`. This is a bounded Gaussian-shaped **inactivity** curve: rest is most likely at the center, and activity rises toward either edge. It is a heuristic, not a measured model of human behavior. These are probabilities of selecting a block, not per-message send rates or the fraction of clock time spent active; different active/rest durations affect that fraction.
+
+Blocks keep their state across daily schedule boundaries and use absolute elapsed seconds for their duration. Time-zone/DST changes affect the next selection's local-time curve. After a long offline gap, the agent samples one new block on resuming instead of replaying missed blocks. Editing rhythm or schedule settings starts a new block; unrelated settings preserve it. Disabling the daily schedule uses `dayProbability` all day. Disabling rhythm restores the original strict schedule.
+
+Rest skips incoming messages and discards queued replies. A response whose generation crosses a block boundary is withheld, even if the next block is active. Becoming active does not trigger a greeting or catch up missed messages. When active, observation, quiet hours, forecasts, per-message sending probabilities, cooldowns and budgets still apply. Quiet hours can therefore suppress proactive messages even during a randomly active nighttime block. The Overview page displays current state, next selection time, sampled probability and current curve probability. No additional model requests are needed.
 
 ### Participation limits and live updates
 

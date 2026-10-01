@@ -74,7 +74,9 @@ async function refresh() {
     $('provider-detail').textContent = s?.provider === 'anthropic' ? 'Anthropic-compatible API' : 'OpenAI-compatible API';
     $('chat-value').textContent = saved ? saved.config.agent.allowedGroups.length + saved.config.agent.allowedUsers.length : '—';
     $('mode-badge').textContent = state.serviceState !== 'active' ? 'Service stopped' : s?.mode === 'waiting_for_setup' ? 'Setup needed' : s?.scheduleActive === false ? 'Inactive hours' : s?.mode === 'dry_run' ? 'Preview mode' : 'Agent active';
-    $('readiness').textContent = s?.missing?.length ? 'Complete setup: ' + s.missing.join(' + ') + '.' : s?.scheduleActive === false ? 'AI participation is paused until the next active window.' : 'The agent is ready to participate in enabled conversations.';
+    $('readiness').textContent = s?.missing?.length ? 'Complete setup: ' + s.missing.join(' + ') + '.' : s?.scheduleActive === false ? 'AI participation is paused by the activity schedule or rest block.' : 'The agent is ready to participate in enabled conversations.';
+    const rhythm = s?.activityRhythm;
+    $('activity-rhythm-status').textContent = fresh && rhythm?.enabled ? `${translate(rhythm.active ? 'Active block' : 'Rest block')} · ${translate('Next block selection')}: ${time(rhythm.until)} · ${translate('Activity probability at selection')}: ${(rhythm.probability * 100).toFixed(1)}% · ${translate('Current curve probability')}: ${(rhythm.currentProbability * 100).toFixed(1)}%` : '';
     const applied = fresh && s.appliedRevision === state.savedRevision && !s.reloading;
     $('applied-indicator').textContent = applied ? 'SETTINGS APPLIED' : state.serviceState !== 'active' ? 'SERVICE STOPPED' : 'APPLYING SETTINGS';
     if (!dirty) $('apply-status').textContent = s?.reloadError || (applied ? 'Saved settings are active' : state.serviceState !== 'active' ? 'Saved. Start the service to apply.' : 'Waiting for the agent to apply settings…');

@@ -1,5 +1,7 @@
 {
-  "ui": { "language": "zh-CN" },
+  "ui": {
+    "language": "zh-CN"
+  },
   "provider": {
     "kind": "openai",
     "baseUrl": "https://api.deepseek.com",
@@ -60,6 +62,17 @@
       "start": 23,
       "end": 8,
       "timezone": "Europe/Stockholm"
+    },
+    "rhythm": {
+      "enabled": false,
+      "dayProbability": 0.85,
+      "edgeProbability": 0.65,
+      "centerProbability": 0.02,
+      "sigma": 0.22,
+      "activeMinSeconds": 300,
+      "activeMaxSeconds": 1200,
+      "restMinSeconds": 600,
+      "restMaxSeconds": 2400
     }
   },
   "storage": {
