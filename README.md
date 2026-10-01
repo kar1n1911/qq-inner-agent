@@ -1,5 +1,7 @@
 # QQ Inner Agent
 
+> [简体中文](README_zh.md) | **English**
+
 A persistent conversational agent for one QQ account, connected through NapCat or SnowLuma's forward OneBot v11 WebSocket. Each enabled group and private contact has its own context, memory, and pool of candidate contributions. DeepSeek is preconfigured; OpenAI-compatible Chat Completions and Anthropic-compatible Messages endpoints are supported.
 
 ## Overview
