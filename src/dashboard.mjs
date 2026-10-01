@@ -46,7 +46,7 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
   function snapshot() {
     const c = loadConfig(root), file = path.join(c.dataDir, 'agent.sqlite');
     const status = readJson(path.join(c.dataDir, 'status.json'), null);
-    let decisions = [], thoughts = [], assessments = [];
+    let decisions = [], thoughts = [], assessments = [], learning = [], memories = [];
     if (fs.existsSync(file)) {
       let db;
       try {
@@ -54,10 +54,12 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
         decisions = db.prepare('SELECT chat,ts,action,score,tags FROM decisions ORDER BY ts DESC LIMIT 30').all();
         thoughts = db.prepare('SELECT chat,text,kind,score,created FROM thoughts WHERE used=0 AND created>? ORDER BY created DESC LIMIT 12').all(Date.now()/1000 - c.agent.thoughtTtlSeconds);
         assessments = db.prepare('SELECT chat,ts,status,details FROM send_assessments ORDER BY ts DESC LIMIT 12').all().map(r => ({ ...r, details: JSON.parse(r.details) }));
+        learning = db.prepare("SELECT chat,style,sources,updated FROM chat_learning WHERE style<>'' OR chat IN (SELECT chat FROM learned_memories WHERE expires>?) ORDER BY updated DESC LIMIT 50").all(Date.now()/1000);
+        memories = db.prepare('SELECT id,chat,text,sources,created,expires FROM learned_memories WHERE expires>? ORDER BY created DESC LIMIT 100').all(Date.now()/1000);
       } catch { /* database may be opening for the first time */ }
       finally { db?.close(); }
     }
-    const data = { status, decisions, thoughts, assessments, logs: tail(path.join(c.dataDir, 'agent.log')), savedRevision: publicSettings(root).revision };
+    const data = { status, decisions, thoughts, assessments, learning, memories, logs: tail(path.join(c.dataDir, 'agent.log')), savedRevision: publicSettings(root).revision };
     let text = JSON.stringify(data);
     for (const secret of [c.apiKey, c.onebotToken, key].filter(Boolean)) text = text.split(secret).join('[redacted]');
     return JSON.parse(text);
@@ -130,6 +132,14 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
         return;
       }
       if (url.pathname === '/api/state' && req.method === 'GET') { json(res, 200, { ...snapshot(), serviceState: await serviceStatus() }); return; }
+      if (url.pathname === '/api/learning/reset' && req.method === 'POST') {
+        const input = await body(req);
+        if (typeof input.chat !== 'string' || !/^(group|private):[1-9]\d{0,19}$/.test(input.chat)) throw fail(400, 'Invalid chat');
+        const c = loadConfig(root); fs.mkdirSync(c.dataDir, { recursive: true, mode: 0o700 });
+        const store = new Store(path.join(c.dataDir, 'agent.sqlite'));
+        try { store.resetLearning(input.chat, Date.now()/1000); } finally { store.close(); }
+        json(res, 200, { ok: true }); return;
+      }
       if (url.pathname === '/api/service' && req.method === 'POST') {
         const input = await body(req);
         if (!['start', 'stop', 'restart'].includes(input.action)) throw fail(400, 'Unknown service action');

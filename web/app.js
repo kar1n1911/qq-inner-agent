@@ -2,6 +2,7 @@ import { startI18n, setLanguage, translate } from './i18n.mjs';
 const $ = id => document.getElementById(id);
 startI18n();
 let csrf = '', saved = null, dirty = false, polling = false, logs = [], online = false;
+let learningView = '';
 const get = (obj, key) => key.split('.').reduce((o, k) => o?.[k], obj);
 const set = (obj, key, value) => { const parts = key.split('.'); const end = parts.pop(); parts.reduce((o,k) => o[k], obj)[end] = value; };
 const ids = value => [...new Set(value.split(/[\s,]+/).filter(Boolean))];
@@ -98,6 +99,27 @@ async function refresh() {
       const detail = element('details'), summary = element('summary', translate('Calculation details'));
       detail.append(summary, element('pre', JSON.stringify({ factors: d.factors, draw: d.draw, timing: d.timing, veto: d.veto, responseMode: d.prediction.responseMode }, null, 2)));
       box.append(detail); $('assessment-list').append(box);
+    }
+    const learningKey = JSON.stringify([state.learning, state.memories, document.documentElement.lang]);
+    if (learningKey !== learningView) {
+    learningView = learningKey;
+    $('learning-list').replaceChildren();
+    if (!state.learning?.length) $('learning-list').append(element('p', 'No learned chat preferences yet.', 'empty'));
+    for (const profile of state.learning || []) {
+      const box = element('article', null, 'thought'), reset = element('button', translate('Reset learned style and memories'), 'secondary');
+      reset.type = 'button';
+      reset.addEventListener('click', async () => {
+        reset.disabled = true;
+        try { await api('/api/learning/reset', { method: 'POST', body: JSON.stringify({ chat: profile.chat }) }); notice('Learned style and memories reset.'); await refresh(); }
+        catch (e) { notice(e.message, true); reset.disabled = false; }
+      });
+      box.append(element('h3', profile.chat), element('p', profile.style || translate('No learned style yet.')), reset);
+      const sources = element('details'); sources.append(element('summary', translate('Style sources')), element('pre', profile.sources)); box.append(sources);
+      for (const memory of (state.memories || []).filter(m => m.chat === profile.chat)) {
+        const item = element('details'); item.append(element('summary', memory.text), element('pre', JSON.stringify({ sources: JSON.parse(memory.sources), created: new Date(memory.created * 1000).toISOString(), expires: new Date(memory.expires * 1000).toISOString() }, null, 2))); box.append(item);
+      }
+      $('learning-list').append(box);
+    }
     }
     $('thought-list').replaceChildren();
     if (!state.thoughts.length) $('thought-list').append(element('p', 'No retained ideas yet. Ideas that are withheld can remain here for later reevaluation.', 'empty'));

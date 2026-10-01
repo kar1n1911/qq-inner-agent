@@ -1,6 +1,21 @@
 // Only application-owned UI text is translated. Chat contents, model IDs, logs,
 // configuration editors and other user-provided values remain untouched.
 const pairs = `
+Adaptive persona & memory|自适应角色与记忆
+Learn chat style and useful memories|学习聊天风格与有用记忆
+The model updates a separate style for each chat from cited messages. Relevant memories are retrieved locally. Your base persona stays editable and takes priority.|模型根据带来源的消息，为每个聊天更新独立的互动风格。相关记忆在本地检索，你手动设置的基础角色仍可编辑并优先适用。
+New messages before learning|学习前至少收到的新消息数
+Learning interval (seconds)|学习最短间隔（秒）
+Memories per chat|每个聊天的记忆上限
+Memory lifetime (days)|记忆保留天数
+Retrieved memories per turn|每轮检索条数
+Learned chat styles & memories|已学习的聊天风格与记忆
+Recent learned profiles and memories, with source IDs. Reset removes learned entries; original chat history is retained. Disable learning to stop updates and use of learned entries.|展示近期学习的风格和记忆及其来源 ID。重置会移除学习结果，原始聊天记录保留。关闭学习可停止更新和使用学习结果。
+No learned chat preferences yet.|暂无已学习的聊天偏好。
+Reset learned style and memories|重置学习风格与记忆
+Learned style and memories reset.|已重置学习风格与记忆。
+No learned style yet.|暂无已学习的风格。
+Style sources|风格依据
 Sending policy & predictions|发送策略与预测
 Enable probability and prediction checks|启用发送概率与预测检查
 Probabilities are heuristic estimates. Timing and chat pace reduce proactive participation. A withheld attempt is not retried during silence. Direct requests bypass timing factors, but still respect the forecast veto and configured probability.|概率是启发式估计。等待时间、发言间隔与消息密度会降低主动发言概率。放弃发送后，不会因沉默反复尝试。直接提问不受时间因子影响，但仍遵守预测否决与所设概率。

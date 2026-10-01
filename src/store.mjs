@@ -25,6 +25,9 @@ export class Store {
       CREATE TABLE IF NOT EXISTS send_assessments(id TEXT PRIMARY KEY, chat TEXT, human_id TEXT, ts REAL, status TEXT, details TEXT, UNIQUE(chat,human_id));
       CREATE TABLE IF NOT EXISTS expectations(chat TEXT PRIMARY KEY, ts REAL, expires REAL, forecast TEXT, observation TEXT);
       CREATE TABLE IF NOT EXISTS handled(chat TEXT PRIMARY KEY, human_id TEXT, pause_done INTEGER DEFAULT 0);
+      CREATE TABLE IF NOT EXISTS chat_learning(chat TEXT PRIMARY KEY, style TEXT, sources TEXT, updated REAL, last_id TEXT, epoch INTEGER DEFAULT 0);
+      CREATE TABLE IF NOT EXISTS learned_memories(id TEXT PRIMARY KEY, chat TEXT, text TEXT, sources TEXT, created REAL, expires REAL);
+      CREATE INDEX IF NOT EXISTS learned_memories_chat ON learned_memories(chat,expires);
       CREATE INDEX IF NOT EXISTS messages_chat_ts ON messages(chat,ts);
       CREATE INDEX IF NOT EXISTS deliveries_chat_ts ON deliveries(chat,ts);
       CREATE INDEX IF NOT EXISTS thoughts_chat ON thoughts(chat,created);`);
@@ -35,12 +38,41 @@ export class Store {
     return !!this.db.prepare('INSERT OR IGNORE INTO messages VALUES(?,?,?,?,?,?,?)').run(m.chat, m.id, m.sender, m.name, m.text, m.ts, m.self ? 1 : 0).changes;
   }
   history(chat, limit = 24) { return this.db.prepare('SELECT * FROM messages WHERE chat=? ORDER BY ts DESC,rowid DESC LIMIT ?').all(chat, limit).reverse(); }
-  retrieve(chat, query, now) {
-    const recent = this.history(chat, 200);
+  retrieve(chat, query, now, options = {}) {
+    const recent = this.history(chat, 500).filter(x => !options.excludeIds?.includes(x.id));
     const notes = this.db.prepare('SELECT text,created AS ts FROM notes WHERE chat=? ORDER BY created DESC LIMIT 50').all(chat);
-    return [...notes.map(x => ({ ...x, type: 'owner_note' })), ...recent.map(x => ({ text: `${x.name}: ${x.text}`, ts: x.ts, type: 'past_utterance' }))]
+    const learned = options.learned === false ? [] : this.db.prepare('SELECT id,text,sources,created AS ts FROM learned_memories WHERE chat=? AND expires>? ORDER BY created DESC LIMIT 500').all(chat, now).map(x => ({ ...x, sources: JSON.parse(x.sources), type: 'learned_memory' }));
+    return [...notes.map(x => ({ ...x, type: 'owner_note' })), ...learned, ...recent.map(x => ({ id: x.id, sender: x.sender, text: `${x.name}: ${x.text}`, ts: x.ts, type: 'past_utterance' }))]
       .map(x => ({ ...x, saliency: similarity(query, x.text) * Math.exp(-Math.max(0, now - x.ts) / 604800) + (x.type === 'owner_note' ? 0.15 : 0) }))
-      .filter(x => x.saliency > 0.12).sort((a, b) => b.saliency - a.saliency).slice(0, 6);
+      .filter(x => x.saliency > 0.12).sort((a, b) => b.saliency - a.saliency)
+      .filter((x, i, list) => !list.slice(0, i).some(y => y.text === x.text)).slice(0, options.limit ?? 6);
+  }
+  learningState(chat) {
+    return this.db.prepare('SELECT * FROM chat_learning WHERE chat=?').get(chat) || { style: '', sources: '[]', updated: 0, last_id: '', epoch: 0 };
+  }
+  learn(chat, update, now, lastId, settings, epoch) {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const old = this.learningState(chat);
+      if (old.epoch !== epoch) { this.db.exec('ROLLBACK'); return false; }
+      this.db.prepare('INSERT INTO chat_learning VALUES(?,?,?,?,?,?) ON CONFLICT(chat) DO UPDATE SET style=excluded.style,sources=excluded.sources,updated=excluded.updated,last_id=excluded.last_id').run(chat, update.style?.text ?? old.style, update.style ? JSON.stringify(update.style.sources) : old.sources, now, lastId, epoch);
+      for (const id of update.forgetIds) this.db.prepare('DELETE FROM learned_memories WHERE chat=? AND id=?').run(chat, id);
+      for (const memory of update.memories) {
+        this.db.prepare('DELETE FROM learned_memories WHERE chat=? AND text=?').run(chat, memory.text);
+        this.db.prepare('INSERT INTO learned_memories VALUES(?,?,?,?,?,?)').run(randomUUID(), chat, memory.text, JSON.stringify(memory.sources), now, now + settings.memoryDays * 86400);
+      }
+      this.db.prepare('DELETE FROM learned_memories WHERE chat=? AND (expires<=? OR id NOT IN (SELECT id FROM learned_memories WHERE chat=? ORDER BY created DESC,rowid DESC LIMIT ?))').run(chat, now, chat, Math.floor(settings.maxMemories));
+      this.db.exec('COMMIT'); return true;
+    } catch (e) { this.db.exec('ROLLBACK'); throw e; }
+  }
+  resetLearning(chat, now) {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const last = this.history(chat, 100).filter(m => !m.self).at(-1)?.id || '';
+      this.db.prepare("INSERT INTO chat_learning VALUES(?,'','[]',?,?,1) ON CONFLICT(chat) DO UPDATE SET style='',sources='[]',updated=excluded.updated,last_id=excluded.last_id,epoch=epoch+1").run(chat, now, last);
+      this.db.prepare('DELETE FROM learned_memories WHERE chat=?').run(chat);
+      this.db.exec('COMMIT');
+    } catch (e) { this.db.exec('ROLLBACK'); throw e; }
   }
   note(chat, text, now) { this.db.prepare('INSERT INTO notes VALUES(?,?,?,?)').run(randomUUID(), chat, text, now); }
   reservoir(chat, now, ttl, limit) {
@@ -96,6 +128,8 @@ export class Store {
       this.db.prepare('DELETE FROM messages WHERE chat=? AND rowid NOT IN (SELECT rowid FROM messages WHERE chat=? ORDER BY ts DESC,rowid DESC LIMIT ?)').run(chat, chat, maxPerChat);
     }
     this.db.prepare('DELETE FROM thoughts WHERE created<?').run(now - 86400);
+    this.db.prepare('DELETE FROM learned_memories WHERE expires<=? OR created<?').run(now, now - retentionDays * 86400);
+    this.db.prepare("UPDATE chat_learning SET style='',sources='[]' WHERE updated<?").run(now - retentionDays * 86400);
     for (const table of ['decisions', 'deliveries', 'send_assessments', 'expectations']) this.db.prepare(`DELETE FROM ${table} WHERE ts<?`).run(now - retentionDays * 86400);
     this.db.exec('DELETE FROM handled WHERE chat NOT IN (SELECT DISTINCT chat FROM messages)');
   }

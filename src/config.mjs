@@ -8,7 +8,8 @@ export const defaults = {
     retries: 2, requestsPerHour: 120, anthropicAuth: 'x-api-key', workspaceId: '', thinking: null },
   onebot: { url: 'ws://127.0.0.1:3001/', selfId: '', heartbeatSeconds: 30,
     requestTimeoutSeconds: 12, reconnectMaxSeconds: 60 },
-  agent: { name: 'Luma', persona: '你是 QQ 聊天中的 AI 参与者。友善、简洁、真诚，保持好奇心，结合聊天内容提供有用的回应。不要编造亲身经历，也不要冒充真人。', replyLanguage: 'auto',
+  agent: { name: 'Luma', persona: '你是 QQ 聊天中善于接话、抛出话题、带动轻松交流的 AI 伙伴。先接住对方的情绪和话头，再给出一个容易接下去的回应。可以分享贴合上下文的观察、轻巧联想、适度玩笑，或一个具体且低负担的问题；不要每句话都追问，也不要把闲聊变成客服答疑或长篇讲课。话题自然结束时，可以从共同兴趣或未完的话题轻轻开启新方向，但冷场不必硬救。气氛热闹时给别人空间，有人认真求助或表达难过时先认真回应。逐渐适应每个聊天的用语、节奏和兴趣，尊重明确反馈，不把一个人的偏好当成所有人的偏好。表达自然、有温度，不编造亲身经历，不冒充真人。', replyLanguage: 'auto',
+    learning: { enabled: true, minMessages: 8, intervalSeconds: 300, maxMemories: 100, memoryDays: 30, retrievalLimit: 6 },
     aliases: ['Luma'], allowedGroups: [], allowedUsers: [], ignoredUsers: [],
     proactive: true, dryRun: false, threshold: 4.09, interruptThreshold: 4.8,
     sending: { enabled: true, proactiveProbability: 0.8, addressedProbability: 1,
@@ -34,10 +35,13 @@ export function merge(base, extra) {
   return result;
 }
 export function validate(c) {
+  if (c.agent.persona === '你是 QQ 聊天中的 AI 参与者。友善、简洁、真诚，保持好奇心，结合聊天内容提供有用的回应。不要编造亲身经历，也不要冒充真人。') c.agent.persona = defaults.agent.persona;
   if (c.agent.persona === 'You are a thoughtful AI participant in a QQ conversation. Be helpful, concise, curious, and honest. Match the language and tone of the conversation. Never invent personal experiences or claim to be human.') c.agent.persona = defaults.agent.persona;
   if (!['zh-CN', 'en'].includes(c.ui.language)) throw Error('Invalid interface language');
   if (!['auto', 'zh-CN', 'en'].includes(c.agent.replyLanguage)) throw Error('Invalid reply language');
   const schedule = c.agent.schedule;
+  if (!c.agent.learning || typeof c.agent.learning.enabled !== 'boolean') throw Error('Invalid learning settings');
+  for (const key of ['minMessages', 'intervalSeconds', 'maxMemories', 'memoryDays', 'retrievalLimit']) if (!Number.isInteger(c.agent.learning[key])) throw Error(`Invalid learning.${key}: expected integer`);
   if (!c.agent.sending || typeof c.agent.sending.enabled !== 'boolean') throw Error('Invalid sending policy');
   if (!schedule || typeof schedule.enabled !== 'boolean') throw Error('Invalid activity schedule');
   for (const k of ['activeStart', 'inactiveStart']) if (typeof schedule[k] !== 'string' || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(schedule[k])) throw Error(`Invalid schedule.${k}: use HH:MM`);
@@ -54,6 +58,9 @@ export function validate(c) {
   if (!['x-api-key', 'bearer'].includes(c.provider.anthropicAuth)) throw Error('Invalid anthropicAuth');
   if (![null, 'disabled'].includes(c.provider.thinking)) throw Error('thinking must be null or disabled');
   const ranges = {
+    'agent.learning.minMessages': [1, 100], 'agent.learning.intervalSeconds': [30, 86400],
+    'agent.learning.maxMemories': [1, 500], 'agent.learning.memoryDays': [1, 365],
+    'agent.learning.retrievalLimit': [1, 20],
     'agent.sending.proactiveProbability': [0, 1], 'agent.sending.addressedProbability': [0, 1],
     'agent.sending.settleSeconds': [1, 3600], 'agent.sending.recoverySeconds': [1, 86400],
     'agent.sending.burstScale': [1, 100], 'agent.sending.maxNegativeProbability': [0, 1],

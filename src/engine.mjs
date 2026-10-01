@@ -2,6 +2,7 @@ import { readiness } from './config.mjs';
 import { allowed, normalize, quiet, activeAt, select, repeated } from './policy.mjs';
 import { formation, evaluation, articulationFor, forecast } from './prompts.mjs';
 import { forecastResult, sendingProbability } from './sending.mjs';
+import { parseLearning } from './learning.mjs';
 
 const criteria = new Set(['relevance', 'information_gap', 'expected_impact', 'urgency', 'coherence', 'originality', 'balance', 'dynamics']);
 const scoreOk = n => typeof n === 'number' && Number.isFinite(n) && n >= 1 && n <= 5;
@@ -80,7 +81,9 @@ export class Engine {
     if (a.sending.enabled && this.store.assessment(chat, id)) { this.finish(state, chat, id, version, trigger, true); return; }
     const hint = trigger === 'pause' ? 'open' : state.hint;
     state.lastThink = now; this.lastCycle = now;
-    const history = this.store.history(chat, a.historyLimit);
+    const profile = this.store.learningState(chat);
+    const obsolete = () => version !== state.version || this.controller.signal.aborted || profile.epoch !== this.store.learningState(chat).epoch;
+    const history = this.store.history(chat, a.learning.enabled ? Math.max(a.historyLimit, a.learning.minMessages) : a.historyLimit);
     const last = history.filter(x => !x.self).at(-1);
     if (!last) return;
     const counts = this.store.counts(chat, now);
@@ -88,21 +91,40 @@ export class Engine {
       (counts.proactive >= a.maxProactivePerHour || now - counts.last < a.proactiveCooldownSeconds));
     if (gated) { this.finish(state, chat, id, version, trigger); return; }
     const signal = this.controller.signal;
+    const humans = history.filter(x => !x.self);
+    const newHumans = humans.slice(humans.findLastIndex(x => x.id === profile.last_id) + 1);
+    const learnNow = a.learning.enabled && last.id !== profile.last_id && newHumans.length >= a.learning.minMessages && now - profile.updated >= a.learning.intervalSeconds;
+    const query = humans.slice(-3).map(x => x.text).join(' ');
     const payload = { persona: a.persona, name: a.name, trigger, addressedHint: hint,
-      history: history.map(x => ({ speaker: x.self ? a.name : x.name, text: x.text })),
-      memories: this.store.retrieve(chat, last.text, now),
+      chatStyle: a.learning.enabled ? profile.style : '',
+      learning: { requested: learnNow },
+      history: history.map(x => ({ id: x.id, sender: x.sender, self: !!x.self, timestamp: x.ts, speaker: x.self ? a.name : x.name, text: x.text })),
+      memories: this.store.retrieve(chat, query, now, { excludeIds: history.map(x => x.id), learned: a.learning.enabled, limit: a.learning.retrievalLimit }),
       retainedIdeas: this.store.reservoir(chat, now, a.thoughtTtlSeconds, a.thoughtLimit),
       priorExpectation: this.store.expectation(chat, now),
     };
     const formed = await this.provider.json(formation, payload, signal);
     if (!Array.isArray(formed.candidates) || !['self', 'other', 'open'].includes(formed.allocation)) throw Object.assign(Error('Invalid formation'), { code: 'invalid_formation' });
+    if (obsolete() || !activeAt(this.now(), a.schedule)) return;
+    if (learnNow && formed.learning !== undefined) {
+      try {
+        const update = parseLearning(formed.learning, history);
+        const retrievableIds = new Set(payload.memories.filter(m => m.type === 'learned_memory').map(m => m.id));
+        update.forgetIds = update.forgetIds.filter(id => retrievableIds.has(id));
+        if (this.store.learn(chat, update, now, last.id, a.learning, profile.epoch)) {
+          payload.chatStyle = this.store.learningState(chat).style;
+          payload.memories = this.store.retrieve(chat, query, now, { excludeIds: history.map(x => x.id), limit: a.learning.retrievalLimit });
+          this.log('chat_learning_updated', { chat, memories: update.memories.length });
+        }
+      } catch { this.log('chat_learning_rejected', { chat }); }
+    }
     for (const candidate of formed.candidates.slice(0, 3)) {
       if (!candidate || typeof candidate.text !== 'string' || !candidate.text.trim() || !['system1', 'system2'].includes(candidate.kind)) continue;
       const thought = { text: candidate.text.trim().slice(0, 300), kind: candidate.kind };
       const existing = this.store.reservoir(chat, now, a.thoughtTtlSeconds, a.thoughtLimit);
       if (!existing.some(x => x.text === thought.text)) this.store.addThought(chat, thought, now);
     }
-    if (version !== state.version || !activeAt(this.now(), a.schedule)) return; // obsolete context or schedule
+    if (obsolete() || !activeAt(this.now(), a.schedule)) return; // obsolete context or schedule
     const candidates = this.store.reservoir(chat, now, a.thoughtTtlSeconds, a.thoughtLimit);
     if (!candidates.length) { this.finish(state, chat, id, version, trigger); return; }
     const result = await this.provider.json(evaluation, { ...payload, retainedIdeas: undefined, candidates,
@@ -119,7 +141,7 @@ export class Engine {
     });
     if (!rated.length) throw Object.assign(Error('Invalid ratings'), { code: 'invalid_ratings' });
     for (const r of rated) this.store.score(r.id, r.motivation);
-    if (version !== state.version || !activeAt(this.now(), a.schedule)) return;
+    if (obsolete() || !activeAt(this.now(), a.schedule)) return;
     // Explicit @mentions take precedence over the model's turn prediction.
     const allocation = hint === 'self' || hint === 'other' ? hint : formed.allocation;
     const turnsSilent = history.slice(history.findLastIndex(x => x.self) + 1).filter(x => !x.self).length;
@@ -135,7 +157,7 @@ export class Engine {
       const timing = { proactive, age: Math.max(0, this.now() - state.lastHuman),
         ...this.store.sendingTiming(chat, this.now(), a.sending.recoverySeconds), score: selected.adjusted };
       prediction = forecastResult(await this.provider.json(forecast, { ...payload, retainedIdeas: undefined, selectedIdea: selected.text, timing }, signal));
-      if (version !== state.version || signal.aborted || !activeAt(this.now(), a.schedule)) return;
+      if (obsolete() || !activeAt(this.now(), a.schedule)) return;
       const gate = sendingProbability(a.sending, timing, prediction), draw = this.random();
       const admitted = !gate.veto && draw < gate.probability;
       this.store.assess(chat, id, this.now(), admitted ? 'admitted' : 'withheld', { ...gate, draw, timing, prediction });
@@ -146,7 +168,7 @@ export class Engine {
       }
     }
     const response = await this.provider.json(articulationFor(a.replyLanguage), { persona: a.persona, name: a.name,
-      history: payload.history, selectedIdea: selected.text, responsePlan: prediction,
+      history: payload.history, chatStyle: payload.chatStyle, memories: payload.memories, selectedIdea: selected.text, responsePlan: prediction,
       priorExpectation: payload.priorExpectation, assertiveTone: a.proactiveTone, maxCharacters: a.maxOutputChars }, signal).catch(error => {
         this.store.assessmentStatus(chat, id, 'generation_failed'); throw error;
       });
@@ -155,7 +177,7 @@ export class Engine {
       throw Object.assign(Error('Invalid articulation'), { code: 'invalid_articulation' });
     }
     const text = [...response.text.trim()].slice(0, a.maxOutputChars).join('');
-    if (version !== state.version || this.now() - state.lastHuman > a.activeWindowSeconds || signal.aborted || !activeAt(this.now(), a.schedule)) {
+    if (obsolete() || this.now() - state.lastHuman > a.activeWindowSeconds || !activeAt(this.now(), a.schedule)) {
       this.store.assessmentStatus(chat, id, 'cancelled'); return;
     }
     if (!this.transport.connected || !this.transport.online) {

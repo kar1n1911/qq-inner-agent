@@ -8,6 +8,7 @@ import { once } from 'node:events';
 import { defaults } from '../src/config.mjs';
 import { publicSettings, saveSettings, recoverSettings, atomicJson } from '../src/settings.mjs';
 import { createDashboard } from '../src/dashboard.mjs';
+import { Store } from '../src/store.mjs';
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-dashboard-test-'));
@@ -58,6 +59,12 @@ test('HTTP dashboard authentication, CSRF, validated save, redaction and fixed s
     const noCsrf = { ...headers }; delete noCsrf['X-CSRF-Token'];
     assert.equal((await request('/api/debug/send', { method: 'POST', headers: noCsrf, body: '{}' })).status, 403);
     assert.equal((await request('/api/debug/receive', { method: 'POST', headers: noCsrf, body: '{}' })).status, 403);
+    assert.equal((await request('/api/learning/reset', { method: 'POST', headers: noCsrf, body: '{"chat":"private:20"}' })).status, 403);
+    const memoryStore = new Store(path.join(root, 'data/agent.sqlite'));
+    memoryStore.learn('private:20', { style: { text: '短句接话', sources: [] }, memories: [{ text: '喜欢园艺', sources: [] }], forgetIds: [] }, Date.now()/1000, '1', defaults.agent.learning, 0);
+    assert.equal((await (await request('/api/state', { headers })).json()).learning[0].style, '短句接话');
+    assert.equal((await request('/api/learning/reset', { method: 'POST', headers, body: '{"chat":"private:20"}' })).status, 200);
+    assert.equal(memoryStore.learningState('private:20').style, ''); memoryStore.close();
     assert.equal((await (await request('/api/debug/receive', { headers })).json()).state, 'idle');
     assert.equal((await request('/api/debug/stop', { method: 'POST', headers, body: '{}' })).status, 200);
     assert.equal((await request('/api/config', { method: 'PUT', headers: noCsrf, body: JSON.stringify({ revision: s.revision, config: changed }) })).status, 403);

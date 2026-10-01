@@ -19,6 +19,18 @@ The time divisors, pace divisor and base probabilities are configurable. Timing 
 
 Articulation uses the response plan. Only a confirmed send establishes an expectation, retained per chat for 300 seconds by default. The next turn receives that forecast plus elapsed time and whether another human message arrived; arrival alone does not prove a reply or agreement. Expectations do not schedule automatic follow-ups. **Activity & logs → Sending forecasts** displays the probability, draw, timing factors, outcome forecast, plan and delivery status. Predictions are subjective estimates, not calibrated probabilities or a reproduction of the paper's experiments.
 
+## Adaptive persona and simple memory RAG / 自适应角色与记忆
+
+The default Chinese persona now emphasizes picking up conversational threads, light associations and humor, and starting relevant, easy-to-answer topics without constant questions or forced activity. Exact previous default personas migrate automatically; custom personas remain unchanged.
+
+The effective prompt context combines your editable base persona with a separate learned style for each chat. The model can rewrite that style as it analyzes new messages, but cannot rewrite system rules, configuration or another chat's profile. **Configuration → Adaptive persona & memory** controls learning. By default it requires at least 8 new human messages and a 300-second interval. Learning is an optional structured part of `FORM`, so it adds no separate API call (the response can use more tokens). Updates require real human message IDs from the supplied context; the application attaches source authors and timestamps. Unsupported or malformed updates are discarded. This validates provenance, not the factual accuracy of every model summary.
+
+Each learning update can retain up to 3 short memories (preferences, agreements, unfinished topics), replace the style summary, and remove up to 3 retrieved outdated memories. Default storage is 100 learned memories per chat, expiring after 30 days or the shorter global retention period. Learned data persists across restarts in SQLite.
+
+Simple local RAG uses the latest three human messages as a query against up to 500 older chat messages, up to 500 non-expired learned memories and 50 owner notes in that same chat. Ranking uses lexical overlap including Chinese character pairs and recency, with a small owner-note preference. The top 6 entries by default are supplied to formation, evaluation, forecast and articulation with source/time metadata. Current prompt history is excluded from raw-history retrieval. No embedding API or vector database is required; paraphrases without keyword overlap may be missed.
+
+**Activity & logs → Learned chat styles & memories** shows recent profiles, memories and sources, with a per-chat reset. Reset retains original chat history and blocks in-flight work from restoring the erased learning; subsequent new messages may teach the agent again. Disabling learning stops both learning updates and the use of learned style/memories; existing raw-history/owner-note retrieval continues. Nothing in learned context overrides sending probability, cooldowns, quiet hours or explicit activity schedules.
+
 ## Finish setup
 
 In a terminal:
