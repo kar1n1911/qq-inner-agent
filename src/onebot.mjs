@@ -105,14 +105,15 @@ export class OneBot extends EventEmitter {
       });
     } finally { clearTimeout(timeout); this.pending.delete(echo); }
   }
-  async send(chat, text) {
+  async send(chat, text, faceId = null) {
     if (!this.connected || !this.online) throw new OneBotError('qq_offline');
     const [type, id] = chat.split(':');
     if (!['group', 'private'].includes(type) || !/^[1-9]\d*$/.test(id)) throw new OneBotError('invalid_chat');
+    if (faceId !== null && (typeof faceId !== 'string' || !/^\d{1,5}$/.test(faceId))) throw new OneBotError('invalid_face');
     // Array text segments make model-written CQ codes inert text.
     return this.call(type === 'group' ? 'send_group_msg' : 'send_private_msg', {
       [type === 'group' ? 'group_id' : 'user_id']: Number(id),
-      message: [{ type: 'text', data: { text } }], auto_escape: true,
+      message: [{ type: 'text', data: { text } }, ...(faceId === null ? [] : [{ type: 'face', data: { id: faceId } }])], auto_escape: true,
     });
   }
 }

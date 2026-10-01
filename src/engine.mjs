@@ -3,6 +3,7 @@ import { allowed, normalize, quiet, select, repeated } from './policy.mjs';
 import { formation, evaluation, articulationFor, forecast } from './prompts.mjs';
 import { forecastResult, sendingProbability } from './sending.mjs';
 import { parseMemoryUpdates } from './memory.mjs';
+import { parseExpressions, personalityContext, decorationChoices, decorate } from './expression.mjs';
 import { ActivityRhythm } from './activity.mjs';
 import { GroupOrientation } from './orientation.mjs';
 
@@ -14,6 +15,7 @@ export class Engine {
     this.config = config; this.store = store; this.provider = provider; this.transport = transport;
     this.now = options.now || (() => Date.now() / 1000); this.log = options.log || (() => {});
     this.random = options.random || Math.random;
+    this.expressionRandom = options.expressionRandom || Math.random;
     this.chats = new Map(); this.running = new Set(); this.controller = new AbortController();
     this.lastError = null; this.lastCycle = 0;
     this.activity = new ActivityRhythm(store, config.agent, options.activityRandom || Math.random);
@@ -118,11 +120,12 @@ export class Engine {
       { excludeIds: history.map(x => x.id), enabled: a.learning.enabled, limit: a.learning.retrievalLimit });
     const chatStyle = context => context.map(scope => ({ subject: scope.subject, traits: scope.traits.map(m => ({ key: m.slot, text: m.text, sources: m.sources })) }));
     const initialMemory = memoryContext();
-    const payload = { persona: a.persona, name: a.name, trigger, addressedHint: hint,
+    const learnedExpressions = () => a.learning.enabled ? this.store.expressions.context(chat,last.sender,query,now,a.expression,a.memory) : [];
+    const payload = { personality: personalityContext(a,this.expressionRandom), expressions: learnedExpressions(), persona: a.persona, name: a.name, trigger, addressedHint: hint,
       groupOrientation: this.orientation.profile(chat),
       chatStyle: chatStyle(initialMemory),
       memoryContext: initialMemory,
-      learning: { requested: learnNow, subjects: initialMemory.map(s => s.subject), currentSpeaker: last.sender },
+      learning: { requested: learnNow, subjects: initialMemory.map(s => s.subject), currentSpeaker: last.sender, learnExpressions: a.expression.learn },
       history: history.map(x => ({ id: x.id, sender: x.sender, self: !!x.self, timestamp: x.ts, speaker: x.self ? a.name : x.name, text: x.text })),
       memories: retrieve(),
       retainedIdeas: this.store.reservoir(chat, now, a.thoughtTtlSeconds, a.thoughtLimit, last.sender),
@@ -133,11 +136,13 @@ export class Engine {
     if (obsolete() || !this.available(this.now())) return;
     if (learnNow && formed.learning !== undefined) {
       try {
-        const updates = parseMemoryUpdates(formed.learning.layers, history, chat, last.sender, a.memory);
-        if (this.store.learn(chat, { style: null, memories: [], forgetIds: [] }, now, last.id, a.learning, profile.epoch, { updates, settings: a.memory })) {
+        const updates = parseMemoryUpdates(formed.learning.layers ?? [], history, chat, last.sender, a.memory);
+        const expressions = a.expression.learn ? parseExpressions(formed.learning.expressions ?? [],history,chat,last.sender) : [];
+        if (this.store.learn(chat, { style: null, memories: [], forgetIds: [] }, now, last.id, a.learning, profile.epoch, { updates, settings: a.memory, expressions, expressionSettings: a.expression })) {
           payload.memoryContext = memoryContext();
           payload.chatStyle = chatStyle(payload.memoryContext);
           payload.memories = retrieve();
+          payload.expressions = learnedExpressions();
           this.log('chat_learning_updated', { chat, updates: updates.length });
         }
       } catch { this.log('chat_learning_rejected', { chat }); }
@@ -191,7 +196,8 @@ export class Engine {
         this.finish(state, chat, id, version, trigger, true); return;
       }
     }
-    const response = await this.provider.json(articulationFor(a.replyLanguage), { persona: a.persona, name: a.name,
+    const decorations = decorationChoices(this.store,chat,this.now(),a.emoji,this.expressionRandom);
+    const response = await this.provider.json(articulationFor(a.replyLanguage), { personality: payload.personality, expressions: payload.expressions, decorations, persona: a.persona, name: a.name,
       history: payload.history, groupOrientation: payload.groupOrientation, chatStyle: payload.chatStyle, memories: payload.memories, memoryContext: payload.memoryContext, selectedIdea: selected.text, responsePlan: prediction,
       priorExpectation: payload.priorExpectation, assertiveTone: a.proactiveTone, maxCharacters: a.maxOutputChars }, signal).catch(error => {
         this.store.assessmentStatus(chat, id, 'generation_failed'); throw error;
@@ -200,7 +206,7 @@ export class Engine {
       this.store.assessmentStatus(chat, id, 'generation_failed');
       throw Object.assign(Error('Invalid articulation'), { code: 'invalid_articulation' });
     }
-    const text = [...response.text.trim()].slice(0, a.maxOutputChars).join('');
+    const { text, faceId, decorated } = decorate(response,decorations,a.maxOutputChars);
     if (obsolete() || this.now() - state.lastHuman > a.activeWindowSeconds || !this.available(this.now())) {
       this.store.assessmentStatus(chat, id, 'cancelled'); return;
     }
@@ -223,8 +229,10 @@ export class Engine {
     this.store.use(selected.id);
     this.finish(state, chat, id, version, trigger, true);
     try {
-      const sent = await this.transport.send(chat, text);
+      const sent = await this.transport.send(chat, text, faceId);
       this.store.finishDelivery(deliveryId, 'sent', sent?.message_id);
+      this.store.expressions.used(chat,payload.expressions,text,this.now());
+      if (decorated) this.store.db.prepare('INSERT OR REPLACE INTO decoration_usage VALUES(?,?)').run(chat,this.now());
       this.store.assessmentStatus(chat, id, 'sent');
       if (prediction) this.store.expect(chat, this.now(), a.sending.expectationSeconds, prediction);
       this.store.message({ chat, id: String(sent?.message_id ?? deliveryId), sender: this.transport.selfId, name: a.name, text, ts: this.now(), self: true });

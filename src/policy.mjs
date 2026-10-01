@@ -37,14 +37,15 @@ export function normalize(event, selfId, a, now) {
         if (String(seg.data?.qq) === selfId) atSelf = true;
         else if (String(seg.data?.qq) !== 'all') atOther = true;
         text += ` [@${String(seg.data?.qq || '')}] `;
-      } else if (seg.type === 'reply') text += ' [reply] ';
+      } else if (seg.type === 'face' && /^\d{1,5}$/.test(String(seg.data?.id))) text += ` [QQface:${seg.data.id}] `;
+      else if (seg.type === 'reply') text += ' [reply] ';
       else text += ` [${String(seg.type || 'attachment').slice(0, 24)}] `;
     }
   } else if (typeof event.message === 'string') {
     text = event.message.replace(/\[CQ:at,qq=(\d+|all)(?:,[^\]]*)?\]/g, (_, id) => {
       if (id === selfId) atSelf = true; else if (id !== 'all') atOther = true;
       return ` [@${id}] `;
-    }).replace(/\[CQ:[^\]]+\]/g, '[attachment]');
+    }).replace(/\[CQ:face,id=(\d{1,5})\]/g, '[QQface:$1]').replace(/\[CQ:[^\]]+\]/g, '[attachment]');
     text = cqDecode(text);
   }
   text = text.trim().slice(0, a.maxInputChars);

@@ -9,6 +9,9 @@ export const defaults = {
   onebot: { url: 'ws://127.0.0.1:3001/', selfId: '', heartbeatSeconds: 30,
     requestTimeoutSeconds: 12, reconnectMaxSeconds: 60 },
   agent: { name: 'Luma', persona: '你是 QQ 聊天中善于接话、抛出话题、带动轻松交流的 AI 伙伴。先接住对方的情绪和话头，再给出一个容易接下去的回应。可以分享贴合上下文的观察、轻巧联想、适度玩笑，或一个具体且低负担的问题；不要每句话都追问，也不要把闲聊变成客服答疑或长篇讲课。话题自然结束时，可以从共同兴趣或未完的话题轻轻开启新方向，但冷场不必硬救。气氛热闹时给别人空间，有人认真求助或表达难过时先认真回应。逐渐适应每个聊天的用语、节奏和兴趣，尊重明确反馈，不把一个人的偏好当成所有人的偏好。表达自然、有温度，不编造亲身经历，不冒充真人。', replyLanguage: 'auto',
+    personality: { behavior: '先听懂当前话题，再决定接话、补充、提问或安静旁观。认真求助优先，不强行热场。', replyStyle: '自然、简洁、口语化，一次接住一个重点。避免客服式开场、机械复述、连续追问和过度比喻。', interests: [], variants: [], variantProbability: 0 },
+    expression: { learn: true, useLearned: true, minConfidence: 0.8, maxPerReply: 2, maxEntries: 100, retentionDays: 90, reuseSeconds: 1800 },
+    emoji: { enabled: true, probability: 0.15, cooldownSeconds: 600, symbols: ['🙂','😂','🤔','👍'], faceIds: [] },
     learning: { enabled: true, minMessages: 8, intervalSeconds: 300, maxMemories: 100, memoryDays: 30, retrievalLimit: 6 },
     observation: { enabled: true, minSeconds: 300, minMessages: 20, thresholdMode: 'both', historyLimit: 30 },
     memory: { recallChars: 2400, recallHalfLifeDays: 30, minConfidence: 0.35, revisionLimit: 3, shortHours: 72, shortLimit: 40, shortChars: 1000, longChars: 1800, traitChars: 900, longDays: 365, traitDays: 180, maxPeople: 200 },
@@ -43,6 +46,14 @@ export function validate(c) {
   if (c.agent.persona === 'You are a thoughtful AI participant in a QQ conversation. Be helpful, concise, curious, and honest. Match the language and tone of the conversation. Never invent personal experiences or claim to be human.') c.agent.persona = defaults.agent.persona;
   if (!['zh-CN', 'en'].includes(c.ui.language)) throw Error('Invalid interface language');
   if (!['auto', 'zh-CN', 'en'].includes(c.agent.replyLanguage)) throw Error('Invalid reply language');
+  const { personality, expression, emoji } = c.agent;
+  if (!personality || !expression || !emoji) throw Error('Invalid expression settings');
+  for (const key of ['behavior','replyStyle']) if (typeof personality[key] !== 'string' || personality[key].length > 2000) throw Error(`Invalid personality.${key}`);
+  for (const [list,max,length] of [[personality.interests,20,80],[personality.variants,8,500],[emoji.symbols,30,24],[emoji.faceIds,30,5]]) if (!Array.isArray(list) || list.length>max || list.some(x=>typeof x!=='string'||!x.trim()||x.length>length)) throw Error('Invalid expression list');
+  if (emoji.faceIds.some(x=>!/^\d{1,5}$/.test(x))) throw Error('Invalid QQ face ID');
+  for (const v of [expression.learn,expression.useLearned,emoji.enabled]) if(typeof v!=='boolean') throw Error('Invalid expression switch');
+  for (const v of [personality.variantProbability,expression.minConfidence,emoji.probability]) if(typeof v!=='number'||!Number.isFinite(v)||v<0||v>1) throw Error('Invalid expression probability');
+  for (const [v,min,max] of [[expression.maxPerReply,1,5],[expression.maxEntries,1,500],[expression.retentionDays,1,3650],[expression.reuseSeconds,0,86400],[emoji.cooldownSeconds,0,86400]]) if(!Number.isInteger(v)||v<min||v>max) throw Error('Invalid expression limit');
   const schedule = c.agent.schedule;
   const rhythm = c.agent.rhythm;
   if (!rhythm || typeof rhythm.enabled !== 'boolean') throw Error('Invalid activity rhythm');

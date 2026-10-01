@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { rankMemories } from './memory-ranking.mjs';
+import { ExpressionMemory } from './expression.mjs';
 import { LayeredMemory } from './memory.mjs';
 
 export function terms(text) {
@@ -34,6 +35,7 @@ export class Store {
       CREATE INDEX IF NOT EXISTS deliveries_chat_ts ON deliveries(chat,ts);
       CREATE INDEX IF NOT EXISTS thoughts_chat ON thoughts(chat,created);`);
     this.memory = new LayeredMemory(this.db);
+    this.expressions = new ExpressionMemory(this.db);
     if (!this.db.prepare('PRAGMA table_info(thoughts)').all().some(c => c.name === 'subject')) this.db.exec('ALTER TABLE thoughts ADD COLUMN subject TEXT');
   }
   recoverDeliveries() { this.db.exec("UPDATE deliveries SET status='uncertain' WHERE status='pending'"); }
@@ -68,6 +70,7 @@ export class Store {
       const old = this.learningState(chat);
       if (old.epoch !== epoch) { this.db.exec('ROLLBACK'); return false; }
       if (layered) this.memory.apply(chat, layered.updates, now, layered.settings);
+      if (layered?.expressions) this.expressions.apply(chat, layered.expressions, now, layered.expressionSettings);
       this.db.prepare('INSERT INTO chat_learning VALUES(?,?,?,?,?,?) ON CONFLICT(chat) DO UPDATE SET style=excluded.style,sources=excluded.sources,updated=excluded.updated,last_id=excluded.last_id').run(chat, update.style?.text ?? old.style, update.style ? JSON.stringify(update.style.sources) : old.sources, now, lastId, epoch);
       for (const id of update.forgetIds) this.db.prepare('DELETE FROM learned_memories WHERE chat=? AND id=?').run(chat, id);
       for (const memory of update.memories) {
@@ -85,6 +88,7 @@ export class Store {
       this.db.prepare("INSERT INTO chat_learning VALUES(?,'','[]',?,?,1) ON CONFLICT(chat) DO UPDATE SET style='',sources='[]',updated=excluded.updated,last_id=excluded.last_id,epoch=epoch+1").run(chat, now, last);
       this.db.prepare('DELETE FROM learned_memories WHERE chat=?').run(chat);
       this.memory.reset(chat, subject);
+      this.expressions.reset(chat, subject);
       this.db.exec('COMMIT');
     } catch (e) { this.db.exec('ROLLBACK'); throw e; }
   }

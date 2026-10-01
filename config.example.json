@@ -79,6 +79,34 @@
       "recallHalfLifeDays": 30,
       "minConfidence": 0.35,
       "revisionLimit": 3
+    },
+    "personality": {
+      "behavior": "先听懂当前话题，再决定接话、补充、提问或安静旁观。认真求助优先，不强行热场。",
+      "replyStyle": "自然、简洁、口语化，一次接住一个重点。避免客服式开场、机械复述、连续追问和过度比喻。",
+      "interests": [],
+      "variants": [],
+      "variantProbability": 0
+    },
+    "expression": {
+      "learn": true,
+      "useLearned": true,
+      "minConfidence": 0.8,
+      "maxPerReply": 2,
+      "maxEntries": 100,
+      "retentionDays": 90,
+      "reuseSeconds": 1800
+    },
+    "emoji": {
+      "enabled": true,
+      "probability": 0.15,
+      "cooldownSeconds": 600,
+      "symbols": [
+        "🙂",
+        "😂",
+        "🤔",
+        "👍"
+      ],
+      "faceIds": []
     }
   },
   "storage": {

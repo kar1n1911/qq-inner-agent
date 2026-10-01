@@ -28,7 +28,7 @@ function populate(data) {
   for (const input of document.querySelectorAll('[data-config]')) {
     const value = get(data.config, input.dataset.config);
     if (input.type === 'checkbox') input.checked = value;
-    else input.value = input.dataset.type === 'ids' ? value.join(', ') : value;
+    else input.value = input.dataset.type === 'ids' ? value.join(', ') : input.dataset.type === 'lines' ? value.join('\n') : value;
   }
   const q = data.config.agent.quietHours;
   $('quiet-enabled').checked = !!q; $('quiet-start').value = q?.start ?? 23;
@@ -43,7 +43,7 @@ function formConfig() {
   if ($('use-advanced').checked) return JSON.parse($('advanced-json').value);
   const c = structuredClone(saved.config);
   for (const input of document.querySelectorAll('[data-config]')) {
-    let value = input.type === 'checkbox' ? input.checked : input.dataset.type === 'ids' ? ids(input.value) : ['number', 'range'].includes(input.type) ? Number(input.value) : input.value;
+    let value = input.type === 'checkbox' ? input.checked : input.dataset.type === 'lines' ? input.value.split('\n').map(x=>x.trim()).filter(Boolean) : input.dataset.type === 'ids' ? ids(input.value) : ['number', 'range'].includes(input.type) ? Number(input.value) : input.value;
     set(c, input.dataset.config, value);
   }
   if (c.agent.name !== saved.config.agent.name) c.agent.aliases = [...new Set([c.agent.name, ...c.agent.aliases])];
@@ -138,6 +138,15 @@ async function refresh() {
       $('learning-list').append(box);
       }
     }
+    }
+    $('expression-list').replaceChildren();
+    if (!state.expressions?.length) $('expression-list').append(element('p', translate('No learned expressions yet.'), 'empty'));
+    for (const r of state.expressions || []) {
+      const row = element('article', null, 'thought');
+      row.append(element('h3', `${r.chat} · ${r.subject} · ${translate(r.kind)}: ${r.term}`), element('p', r.meaning), element('p', `${translate('Applicable situation')}: ${r.situation}`), element('p', `${translate('Observed example')}: ${r.example}`), element('small', `${translate('Confidence')}: ${r.confidence} · ${translate('Evidence messages')}: ${JSON.parse(r.sources).length}`));
+      const reset = element('button', translate('Reset this subject’s learning'), 'secondary');
+      reset.addEventListener('click', async () => { reset.disabled=true; try { await api('/api/learning/reset',{method:'POST',body:JSON.stringify({chat:r.chat,subject:r.subject})}); await refresh(); } catch(e) {notice(e.message,true);reset.disabled=false;} });
+      row.append(reset); $('expression-list').append(row);
     }
     $('thought-list').replaceChildren();
     if (!state.thoughts.length) $('thought-list').append(element('p', 'No retained ideas yet. Ideas that are withheld can remain here for later reevaluation.', 'empty'));

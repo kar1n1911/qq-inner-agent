@@ -58,7 +58,7 @@ function status() {
 }
 const tick = setInterval(() => { if (!reloading && !shuttingDown) engine.tick(); }, 1000);
 const report = setInterval(status, 5000);
-const prune = () => { store.prune(Date.now() / 1000, config.storage.retentionDays, config.storage.maxMessagesPerChat); store.memory.configure(Date.now() / 1000, config.agent.memory); };
+const prune = () => { store.prune(Date.now() / 1000, config.storage.retentionDays, config.storage.maxMessagesPerChat); store.memory.configure(Date.now() / 1000, config.agent.memory); store.expressions.prune(Date.now()/1000,config.agent.expression); };
 prune(); const cleanup = setInterval(prune, 3600_000);
 status();
 let stopResolve;
@@ -81,7 +81,7 @@ const watcher = setInterval(() => {
       const chats = engine.chats;
       if (reconnect) { abort.abort(); await connection; if (shuttingDown) return; abort = new AbortController(); bot = new OneBot(next.onebot, next.onebotToken); }
       config = next; provider = new Provider(config.provider, config.apiKey, store);
-      store.memory.configure(Date.now() / 1000, config.agent.memory);
+      store.memory.configure(Date.now() / 1000, config.agent.memory); store.expressions.prune(Date.now()/1000,config.agent.expression);
       engine = new Engine(config, store, provider, bot, { log });
       for (const [chat, state] of chats) if (allowed(chat, config.agent)) engine.chats.set(chat, { ...state, busy: false, lastThink: 0 });
       if (reconnect) connect();

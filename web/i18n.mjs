@@ -1,6 +1,35 @@
 // Only application-owned UI text is translated. Chat contents, model IDs, logs,
 // configuration editors and other user-provided values remain untouched.
 const pairs = `
+Participation principles|参与行为准则
+Base reply style|基础回复风格
+Interests (one per line)|兴趣方向（每行一项）
+Alternative styles (one per line)|备用表达风格（每行一项）
+Alternative style probability|临时采用备用风格的概率
+Expressions, jargon & emoji|表达、黑话与表情
+Learn expressions and jargon|学习当前聊天的表达和黑话
+Use learned expressions and jargon|使用已学习的表达和黑话
+Allow optional emoji decorations|允许可选表情装饰
+Minimum expression confidence|表达最低可信度
+Expression candidates per reply|每轮参考表达数
+Expression entries per chat|每个聊天的表达条目上限
+Expression retention (days)|表达保留时间（天）
+Expression reuse interval (seconds)|相同表达复用间隔（秒）
+Emoji opportunity probability|本轮允许表情的概率
+Emoji interval (seconds)|表情使用间隔（秒）
+Text emoji (one per line)|文字表情（每行一个）
+Allowed QQ face IDs|允许的 QQ 原生表情编号
+Learned expressions & jargon|已学习的表达与黑话
+No learned expressions yet.|暂无已学习表达。
+Applicable situation|适用场景
+Observed example|原话示例
+Confidence|可信度
+Evidence messages|证据消息数
+Reset this subject’s learning|重置此主体的记忆与表达
+jargon|黑话
+expression|表达习惯
+Learn only from attributed messages in this chat. At least two messages are needed before use; group patterns also require two speakers. Learning follows the memory cadence and master switch. Images and stickers are not collected.|只从当前聊天中来源明确的消息学习。至少两条证据才可使用；群体表达还需两位发言人。学习遵守记忆总开关与学习间隔。不自动收集图片或表情包。
+
 Memory recall character budget|记忆召回字数上限
 Recall recency half-life (days)|召回时效半衰期（天）
 Minimum memory confidence|记忆最低可信度
@@ -70,9 +99,9 @@ Memories per chat|每个聊天的记忆上限
 Memory lifetime (days)|记忆保留天数
 Retrieved memories per turn|每轮检索条数
 Learned chat styles & memories|已学习的聊天风格与记忆
-Shows up to 200 entries, with notebooks and traits first, separated by chat and subject. Reset clears only that subject. Original chat history remains; disable learning to stop memory use and updates.|展示最多200条当前记忆，优先展示长期与特征层，按聊天和主体分开。重置只清除此主体的三层记忆，原始聊天记录保留；关闭学习可停止写入和使用记忆。
+Shows up to 200 entries, with notebooks and traits first, separated by chat and subject. Reset clears only that subject. Original chat history remains; disable learning to stop memory use and updates.|展示最多200条当前记忆，优先展示长期与特征层，按聊天和主体分开。重置清除此主体的三层记忆和表达黑话，原始聊天记录保留；关闭学习可停止写入和使用记忆。
 No learned chat preferences yet.|暂无已学习的聊天偏好。
-Reset learned style and memories|重置此主体的三层记忆
+Reset learned style and memories|重置此主体的记忆与表达
 Learned style and memories reset.|已重置学习风格与记忆。
 No learned style yet.|暂无已学习的风格。
 Style sources|风格依据

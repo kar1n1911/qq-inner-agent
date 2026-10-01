@@ -47,7 +47,7 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
   function snapshot() {
     const c = loadConfig(root), file = path.join(c.dataDir, 'agent.sqlite');
     const status = readJson(path.join(c.dataDir, 'status.json'), null);
-    let decisions = [], thoughts = [], assessments = [], learning = [], memories = [], observations = [];
+    let decisions = [], thoughts = [], assessments = [], learning = [], memories = [], observations = [], expressions = [];
     if (fs.existsSync(file)) {
       let db;
       try {
@@ -57,12 +57,13 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
         assessments = db.prepare('SELECT chat,ts,status,details FROM send_assessments ORDER BY ts DESC LIMIT 12').all().map(r => ({ ...r, details: JSON.parse(r.details) }));
         memories = db.prepare("SELECT * FROM memory_layers WHERE expires>? ORDER BY CASE layer WHEN 'long_term' THEN 0 WHEN 'traits' THEN 1 ELSE 2 END,updated DESC LIMIT 200").all(Date.now()/1000);
         if (db.prepare("SELECT name FROM sqlite_master WHERE name='memory_revisions'").get()) for (const m of memories) m.revisions = db.prepare('SELECT revision,text,sources,updated,replaced FROM memory_revisions WHERE memory_id=? ORDER BY revision DESC LIMIT 10').all(m.id);
+        if (db.prepare("SELECT name FROM sqlite_master WHERE name='expressions'").get()) expressions = db.prepare('SELECT * FROM expressions WHERE updated>? ORDER BY updated DESC LIMIT 200').all(Date.now()/1000-c.agent.expression.retentionDays*86400);
         learning = [...new Set(memories.map(m => m.chat))].map(chat => ({ chat }));
         if (db.prepare("SELECT name FROM sqlite_master WHERE name='group_orientation'").get()) observations = db.prepare('SELECT chat,started,message_count,status,sources,analysis,retry_at,error FROM group_orientation ORDER BY started DESC LIMIT 100').all().map(r => ({ ...r, sources: JSON.parse(r.sources), analysis: JSON.parse(r.analysis) }));
       } catch { /* database may be opening for the first time */ }
       finally { db?.close(); }
     }
-    const data = { status, decisions, thoughts, assessments, learning, memories, observations, logs: tail(path.join(c.dataDir, 'agent.log')), savedRevision: publicSettings(root).revision };
+    const data = { status, decisions, thoughts, assessments, learning, memories, observations, expressions, logs: tail(path.join(c.dataDir, 'agent.log')), savedRevision: publicSettings(root).revision };
     let text = JSON.stringify(data);
     for (const secret of [c.apiKey, c.onebotToken, key].filter(Boolean)) text = text.split(secret).join('[redacted]');
     return JSON.parse(text);
