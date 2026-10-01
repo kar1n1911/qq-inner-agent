@@ -106,19 +106,24 @@ async function refresh() {
     $('learning-list').replaceChildren();
     if (!state.learning?.length) $('learning-list').append(element('p', 'No learned chat preferences yet.', 'empty'));
     for (const profile of state.learning || []) {
+      const chatMemories = (state.memories || []).filter(m => m.chat === profile.chat);
+      for (const subject of [...new Set(chatMemories.map(m => m.subject))]) {
       const box = element('article', null, 'thought'), reset = element('button', translate('Reset learned style and memories'), 'secondary');
       reset.type = 'button';
       reset.addEventListener('click', async () => {
         reset.disabled = true;
-        try { await api('/api/learning/reset', { method: 'POST', body: JSON.stringify({ chat: profile.chat }) }); notice('Learned style and memories reset.'); await refresh(); }
+        try { await api('/api/learning/reset', { method: 'POST', body: JSON.stringify({ chat: profile.chat, subject }) }); notice('Learned style and memories reset.'); await refresh(); }
         catch (e) { notice(e.message, true); reset.disabled = false; }
       });
-      box.append(element('h3', profile.chat), element('p', profile.style || translate('No learned style yet.')), reset);
-      const sources = element('details'); sources.append(element('summary', translate('Style sources')), element('pre', profile.sources)); box.append(sources);
-      for (const memory of (state.memories || []).filter(m => m.chat === profile.chat)) {
-        const item = element('details'); item.append(element('summary', memory.text), element('pre', JSON.stringify({ sources: JSON.parse(memory.sources), created: new Date(memory.created * 1000).toISOString(), expires: new Date(memory.expires * 1000).toISOString() }, null, 2))); box.append(item);
+      box.append(element('h3', `${profile.chat} · ${subject === 'group' ? translate('Group memory') : subject}`), reset);
+      for (const layer of ['long_term', 'short_term', 'traits']) {
+        box.append(element('h4', translate({ long_term: 'Long-term notebook', short_term: 'Short-term details', traits: 'Traits and topics' }[layer])));
+        for (const memory of chatMemories.filter(m => m.subject === subject && m.layer === layer)) {
+          const item = element('details'); item.append(element('summary', `${layer === 'short_term' ? '' : memory.slot + ': '}${memory.text}`), element('pre', JSON.stringify({ sources: JSON.parse(memory.sources), importance: memory.importance, revision: memory.revision, updated: new Date(memory.updated * 1000).toISOString(), expires: new Date(memory.expires * 1000).toISOString() }, null, 2))); box.append(item);
+        }
       }
       $('learning-list').append(box);
+      }
     }
     }
     $('thought-list').replaceChildren();

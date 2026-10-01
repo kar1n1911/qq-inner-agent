@@ -10,6 +10,7 @@ export const defaults = {
     requestTimeoutSeconds: 12, reconnectMaxSeconds: 60 },
   agent: { name: 'Luma', persona: '你是 QQ 聊天中善于接话、抛出话题、带动轻松交流的 AI 伙伴。先接住对方的情绪和话头，再给出一个容易接下去的回应。可以分享贴合上下文的观察、轻巧联想、适度玩笑，或一个具体且低负担的问题；不要每句话都追问，也不要把闲聊变成客服答疑或长篇讲课。话题自然结束时，可以从共同兴趣或未完的话题轻轻开启新方向，但冷场不必硬救。气氛热闹时给别人空间，有人认真求助或表达难过时先认真回应。逐渐适应每个聊天的用语、节奏和兴趣，尊重明确反馈，不把一个人的偏好当成所有人的偏好。表达自然、有温度，不编造亲身经历，不冒充真人。', replyLanguage: 'auto',
     learning: { enabled: true, minMessages: 8, intervalSeconds: 300, maxMemories: 100, memoryDays: 30, retrievalLimit: 6 },
+    memory: { shortHours: 72, shortLimit: 40, shortChars: 1000, longChars: 1800, traitChars: 900, longDays: 365, traitDays: 180, maxPeople: 200 },
     aliases: ['Luma'], allowedGroups: [], allowedUsers: [], ignoredUsers: [],
     proactive: true, dryRun: false, threshold: 4.09, interruptThreshold: 4.8,
     sending: { enabled: true, proactiveProbability: 0.8, addressedProbability: 1,
@@ -40,6 +41,10 @@ export function validate(c) {
   if (!['zh-CN', 'en'].includes(c.ui.language)) throw Error('Invalid interface language');
   if (!['auto', 'zh-CN', 'en'].includes(c.agent.replyLanguage)) throw Error('Invalid reply language');
   const schedule = c.agent.schedule;
+  if (!c.agent.memory || typeof c.agent.memory !== 'object') throw Error('Invalid memory settings');
+  for (const [key, min, max] of [['shortHours',1,720], ['shortLimit',1,200], ['shortChars',100,2000], ['longChars',200,8000], ['traitChars',100,4000], ['longDays',1,3650], ['traitDays',1,3650], ['maxPeople',1,1000]]) {
+    if (!Number.isInteger(c.agent.memory[key]) || c.agent.memory[key] < min || c.agent.memory[key] > max) throw Error(`Invalid memory.${key}: expected ${min}..${max}`);
+  }
   if (!c.agent.learning || typeof c.agent.learning.enabled !== 'boolean') throw Error('Invalid learning settings');
   for (const key of ['minMessages', 'intervalSeconds', 'maxMemories', 'memoryDays', 'retrievalLimit']) if (!Number.isInteger(c.agent.learning[key])) throw Error(`Invalid learning.${key}: expected integer`);
   if (!c.agent.sending || typeof c.agent.sending.enabled !== 'boolean') throw Error('Invalid sending policy');

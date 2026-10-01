@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
+import { LayeredMemory } from './memory.mjs';
 
 export function terms(text) {
   const t = String(text).toLowerCase();
@@ -31,6 +32,8 @@ export class Store {
       CREATE INDEX IF NOT EXISTS messages_chat_ts ON messages(chat,ts);
       CREATE INDEX IF NOT EXISTS deliveries_chat_ts ON deliveries(chat,ts);
       CREATE INDEX IF NOT EXISTS thoughts_chat ON thoughts(chat,created);`);
+    this.memory = new LayeredMemory(this.db);
+    if (!this.db.prepare('PRAGMA table_info(thoughts)').all().some(c => c.name === 'subject')) this.db.exec('ALTER TABLE thoughts ADD COLUMN subject TEXT');
   }
   recoverDeliveries() { this.db.exec("UPDATE deliveries SET status='uncertain' WHERE status='pending'"); }
   close() { this.db.close(); }
@@ -50,11 +53,20 @@ export class Store {
   learningState(chat) {
     return this.db.prepare('SELECT * FROM chat_learning WHERE chat=?').get(chat) || { style: '', sources: '[]', updated: 0, last_id: '', epoch: 0 };
   }
-  learn(chat, update, now, lastId, settings, epoch) {
+  retrieveScoped(chat, sender, query, now, settings, options = {}) {
+    const scope = chat.startsWith('group:') ? 'group' : `person:${sender}`;
+    const notes = this.db.prepare('SELECT id,text,created AS updated FROM notes WHERE chat=? ORDER BY created DESC LIMIT 50').all(chat)
+      .map(n => ({ ...n, subject: scope, layer: 'owner_note', sources: [] }));
+    const short = options.enabled === false ? [] : this.memory.short(chat, sender, now, settings, options.excludeIds);
+    return [...notes, ...short].map(m => ({ ...m, saliency: similarity(query, m.text) * Math.exp(-Math.max(0, now - m.updated) / 604800) + (m.layer === 'owner_note' ? 0.15 : 0) }))
+      .filter(m => m.saliency > 0.12).sort((a, b) => b.saliency - a.saliency).slice(0, options.limit ?? 6);
+  }
+  learn(chat, update, now, lastId, settings, epoch, layered = null) {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const old = this.learningState(chat);
       if (old.epoch !== epoch) { this.db.exec('ROLLBACK'); return false; }
+      if (layered) this.memory.apply(chat, layered.updates, now, layered.settings);
       this.db.prepare('INSERT INTO chat_learning VALUES(?,?,?,?,?,?) ON CONFLICT(chat) DO UPDATE SET style=excluded.style,sources=excluded.sources,updated=excluded.updated,last_id=excluded.last_id').run(chat, update.style?.text ?? old.style, update.style ? JSON.stringify(update.style.sources) : old.sources, now, lastId, epoch);
       for (const id of update.forgetIds) this.db.prepare('DELETE FROM learned_memories WHERE chat=? AND id=?').run(chat, id);
       for (const memory of update.memories) {
@@ -65,22 +77,24 @@ export class Store {
       this.db.exec('COMMIT'); return true;
     } catch (e) { this.db.exec('ROLLBACK'); throw e; }
   }
-  resetLearning(chat, now) {
+  resetLearning(chat, now, subject = null) {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const last = this.history(chat, 100).filter(m => !m.self).at(-1)?.id || '';
       this.db.prepare("INSERT INTO chat_learning VALUES(?,'','[]',?,?,1) ON CONFLICT(chat) DO UPDATE SET style='',sources='[]',updated=excluded.updated,last_id=excluded.last_id,epoch=epoch+1").run(chat, now, last);
       this.db.prepare('DELETE FROM learned_memories WHERE chat=?').run(chat);
+      this.memory.reset(chat, subject);
       this.db.exec('COMMIT');
     } catch (e) { this.db.exec('ROLLBACK'); throw e; }
   }
   note(chat, text, now) { this.db.prepare('INSERT INTO notes VALUES(?,?,?,?)').run(randomUUID(), chat, text, now); }
-  reservoir(chat, now, ttl, limit) {
-    return this.db.prepare('SELECT * FROM thoughts WHERE chat=? AND used=0 AND created>? ORDER BY created DESC LIMIT ?').all(chat, now - ttl, limit);
+  reservoir(chat, now, ttl, limit, subject = null) {
+    return subject === null ? this.db.prepare('SELECT * FROM thoughts WHERE chat=? AND used=0 AND created>? ORDER BY created DESC LIMIT ?').all(chat, now - ttl, limit)
+      : this.db.prepare('SELECT * FROM thoughts WHERE chat=? AND subject=? AND used=0 AND created>? ORDER BY created DESC LIMIT ?').all(chat, subject, now - ttl, limit);
   }
   addThought(chat, thought, now) {
     const item = { id: randomUUID(), chat, text: thought.text, kind: thought.kind, created: now };
-    this.db.prepare('INSERT INTO thoughts(id,chat,text,kind,created) VALUES(?,?,?,?,?)').run(item.id, chat, item.text, item.kind, now);
+    this.db.prepare('INSERT INTO thoughts(id,chat,text,kind,created,subject) VALUES(?,?,?,?,?,?)').run(item.id, chat, item.text, item.kind, now, thought.subject ?? null);
     return item;
   }
   score(id, score) { this.db.prepare('UPDATE thoughts SET score=? WHERE id=?').run(score, id); }
@@ -129,6 +143,8 @@ export class Store {
     }
     this.db.prepare('DELETE FROM thoughts WHERE created<?').run(now - 86400);
     this.db.prepare('DELETE FROM learned_memories WHERE expires<=? OR created<?').run(now, now - retentionDays * 86400);
+    // Notebook/trait retention is independent of raw-message retention.
+    this.db.prepare('DELETE FROM memory_layers WHERE expires<=?').run(now);
     this.db.prepare("UPDATE chat_learning SET style='',sources='[]' WHERE updated<?").run(now - retentionDays * 86400);
     for (const table of ['decisions', 'deliveries', 'send_assessments', 'expectations']) this.db.prepare(`DELETE FROM ${table} WHERE ts<?`).run(now - retentionDays * 86400);
     this.db.exec('DELETE FROM handled WHERE chat NOT IN (SELECT DISTINCT chat FROM messages)');

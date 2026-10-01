@@ -15,7 +15,7 @@ function fixture(enabled = true) {
   const c = merge(defaults, { agent: { allowedUsers: ['20'], quietHours: null, sending: { enabled: false }, learning: { enabled, minMessages: 1, intervalSeconds: 30 } } });
   const provider = { json: async (sys, payload) => {
     calls.push({ sys, payload: structuredClone(payload) });
-    if (sys.includes('TASK: FORM')) return { allocation: 'self', candidates: [{ kind: 'system2', text: '聊聊园艺' }], learning: result };
+    if (sys.includes('TASK: FORM')) return { allocation: 'self', candidates: [{ kind: 'system2', text: '聊聊园艺' }], learning: { layers: [{ subject: 'person:20', layer: 'traits', key: '互动风格', operation: 'upsert', text: result.style.text, importance: 0.8, sourceIds: ['1'] }] } };
     if (sys.includes('TASK: EVALUATE')) return { ratings: payload.candidates.map(m => ({ id: m.id, motivation: 5, relevance: 5, originality: 5 })) };
     return { text: '你最近种了什么？' };
   } };
@@ -39,9 +39,9 @@ test('learning updates effective chat style and grounds articulation without an 
   try {
     await f.engine.cycle('private:20');
     assert.equal(f.calls.length, 3); assert.equal(f.calls[0].payload.learning.requested, true);
-    assert.equal(f.calls[2].payload.chatStyle, result.style.text);
-    assert.ok(f.calls[2].payload.memories.some(m => m.type === 'learned_memory'));
-    assert.equal(f.store.learningState('private:20').style, result.style.text);
+    assert.equal(f.calls[2].payload.chatStyle[0].traits[0].text, result.style.text);
+    assert.equal(f.calls[2].payload.memoryContext[0].traits[0].subject, 'person:20');
+    assert.equal(f.store.memory.context('private:20', '20', 1000, f.c.agent.memory)[0].traits[0].text, result.style.text);
     assert.equal(f.store.learningState('private:21').style, '');
   } finally { f.store.close(); }
 });

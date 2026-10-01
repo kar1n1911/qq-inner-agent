@@ -2,7 +2,7 @@ import { readiness } from './config.mjs';
 import { allowed, normalize, quiet, activeAt, select, repeated } from './policy.mjs';
 import { formation, evaluation, articulationFor, forecast } from './prompts.mjs';
 import { forecastResult, sendingProbability } from './sending.mjs';
-import { parseLearning } from './learning.mjs';
+import { parseMemoryUpdates } from './memory.mjs';
 
 const criteria = new Set(['relevance', 'information_gap', 'expected_impact', 'urgency', 'coherence', 'originality', 'balance', 'dynamics']);
 const scoreOk = n => typeof n === 'number' && Number.isFinite(n) && n >= 1 && n <= 5;
@@ -30,6 +30,7 @@ export class Engine {
     if (!m) return;
     const state = this.state(m.chat);
     if (!state || !this.store.message(m)) return;
+    if (a.learning.enabled) this.store.memory.capture(m, now, a.memory);
     this.store.observe(m, now);
     state.version++; state.lastHuman = now; state.lastId = m.id;
     // Keep a direct request pending while later group messages arrive in the same batch.
@@ -95,12 +96,18 @@ export class Engine {
     const newHumans = humans.slice(humans.findLastIndex(x => x.id === profile.last_id) + 1);
     const learnNow = a.learning.enabled && last.id !== profile.last_id && newHumans.length >= a.learning.minMessages && now - profile.updated >= a.learning.intervalSeconds;
     const query = humans.slice(-3).map(x => x.text).join(' ');
+    const memoryContext = () => a.learning.enabled ? this.store.memory.context(chat, last.sender, now, a.memory) : [];
+    const retrieve = () => this.store.retrieveScoped(chat, last.sender, query, now, a.memory,
+      { excludeIds: history.map(x => x.id), enabled: a.learning.enabled, limit: a.learning.retrievalLimit });
+    const chatStyle = context => context.map(scope => ({ subject: scope.subject, traits: scope.traits.map(m => ({ key: m.slot, text: m.text, sources: m.sources })) }));
+    const initialMemory = memoryContext();
     const payload = { persona: a.persona, name: a.name, trigger, addressedHint: hint,
-      chatStyle: a.learning.enabled ? profile.style : '',
-      learning: { requested: learnNow },
+      chatStyle: chatStyle(initialMemory),
+      memoryContext: initialMemory,
+      learning: { requested: learnNow, subjects: initialMemory.map(s => s.subject), currentSpeaker: last.sender },
       history: history.map(x => ({ id: x.id, sender: x.sender, self: !!x.self, timestamp: x.ts, speaker: x.self ? a.name : x.name, text: x.text })),
-      memories: this.store.retrieve(chat, query, now, { excludeIds: history.map(x => x.id), learned: a.learning.enabled, limit: a.learning.retrievalLimit }),
-      retainedIdeas: this.store.reservoir(chat, now, a.thoughtTtlSeconds, a.thoughtLimit),
+      memories: retrieve(),
+      retainedIdeas: this.store.reservoir(chat, now, a.thoughtTtlSeconds, a.thoughtLimit, last.sender),
       priorExpectation: this.store.expectation(chat, now),
     };
     const formed = await this.provider.json(formation, payload, signal);
@@ -108,24 +115,23 @@ export class Engine {
     if (obsolete() || !activeAt(this.now(), a.schedule)) return;
     if (learnNow && formed.learning !== undefined) {
       try {
-        const update = parseLearning(formed.learning, history);
-        const retrievableIds = new Set(payload.memories.filter(m => m.type === 'learned_memory').map(m => m.id));
-        update.forgetIds = update.forgetIds.filter(id => retrievableIds.has(id));
-        if (this.store.learn(chat, update, now, last.id, a.learning, profile.epoch)) {
-          payload.chatStyle = this.store.learningState(chat).style;
-          payload.memories = this.store.retrieve(chat, query, now, { excludeIds: history.map(x => x.id), limit: a.learning.retrievalLimit });
-          this.log('chat_learning_updated', { chat, memories: update.memories.length });
+        const updates = parseMemoryUpdates(formed.learning.layers, history, chat, last.sender, a.memory);
+        if (this.store.learn(chat, { style: null, memories: [], forgetIds: [] }, now, last.id, a.learning, profile.epoch, { updates, settings: a.memory })) {
+          payload.memoryContext = memoryContext();
+          payload.chatStyle = chatStyle(payload.memoryContext);
+          payload.memories = retrieve();
+          this.log('chat_learning_updated', { chat, updates: updates.length });
         }
       } catch { this.log('chat_learning_rejected', { chat }); }
     }
     for (const candidate of formed.candidates.slice(0, 3)) {
       if (!candidate || typeof candidate.text !== 'string' || !candidate.text.trim() || !['system1', 'system2'].includes(candidate.kind)) continue;
-      const thought = { text: candidate.text.trim().slice(0, 300), kind: candidate.kind };
-      const existing = this.store.reservoir(chat, now, a.thoughtTtlSeconds, a.thoughtLimit);
+      const thought = { text: candidate.text.trim().slice(0, 300), kind: candidate.kind, subject: last.sender };
+      const existing = this.store.reservoir(chat, now, a.thoughtTtlSeconds, a.thoughtLimit, last.sender);
       if (!existing.some(x => x.text === thought.text)) this.store.addThought(chat, thought, now);
     }
     if (obsolete() || !activeAt(this.now(), a.schedule)) return; // obsolete context or schedule
-    const candidates = this.store.reservoir(chat, now, a.thoughtTtlSeconds, a.thoughtLimit);
+    const candidates = this.store.reservoir(chat, now, a.thoughtTtlSeconds, a.thoughtLimit, last.sender);
     if (!candidates.length) { this.finish(state, chat, id, version, trigger); return; }
     const result = await this.provider.json(evaluation, { ...payload, retainedIdeas: undefined, candidates,
       recentAgentMessages: counts.total }, signal);
@@ -168,7 +174,7 @@ export class Engine {
       }
     }
     const response = await this.provider.json(articulationFor(a.replyLanguage), { persona: a.persona, name: a.name,
-      history: payload.history, chatStyle: payload.chatStyle, memories: payload.memories, selectedIdea: selected.text, responsePlan: prediction,
+      history: payload.history, chatStyle: payload.chatStyle, memories: payload.memories, memoryContext: payload.memoryContext, selectedIdea: selected.text, responsePlan: prediction,
       priorExpectation: payload.priorExpectation, assertiveTone: a.proactiveTone, maxCharacters: a.maxOutputChars }, signal).catch(error => {
         this.store.assessmentStatus(chat, id, 'generation_failed'); throw error;
       });

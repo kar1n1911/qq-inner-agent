@@ -60,11 +60,13 @@ test('HTTP dashboard authentication, CSRF, validated save, redaction and fixed s
     assert.equal((await request('/api/debug/send', { method: 'POST', headers: noCsrf, body: '{}' })).status, 403);
     assert.equal((await request('/api/debug/receive', { method: 'POST', headers: noCsrf, body: '{}' })).status, 403);
     assert.equal((await request('/api/learning/reset', { method: 'POST', headers: noCsrf, body: '{"chat":"private:20"}' })).status, 403);
+    assert.equal((await request('/api/learning/reset', { method: 'POST', headers, body: '{"chat":"private:20","subject":"person:21"}' })).status, 400);
+    assert.equal((await request('/api/learning/reset', { method: 'POST', headers, body: '{"chat":"private:20","subject":"group"}' })).status, 400);
     const memoryStore = new Store(path.join(root, 'data/agent.sqlite'));
-    memoryStore.learn('private:20', { style: { text: '短句接话', sources: [] }, memories: [{ text: '喜欢园艺', sources: [] }], forgetIds: [] }, Date.now()/1000, '1', defaults.agent.learning, 0);
-    assert.equal((await (await request('/api/state', { headers })).json()).learning[0].style, '短句接话');
+    memoryStore.memory.apply('private:20', [{ subject: 'person:20', layer: 'traits', key: '互动风格', operation: 'upsert', text: '短句接话', importance: 0.8, sources: [] }], Date.now()/1000, defaults.agent.memory);
+    assert.equal((await (await request('/api/state', { headers })).json()).memories[0].text, '短句接话');
     assert.equal((await request('/api/learning/reset', { method: 'POST', headers, body: '{"chat":"private:20"}' })).status, 200);
-    assert.equal(memoryStore.learningState('private:20').style, ''); memoryStore.close();
+    assert.equal(memoryStore.memory.context('private:20', '20', Date.now()/1000, defaults.agent.memory)[0].traits.length, 0); memoryStore.close();
     assert.equal((await (await request('/api/debug/receive', { headers })).json()).state, 'idle');
     assert.equal((await request('/api/debug/stop', { method: 'POST', headers, body: '{}' })).status, 200);
     assert.equal((await request('/api/config', { method: 'PUT', headers: noCsrf, body: JSON.stringify({ revision: s.revision, config: changed }) })).status, 403);

@@ -54,8 +54,8 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
         decisions = db.prepare('SELECT chat,ts,action,score,tags FROM decisions ORDER BY ts DESC LIMIT 30').all();
         thoughts = db.prepare('SELECT chat,text,kind,score,created FROM thoughts WHERE used=0 AND created>? ORDER BY created DESC LIMIT 12').all(Date.now()/1000 - c.agent.thoughtTtlSeconds);
         assessments = db.prepare('SELECT chat,ts,status,details FROM send_assessments ORDER BY ts DESC LIMIT 12').all().map(r => ({ ...r, details: JSON.parse(r.details) }));
-        learning = db.prepare("SELECT chat,style,sources,updated FROM chat_learning WHERE style<>'' OR chat IN (SELECT chat FROM learned_memories WHERE expires>?) ORDER BY updated DESC LIMIT 50").all(Date.now()/1000);
-        memories = db.prepare('SELECT id,chat,text,sources,created,expires FROM learned_memories WHERE expires>? ORDER BY created DESC LIMIT 100').all(Date.now()/1000);
+        memories = db.prepare("SELECT * FROM memory_layers WHERE expires>? ORDER BY CASE layer WHEN 'long_term' THEN 0 WHEN 'traits' THEN 1 ELSE 2 END,updated DESC LIMIT 200").all(Date.now()/1000);
+        learning = [...new Set(memories.map(m => m.chat))].map(chat => ({ chat }));
       } catch { /* database may be opening for the first time */ }
       finally { db?.close(); }
     }
@@ -135,9 +135,12 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
       if (url.pathname === '/api/learning/reset' && req.method === 'POST') {
         const input = await body(req);
         if (typeof input.chat !== 'string' || !/^(group|private):[1-9]\d{0,19}$/.test(input.chat)) throw fail(400, 'Invalid chat');
+        if (input.subject !== undefined && !(input.subject === 'group' && input.chat.startsWith('group:')) &&
+            !(typeof input.subject === 'string' && /^person:[1-9]\d{0,19}$/.test(input.subject) &&
+              (input.chat.startsWith('group:') || input.subject.slice(7) === input.chat.slice(8)))) throw fail(400, 'Invalid memory subject');
         const c = loadConfig(root); fs.mkdirSync(c.dataDir, { recursive: true, mode: 0o700 });
         const store = new Store(path.join(c.dataDir, 'agent.sqlite'));
-        try { store.resetLearning(input.chat, Date.now()/1000); } finally { store.close(); }
+        try { store.resetLearning(input.chat, Date.now()/1000, input.subject ?? null); } finally { store.close(); }
         json(res, 200, { ok: true }); return;
       }
       if (url.pathname === '/api/service' && req.method === 'POST') {

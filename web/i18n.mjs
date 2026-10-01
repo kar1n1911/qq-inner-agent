@@ -1,18 +1,30 @@
 // Only application-owned UI text is translated. Chat contents, model IDs, logs,
 // configuration editors and other user-provided values remain untouched.
 const pairs = `
+Group memory|群体记忆
+Long-term notebook|长期笔记本
+Short-term details|短期细节
+Traits and topics|特征与主题
+Short-term lifetime (hours)|短期记忆保留小时数
+Short-term entries per scope|每个主体的短期记忆条数
+Characters per short-term entry|每条短期记忆字数
+Notebook capacity (characters)|每个主体的长期笔记本字数
+Trait capacity (characters)|每个主体的特征档案字数
+Long-term lifetime (days)|长期笔记本保留天数
+Trait lifetime (days)|特征档案保留天数
+People retained per chat|每个聊天保留的个人档案数
 Adaptive persona & memory|自适应角色与记忆
 Learn chat style and useful memories|学习聊天风格与有用记忆
-The model updates a separate style for each chat from cited messages. Relevant memories are retrieved locally. Your base persona stays editable and takes priority.|模型根据带来源的消息，为每个聊天更新独立的互动风格。相关记忆在本地检索，你手动设置的基础角色仍可编辑并优先适用。
+Group and personal memory are isolated by chat and QQ ID. Each has a long-term notebook, short-term details and traits. Only the current group and speaker notebooks are loaded.|分别维护群体与个人的长期笔记本、短期细节和特征。群内个人档案按群号与 QQ 号隔离，私聊档案独立；只加载当前群体和当前发言人的笔记本。基础角色保持优先。
 New messages before learning|学习前至少收到的新消息数
 Learning interval (seconds)|学习最短间隔（秒）
 Memories per chat|每个聊天的记忆上限
 Memory lifetime (days)|记忆保留天数
 Retrieved memories per turn|每轮检索条数
 Learned chat styles & memories|已学习的聊天风格与记忆
-Recent learned profiles and memories, with source IDs. Reset removes learned entries; original chat history is retained. Disable learning to stop updates and use of learned entries.|展示近期学习的风格和记忆及其来源 ID。重置会移除学习结果，原始聊天记录保留。关闭学习可停止更新和使用学习结果。
+Shows up to 200 entries, with notebooks and traits first, separated by chat and subject. Reset clears only that subject. Original chat history remains; disable learning to stop memory use and updates.|展示最多200条当前记忆，优先展示长期与特征层，按聊天和主体分开。重置只清除此主体的三层记忆，原始聊天记录保留；关闭学习可停止写入和使用记忆。
 No learned chat preferences yet.|暂无已学习的聊天偏好。
-Reset learned style and memories|重置学习风格与记忆
+Reset learned style and memories|重置此主体的三层记忆
 Learned style and memories reset.|已重置学习风格与记忆。
 No learned style yet.|暂无已学习的风格。
 Style sources|风格依据
