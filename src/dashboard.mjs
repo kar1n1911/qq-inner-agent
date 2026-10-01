@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
+import net from 'node:net';
 import https from 'node:https';
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
 import { execFile } from 'node:child_process';
@@ -65,7 +66,8 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
     for (const secret of [c.apiKey, c.onebotToken, key].filter(Boolean)) text = text.split(secret).join('[redacted]');
     return JSON.parse(text);
   }
-  const handler = async (req, res) => {
+  const clientAddress = (req, peer) => peer?.address || req.socket.remoteAddress;
+  const handler = async (req, res, peer) => {
     const secure = !!req.socket.encrypted;
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -83,7 +85,7 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
       const origin = req.headers.origin;
       if (req.method !== 'GET' && (!origin || !origins.has(origin) || new URL(origin).host !== req.headers.host)) throw fail(403, 'Origin rejected');
       if (url.pathname === '/api/login' && req.method === 'POST') {
-        const ip = req.socket.remoteAddress, now = Date.now();
+        const ip = clientAddress(req, peer), now = Date.now();
         for (const [id, value] of attempts) if (value.until < now) attempts.delete(id);
         const attempt = attempts.get(ip) || { count: 0, until: now + 600_000 };
         if (attempt.count >= 8 || attempts.size > 1000) throw fail(429, 'Too many attempts. Try again in ten minutes.');
@@ -184,8 +186,90 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
   return { handler, snapshot, close: () => diagnostics.stop() };
 }
 
+function redirectToHttps(req, host, knownHosts) {
+  const raw = String(host || "");
+  const authority = knownHosts.has(raw) ? raw.replace(/:\d+$/, "") : null;
+  const path = String(req.url || "/") || "/";
+  const target = `https://${authority || req.socket.localAddress}:${req.socket.localPort}${path}`;
+  const notice = "This dashboard is served over HTTPS. Redirecting to the encrypted address.\n";
+  req.socket.end([
+    "HTTP/1.1 301 Moved Permanently",
+    `Location: ${target}`,
+    "Content-Type: text/plain; charset=utf-8",
+    `Content-Length: ${Buffer.byteLength(notice)}`,
+    "Cache-Control: no-store",
+    "Connection: close",
+    "", notice
+  ].join("\r\n"));
+}
+// Only TLS traffic opens an upstream connection. Its local port identifies the
+// corresponding HTTPS request socket's remote port, including after TLS wrapping.
+export function createHttpsRedirectProxy({ upstreamPort, knownHosts = new Set(), onError = () => {} }) {
+  const peers = new Map(), sockets = new Set();
+  const parsed = http.createServer((req, res) => redirectToHttps(req, req.headers.host, knownHosts));
+  parsed.requestTimeout = 20000; parsed.headersTimeout = 10000; parsed.maxHeadersCount = 50;
+  const server = net.createServer(socket => {
+    sockets.add(socket);
+    let upstream, peerPort, peer;
+    socket.once('close', () => {
+      sockets.delete(socket);
+      upstream?.destroy();
+    });
+    socket.on('error', onError);
+    socket.setTimeout(10000, () => socket.destroy());
+    socket.once('data', chunk => {
+      socket.pause();
+      socket.unshift(chunk);
+      // A TLS ClientHello begins with a handshake record (0x16). Let the HTTP
+      // parser handle all other bytes, including request lines split across packets.
+      if (chunk[0] !== 0x16) {
+        parsed.emit('connection', socket);
+        socket.resume();
+        return;
+      }
+      socket.setTimeout(0);
+      upstream = net.connect(upstreamPort, '127.0.0.1');
+      upstream.on('error', error => { onError(error); socket.destroy(); });
+      upstream.once('close', () => {
+        if (peers.get(peerPort) === peer) peers.delete(peerPort);
+        socket.destroy();
+      });
+      upstream.once('connect', () => {
+        if (socket.destroyed) { upstream.destroy(); return; }
+        peerPort = upstream.localPort;
+        peer = { address: socket.remoteAddress };
+        peers.set(peerPort, peer);
+        socket.pipe(upstream).pipe(socket);
+        socket.resume();
+      });
+    });
+  });
+  let closing;
+  return {
+    server,
+    peerFor: (req, fallback) => req.socket.remoteAddress === '127.0.0.1'
+      ? peers.get(req.socket.remotePort)?.address || fallback : fallback,
+    close: () => closing ||= new Promise(resolve => {
+      server.close(resolve);
+      for (const socket of sockets) socket.destroy();
+    })
+  };
+}
+
+export async function closeDashboardListeners({ redirectProxy, upstream, servers = [] }) {
+  await Promise.all([
+    redirectProxy?.close(),
+    ...[upstream, ...servers].filter(Boolean).map(server => new Promise(resolve => {
+      server.close(resolve);
+      server.closeAllConnections?.();
+    }))
+  ]);
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   process.umask(0o077);
+  const servers = [], applySafety = server => { server.requestTimeout = 20000; server.headersTimeout = 10000; server.maxHeadersCount = 50; };
+  let upstream = null, redirectProxy = null;
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   recoverSettings(root);
   const settings = readJson(path.join(root, 'dashboard.json'));
@@ -193,17 +277,33 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   fs.mkdirSync(path.dirname(keyFile), { recursive: true, mode: 0o700 });
   if (!fs.existsSync(keyFile)) fs.writeFileSync(keyFile, randomBytes(24).toString('base64url') + '\n', { mode: 0o600 });
   const key = fs.readFileSync(keyFile, 'utf8').trim();
-  const { handler, close } = createDashboard({ root, settings, key });
-  const servers = [];
+  const dashboard = createDashboard({ root, settings, key });
+  const handlerFor = getPeer => (req, res) => dashboard.handler(req, res, getPeer(req));
+  const knownHosts = new Set((settings.origins || []).map(origin => new URL(origin).host));
+  const record = error => { if (!error || ['ECONNRESET', 'EPIPE', 'ERR_STREAM_PREMATURE_CLOSE'].includes(error.code)) return; console.error('dashboard socket error:', error.code || error.message); };
   if (settings.tls) {
-    const server = https.createServer({ key: fs.readFileSync(path.resolve(root, settings.tls.key)), cert: fs.readFileSync(path.resolve(root, settings.tls.cert)), minVersion: 'TLSv1.2' }, handler);
-    server.listen(settings.port, settings.host); servers.push(server);
+    const tls = { key: fs.readFileSync(path.resolve(root, settings.tls.key)), cert: fs.readFileSync(path.resolve(root, settings.tls.cert)), minVersion: 'TLSv1.2' };
+    const peerOf = req => ({ address: redirectProxy?.peerFor(req, req.socket.remoteAddress) || req.socket.remoteAddress });
+    upstream = https.createServer(tls, handlerFor(peerOf));
+    applySafety(upstream);
+    upstream.listen(0, '127.0.0.1', () => {
+      if (stopping) { upstream.close(); return; }
+      redirectProxy = createHttpsRedirectProxy({ upstreamPort: upstream.address().port, knownHosts, onError: record });
+      redirectProxy.server.listen(settings.port, settings.host);
+    });
   } else {
     if (!['127.0.0.1', '::1'].includes(settings.host)) throw Error('HTTPS is required for a remote bind');
-    const server = http.createServer(handler); server.listen(settings.port, settings.host); servers.push(server);
+    const server = http.createServer(handlerFor(req => ({ address: req.socket.remoteAddress })));
+    server.listen(settings.port, settings.host); servers.push(server);
   }
-  if (settings.localPort) { const server = http.createServer(handler); server.listen(settings.localPort, '127.0.0.1'); servers.push(server); }
-  for (const server of servers) { server.requestTimeout = 20000; server.headersTimeout = 10000; server.maxHeadersCount = 50; }
+  if (settings.localPort) { const server = http.createServer(handlerFor(req => ({ address: req.socket.remoteAddress }))); server.listen(settings.localPort, '127.0.0.1'); servers.push(server); }
+  for (const server of servers) applySafety(server);
   console.log('Dashboard listening. Retrieve the access key with ./agent dashboard-key.');
-  for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { close(); for (const s of servers) { s.close(); s.closeAllConnections(); } });
+  let stopping = false;
+  for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => {
+    if (stopping) return;
+    stopping = true;
+    dashboard.close();
+    void closeDashboardListeners({ redirectProxy, upstream, servers });
+  });
 }

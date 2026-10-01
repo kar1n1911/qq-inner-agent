@@ -92,7 +92,7 @@ The installed dashboard runs independently of the agent:
 - LAN: `https://<host-LAN-IP>:5098`
 - VPN: `https://<host-VPN-IP>:5098`
 
-On a remote device, import the public `dashboard-ca.crt` into its trusted certificate authorities before opening the HTTPS address. Keep `data/dashboard-ca.key` and all other private keys on this host. The certificate covers the addresses available during installation; run `./agent install-dashboard` again if addresses change. Remote connectivity still depends on your LAN/VPN routing and firewall. The HTTP listener is loopback-only.
+On a remote device, import the public `dashboard-ca.crt` into its trusted certificate authorities before opening the HTTPS address. Keep `data/dashboard-ca.key` and all other private keys on this host. The certificate covers the addresses available during installation; run `./agent install-dashboard` again if addresses change. Remote connectivity still depends on your LAN/VPN routing and firewall. The HTTP listener is loopback-only. A plain `http://` request to the dashboard port is answered with a redirect to the same address over HTTPS, so only the TLS listener needs to be reachable from a remote device.
 
 Retrieve your login key on the host with `./agent dashboard-key`. Sessions expire after 12 hours. HTTPS, HttpOnly cookies, CSRF checks, an origin allowlist, and login rate limiting protect remote access. Do not expose this private administration service to the public internet. The dashboard key gives access to configuration, retained conversation ideas, operational logs, and agent controls.
 
