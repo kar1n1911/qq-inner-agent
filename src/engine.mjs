@@ -1,6 +1,7 @@
 import { readiness } from './config.mjs';
 import { allowed, normalize, quiet, activeAt, select, repeated } from './policy.mjs';
-import { formation, evaluation, articulationFor } from './prompts.mjs';
+import { formation, evaluation, articulationFor, forecast } from './prompts.mjs';
+import { forecastResult, sendingProbability } from './sending.mjs';
 
 const criteria = new Set(['relevance', 'information_gap', 'expected_impact', 'urgency', 'coherence', 'originality', 'balance', 'dynamics']);
 const scoreOk = n => typeof n === 'number' && Number.isFinite(n) && n >= 1 && n <= 5;
@@ -9,6 +10,7 @@ export class Engine {
   constructor(config, store, provider, transport, options = {}) {
     this.config = config; this.store = store; this.provider = provider; this.transport = transport;
     this.now = options.now || (() => Date.now() / 1000); this.log = options.log || (() => {});
+    this.random = options.random || Math.random;
     this.chats = new Map(); this.running = new Set(); this.controller = new AbortController();
     this.lastError = null; this.lastCycle = 0;
   }
@@ -27,6 +29,7 @@ export class Engine {
     if (!m) return;
     const state = this.state(m.chat);
     if (!state || !this.store.message(m)) return;
+    this.store.observe(m, now);
     state.version++; state.lastHuman = now; state.lastId = m.id;
     // Keep a direct request pending while later group messages arrive in the same batch.
     state.hint = state.pending && state.hint === 'self' ? 'self' : m.hint;
@@ -74,6 +77,7 @@ export class Engine {
     const state = this.chats.get(chat), a = this.config.agent, now = this.now();
     if (!state || !allowed(chat, a) || !activeAt(now, a.schedule)) return;
     const version = state.version, id = state.lastId;
+    if (a.sending.enabled && this.store.assessment(chat, id)) { this.finish(state, chat, id, version, trigger, true); return; }
     const hint = trigger === 'pause' ? 'open' : state.hint;
     state.lastThink = now; this.lastCycle = now;
     const history = this.store.history(chat, a.historyLimit);
@@ -88,6 +92,7 @@ export class Engine {
       history: history.map(x => ({ speaker: x.self ? a.name : x.name, text: x.text })),
       memories: this.store.retrieve(chat, last.text, now),
       retainedIdeas: this.store.reservoir(chat, now, a.thoughtTtlSeconds, a.thoughtLimit),
+      priorExpectation: this.store.expectation(chat, now),
     };
     const formed = await this.provider.json(formation, payload, signal);
     if (!Array.isArray(formed.candidates) || !['self', 'other', 'open'].includes(formed.allocation)) throw Object.assign(Error('Invalid formation'), { code: 'invalid_formation' });
@@ -125,16 +130,44 @@ export class Engine {
       this.store.decision(chat, 'withhold', selected?.adjusted || 0, [], now);
       this.finish(state, chat, id, version, trigger); return;
     }
+    let prediction = null;
+    if (a.sending.enabled) {
+      const timing = { proactive, age: Math.max(0, this.now() - state.lastHuman),
+        ...this.store.sendingTiming(chat, this.now(), a.sending.recoverySeconds), score: selected.adjusted };
+      prediction = forecastResult(await this.provider.json(forecast, { ...payload, retainedIdeas: undefined, selectedIdea: selected.text, timing }, signal));
+      if (version !== state.version || signal.aborted || !activeAt(this.now(), a.schedule)) return;
+      const gate = sendingProbability(a.sending, timing, prediction), draw = this.random();
+      const admitted = !gate.veto && draw < gate.probability;
+      this.store.assess(chat, id, this.now(), admitted ? 'admitted' : 'withheld', { ...gate, draw, timing, prediction });
+      this.log('send_assessment', { chat, probability: gate.probability, admitted });
+      if (!admitted) {
+        this.store.decision(chat, gate.veto || 'probability_withhold', selected.adjusted, [], this.now());
+        this.finish(state, chat, id, version, trigger, true); return;
+      }
+    }
     const response = await this.provider.json(articulationFor(a.replyLanguage), { persona: a.persona, name: a.name,
-      history: payload.history, selectedIdea: selected.text, assertiveTone: a.proactiveTone, maxCharacters: a.maxOutputChars }, signal);
-    if (typeof response.text !== 'string' || !response.text.trim() || /<\/?(?:think|analysis)>/i.test(response.text)) throw Object.assign(Error('Invalid articulation'), { code: 'invalid_articulation' });
+      history: payload.history, selectedIdea: selected.text, responsePlan: prediction,
+      priorExpectation: payload.priorExpectation, assertiveTone: a.proactiveTone, maxCharacters: a.maxOutputChars }, signal).catch(error => {
+        this.store.assessmentStatus(chat, id, 'generation_failed'); throw error;
+      });
+    if (typeof response.text !== 'string' || !response.text.trim() || /<\/?(?:think|analysis)>/i.test(response.text)) {
+      this.store.assessmentStatus(chat, id, 'generation_failed');
+      throw Object.assign(Error('Invalid articulation'), { code: 'invalid_articulation' });
+    }
     const text = [...response.text.trim()].slice(0, a.maxOutputChars).join('');
-    if (version !== state.version || this.now() - state.lastHuman > a.activeWindowSeconds || signal.aborted || !activeAt(this.now(), a.schedule)) return;
-    if (!this.transport.connected || !this.transport.online) throw Object.assign(Error('Offline'), { code: 'qq_offline' });
+    if (version !== state.version || this.now() - state.lastHuman > a.activeWindowSeconds || signal.aborted || !activeAt(this.now(), a.schedule)) {
+      this.store.assessmentStatus(chat, id, 'cancelled'); return;
+    }
+    if (!this.transport.connected || !this.transport.online) {
+      this.store.assessmentStatus(chat, id, 'cancelled');
+      throw Object.assign(Error('Offline'), { code: 'qq_offline' });
+    }
     if ((proactive && quiet(this.now(), a.quietHours)) || repeated(text, history)) {
+      this.store.assessmentStatus(chat, id, 'cancelled');
       this.store.use(selected.id); this.finish(state, chat, id, version, trigger); return;
     }
     if (a.dryRun) {
+      this.store.assessmentStatus(chat, id, 'dry_run');
       this.store.decision(chat, 'dry_run', selected.adjusted, [...selected.for, ...selected.against], now);
       this.store.use(selected.id); this.finish(state, chat, id, version, trigger);
       this.log('dry_run', { chat, score: selected.adjusted }); return;
@@ -146,11 +179,14 @@ export class Engine {
     try {
       const sent = await this.transport.send(chat, text);
       this.store.finishDelivery(deliveryId, 'sent', sent?.message_id);
+      this.store.assessmentStatus(chat, id, 'sent');
+      if (prediction) this.store.expect(chat, this.now(), a.sending.expectationSeconds, prediction);
       this.store.message({ chat, id: String(sent?.message_id ?? deliveryId), sender: this.transport.selfId, name: a.name, text, ts: this.now(), self: true });
       this.store.decision(chat, 'sent', selected.adjusted, selected.for, this.now());
       this.lastError = null; this.log('message_sent', { chat, proactive });
     } catch (error) {
       this.store.finishDelivery(deliveryId, error.uncertain ? 'uncertain' : 'failed');
+      this.store.assessmentStatus(chat, id, error.uncertain ? 'uncertain' : 'failed');
       this.store.decision(chat, error.uncertain ? 'delivery_uncertain' : 'delivery_failed', selected.adjusted, [], this.now());
       // Do not schedule an automatic duplicate, even for an explicit server rejection.
       this.lastError = error.code || 'delivery_failed'; this.log('delivery_error', { chat, code: this.lastError });

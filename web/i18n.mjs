@@ -1,6 +1,32 @@
 // Only application-owned UI text is translated. Chat contents, model IDs, logs,
 // configuration editors and other user-provided values remain untouched.
 const pairs = `
+Sending policy & predictions|发送策略与预测
+Enable probability and prediction checks|启用发送概率与预测检查
+Probabilities are heuristic estimates. Timing and chat pace reduce proactive participation. A withheld attempt is not retried during silence. Direct requests bypass timing factors, but still respect the forecast veto and configured probability.|概率是启发式估计。等待时间、发言间隔与消息密度会降低主动发言概率。放弃发送后，不会因沉默反复尝试。直接提问不受时间因子影响，但仍遵守预测否决与所设概率。
+Proactive base probability|主动发言基础概率
+Addressed base probability|被点名时的基础概率
+Conversation settling time (seconds)|聊天等待时间（秒）
+Participation recovery time (seconds)|参与概率恢复时间（秒）
+Messages per minute for half pace factor|节奏因子降至一半时的每分钟消息数
+Maximum negative reaction probability|允许的最高负面反应概率
+Expectation lifetime (seconds)|预期保留时间（秒）
+Sending forecasts|发送预测记录
+No sending forecasts yet.|暂无发送预测记录。
+Send probability|发送概率
+Expected response|预期回应
+Reply|正常回应
+Silence|没有回应
+Negative reaction|负面反应
+Calculation details|计算详情
+admitted|允许发送
+withheld|放弃发送
+cancelled|已取消
+sent|已发送
+dry_run|仅预览
+failed|发送失败
+uncertain|发送结果不确定
+generation_failed|生成失败
 Language settings|语言设置
 Interface language|界面语言
 Reply language|回复语言

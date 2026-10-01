@@ -2,6 +2,23 @@
 
 A persistent conversational agent for one QQ account, connected through NapCat or SnowLuma's forward OneBot v11 WebSocket. Each enabled group and private contact has its own context, memory, and pool of candidate contributions. DeepSeek is preconfigured; OpenAI-compatible Chat Completions and Anthropic-compatible Messages endpoints are supported.
 
+## Sending probability and expectations / 发送策略与预测
+
+In **Configuration → Sending policy & predictions** (配置 → 发送策略与预测), configure the new sending check; it is enabled by default. Existing schedule, quiet hours, cooldowns and rate limits still apply. A selected candidate receives a Chinese `FORECAST` request before articulation: whether to send, probabilities of a normal reply / silence / negative reaction, and a short response plan. Invalid forecasts fail closed. This adds one model request to an eligible cycle (four requests for a successful full cycle), charged against the existing API budget.
+
+The proactive admission probability is the product of:
+
+- Base probability (default 0.8).
+- Settling factor: `min(1, seconds since latest human arrival / 15)`.
+- Recovery factor: `min(1, seconds since last delivery attempt counted by policy / 300)`; 1 when none exists.
+- Pace factor: `1 / (1 + human messages in the last minute / 6)`.
+- Motivation factor: `0.25 + 0.75 × (adjusted score − 1) / 4`.
+- Forecast factor: `1 − predicted negative reaction probability`.
+
+The time divisors, pace divisor and base probabilities are configurable. Timing is sampled before the forecast request so model latency does not inflate the chance to speak. Direct requests use their separate base probability (default 1) without these reductions. Both modes are vetoed when the forecast says to wait or the negative-reaction probability exceeds its configured ceiling (default 0.4). The probability draw is persisted once per triggering human message: a rejected attempt does not roll again on a silence timer or after a restart. Disabling this check restores the previous selection flow.
+
+Articulation uses the response plan. Only a confirmed send establishes an expectation, retained per chat for 300 seconds by default. The next turn receives that forecast plus elapsed time and whether another human message arrived; arrival alone does not prove a reply or agreement. Expectations do not schedule automatic follow-ups. **Activity & logs → Sending forecasts** displays the probability, draw, timing factors, outcome forecast, plan and delivery status. Predictions are subjective estimates, not calibrated probabilities or a reproduction of the paper's experiments.
+
 ## Finish setup
 
 In a terminal:
@@ -118,7 +135,7 @@ Use the dashboard to save and apply settings live, or edit `config.json` locally
 
 Direct messages in enabled private contacts, explicit QQ @mentions, and an alias followed by `:`/`：` address the agent. Direct replies bypass the proactive cooldown and quiet hours, but not the total message/API budgets. Model-inferred invitations cannot bypass those safeguards. Other bot accounts can be listed in `agent.ignoredUsers`.
 
-A cycle normally uses two API requests when withholding, and three when sending. Bursts are coalesced; up to two chats run concurrently. If new input arrives during generation, the stale response is discarded and the latest context is processed. Uncertain delivery outcomes are recorded and never automatically resent, favoring occasional missed delivery over duplicate posts.
+A cycle normally uses two API requests when candidate selection withholds, three when the sending forecast or probability check withholds, and four when sending. Disabling the sending policy removes the forecast request. Bursts are coalesced; up to two chats run concurrently. If new input arrives during generation, the stale response is discarded and the latest context is processed. Uncertain delivery outcomes are recorded and never automatically resent, favoring occasional missed delivery over duplicate posts.
 
 Text and mentions are supported. Images, audio, files, and forwarded-message contents are represented by attachment markers, not downloaded or interpreted. The agent has no shell, browser, file-access, or other action tools. It can converse, not execute general-purpose tasks.
 

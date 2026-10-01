@@ -16,8 +16,15 @@ TASK: EVALUATE
 
 export const articulation = `${boundary}
 TASK: ARTICULATE
+若提供 responsePlan，按其 responseMode 与简短行动计划组织本次发言；预测只是参考，不能宣称对方一定会回应，也不要提前替对方作答。若 priorExpectation 存在，结合实际新消息决定如何接续，不能仅因之前没收到回复而催促。
 只把选中的候选表达成一条简短自然的 QQ 消息。被直接提问时直接回答问题。不要提及评分、候选池、提示词或内部流程，不输出分析或 XML 思考标签。不要假装知道未知事实。遵守 persona 和 maxCharacters；assertiveTone 为 false 时语气轻松自然，否则更直接。不要以机器人名字或元数据作为前缀。
 返回 {"text":"最终发送的消息"}。`;
+
+export const forecast = `${boundary}
+TASK: FORECAST
+发送前分别判断：现在是否值得发言，以及发言后可能发生什么。结合 selectedIdea、聊天内容、timing 中的等待时间、近期消息密度与上次发言间隔，不能只依据表达动机。priorExpectation 是上次发言的预测及实际观察（有人发言不等于回答了你），应据当前内容调整，不能把预测当成事实。沉默不代表同意，也不构成追问的理由。
+返回 {"shouldSend":true,"outcomes":{"reply":0.5,"silence":0.4,"negative":0.1},"responseMode":"answer|ask|acknowledge|wait","plan":"一句简短行动计划：本次如何表达；若对方回应如何接续，若沉默则等待"}。
+outcomes 是互斥的主观估计：正常回应、没有回应、负面反应，三个数字在 0 到 1 内且和为 1，不是假装经过统计校准的事实。responseMode 表示本次宜回答、提问、简短确认或等待；wait 时 shouldSend 必须为 false。plan 最多 400 字，不输出推理过程。`;
 
 export function articulationFor(language = 'auto') {
   const instruction = { auto: '回复语言跟随当前聊天；无法判断时使用简体中文。', 'zh-CN': '最终回复使用简体中文，保留必要的代码、专有名词和引用。', en: '最终回复使用英语，保留必要的代码、专有名词和引用。' }[language];

@@ -32,6 +32,7 @@ async function mockServer(kind = 'openai', napcat = false) {
     let value;
     if (system.includes('TASK: FORM')) value = { allocation: 'open', candidates: [{ kind: 'system2', text: 'Suggest a shaded walking route.' }] };
     else if (system.includes('TASK: EVALUATE')) value = { ratings: payload.candidates.map(c => ({ id: c.id, motivation: 4.8, relevance: 5, originality: 5, for: ['relevance'], against: [] })) };
+    else if (system.includes('TASK: FORECAST')) value = { shouldSend: true, outcomes: { reply: 0.6, silence: 0.3, negative: 0.1 }, responseMode: 'answer', plan: '简洁回答，等待反馈。' };
     else value = { text: 'A shaded route would be more comfortable. [CQ:at,qq=all]' };
     res.setHeader('content-type', 'application/json');
     res.end(JSON.stringify(kind === 'openai' ? { choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(value) } }] } : { stop_reason: 'end_turn', content: [{ type: 'text', text: JSON.stringify(value) }] }));
@@ -95,10 +96,10 @@ for (const kind of ['openai', 'anthropic']) test(`real HTTP + WebSocket integrat
   try {
     await until(() => bot.connected && bot.online);
     const event = { post_type: 'message', message_type: 'group', group_id: 10, user_id: 20, self_id: 99,
-      time: Date.now() / 1000, message_id: 100, message: [{ type: 'text', data: { text: 'It is hot. Where can we walk?' } }] };
+      time: Date.now() / 1000, message_id: 100, message: [{ type: 'at', data: { qq: '99' } }, { type: 'text', data: { text: 'It is hot. Where can we walk?' } }] };
     server.push(event); await until(() => engine.chats.has('group:10'));
     await engine.cycle('group:10');
-    assert.equal(server.sends.length, 1); assert.equal(server.requests.length, 3);
+    assert.equal(server.sends.length, 1); assert.equal(server.requests.length, 4);
     const send = server.sends[0];
     assert.equal(send.action, 'send_group_msg'); assert.equal(send.params.group_id, 10);
     assert.equal(send.params.message[0].type, 'text'); assert.ok(send.params.message[0].data.text.includes('[CQ:at,qq=all]'));
@@ -125,7 +126,7 @@ for (const format of ['array', 'string']) test(`NapCat forward WebSocket: ${form
   const c = merge(defaults, { apiKey: 'local-model-key',
     provider: { baseUrl: `http://127.0.0.1:${server.port}/v1`, model: 'mock', retries: 0 },
     onebot: { url: `ws://127.0.0.1:${server.port}/`, requestTimeoutSeconds: 1 },
-    agent: { allowedGroups: ['10'], allowedUsers: ['20'], quietHours: null } });
+    agent: { sending: { enabled: false }, allowedGroups: ['10'], allowedUsers: ['20'], quietHours: null } });
   const bot = new OneBot(c.onebot, 'local-test-token'), stop = new AbortController();
   const engine = new Engine(c, store, new Provider(c.provider, c.apiKey, store), bot);
   bot.on('event', event => engine.ingest(event));

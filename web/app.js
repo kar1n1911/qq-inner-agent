@@ -88,6 +88,17 @@ async function refresh() {
       row.append(element('time', time(d.ts)), element('span', d.chat), element('span', d.action.replaceAll('_', ' ')), element('span', Number(d.score).toFixed(2), 'decision-score'));
       $('decision-list').append(row);
     }
+    $('assessment-list').replaceChildren();
+    if (!state.assessments?.length) $('assessment-list').append(element('p', 'No sending forecasts yet.', 'empty'));
+    for (const record of state.assessments || []) {
+      const d = record.details, box = element('div', null, 'thought');
+      box.append(element('small', `${time(record.ts)} · ${record.chat} · ${translate(record.status)} · ${translate('Send probability')}: ${(d.probability * 100).toFixed(1)}%`));
+      box.append(element('p', `${translate('Expected response')}: ${translate('Reply')} ${(d.prediction.outcomes.reply * 100).toFixed(0)}% · ${translate('Silence')} ${(d.prediction.outcomes.silence * 100).toFixed(0)}% · ${translate('Negative reaction')} ${(d.prediction.outcomes.negative * 100).toFixed(0)}%`));
+      box.append(element('p', d.prediction.plan));
+      const detail = element('details'), summary = element('summary', translate('Calculation details'));
+      detail.append(summary, element('pre', JSON.stringify({ factors: d.factors, draw: d.draw, timing: d.timing, veto: d.veto, responseMode: d.prediction.responseMode }, null, 2)));
+      box.append(detail); $('assessment-list').append(box);
+    }
     $('thought-list').replaceChildren();
     if (!state.thoughts.length) $('thought-list').append(element('p', 'No retained ideas yet. Ideas that are withheld can remain here for later reevaluation.', 'empty'));
     for (const t of state.thoughts) { const box = element('div', null, 'thought'); box.append(element('p', t.text), element('small', `${t.chat} · ${t.kind} · score ${Number(t.score).toFixed(2)}`)); $('thought-list').append(box); }

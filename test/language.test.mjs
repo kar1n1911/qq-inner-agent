@@ -30,7 +30,7 @@ test('UI translator handles Chinese and English without modifying unknown model 
 });
 test('engine uses selected reply language in the actual articulation request', async () => {
   for (const language of ['en', 'zh-CN', 'auto']) {
-    const c = merge(defaults, { agent: { allowedUsers: ['20'], quietHours: null, replyLanguage: language } });
+    const c = merge(defaults, { agent: { sending: { enabled: false }, allowedUsers: ['20'], quietHours: null, replyLanguage: language } });
     const store = new Store(':memory:'), prompts = [];
     const provider = { json: async (system, payload) => {
       prompts.push(system);

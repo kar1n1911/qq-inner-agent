@@ -22,6 +22,8 @@ export class Store {
       CREATE TABLE IF NOT EXISTS decisions(id TEXT PRIMARY KEY, chat TEXT, ts REAL, action TEXT, score REAL, tags TEXT);
       CREATE TABLE IF NOT EXISTS deliveries(id TEXT PRIMARY KEY, chat TEXT, ts REAL, proactive INTEGER, status TEXT, message_id TEXT);
       CREATE TABLE IF NOT EXISTS calls(ts REAL);
+      CREATE TABLE IF NOT EXISTS send_assessments(id TEXT PRIMARY KEY, chat TEXT, human_id TEXT, ts REAL, status TEXT, details TEXT, UNIQUE(chat,human_id));
+      CREATE TABLE IF NOT EXISTS expectations(chat TEXT PRIMARY KEY, ts REAL, expires REAL, forecast TEXT, observation TEXT);
       CREATE TABLE IF NOT EXISTS handled(chat TEXT PRIMARY KEY, human_id TEXT, pause_done INTEGER DEFAULT 0);
       CREATE INDEX IF NOT EXISTS messages_chat_ts ON messages(chat,ts);
       CREATE INDEX IF NOT EXISTS deliveries_chat_ts ON deliveries(chat,ts);
@@ -67,6 +69,26 @@ export class Store {
   }
   markHandled(chat, id, pause = false) { this.db.prepare('INSERT INTO handled VALUES(?,?,?) ON CONFLICT(chat) DO UPDATE SET human_id=excluded.human_id,pause_done=excluded.pause_done').run(chat, id, pause ? 1 : 0); }
   handled(chat) { return this.db.prepare('SELECT * FROM handled WHERE chat=?').get(chat); }
+  assessment(chat, humanId) { return this.db.prepare('SELECT * FROM send_assessments WHERE chat=? AND human_id=?').get(chat, humanId); }
+  sendingTiming(chat, now, fallbackGap) {
+    const last = this.db.prepare("SELECT max(ts) AS ts FROM deliveries WHERE chat=? AND status IN ('sent','pending','uncertain')").get(chat).ts;
+    const recentHumans = this.db.prepare('SELECT count(*) AS n FROM messages WHERE chat=? AND self=0 AND ts>=?').get(chat, now - 60).n;
+    return { gap: last === null ? fallbackGap : Math.max(0, now - last), recentHumans };
+  }
+  assess(chat, humanId, now, status, details) {
+    this.db.prepare('INSERT INTO send_assessments VALUES(?,?,?,?,?,?)').run(randomUUID(), chat, humanId, now, status, JSON.stringify(details));
+  }
+  assessmentStatus(chat, humanId, status) { this.db.prepare('UPDATE send_assessments SET status=? WHERE chat=? AND human_id=?').run(status, chat, humanId); }
+  expect(chat, now, seconds, forecast) {
+    this.db.prepare('INSERT INTO expectations VALUES(?,?,?,?,NULL) ON CONFLICT(chat) DO UPDATE SET ts=excluded.ts,expires=excluded.expires,forecast=excluded.forecast,observation=NULL').run(chat, now, now + seconds, JSON.stringify(forecast));
+  }
+  observe(m, now) {
+    this.db.prepare('UPDATE expectations SET observation=? WHERE chat=? AND observation IS NULL AND ts<=? AND expires>=?').run(JSON.stringify({ event: 'human_message', addressed: m.hint === 'self', at: now }), m.chat, now, now);
+  }
+  expectation(chat, now) {
+    const r = this.db.prepare('SELECT * FROM expectations WHERE chat=? AND expires>?').get(chat, now);
+    return r ? { forecast: JSON.parse(r.forecast), elapsedSeconds: Math.max(0, now - r.ts), observation: r.observation ? JSON.parse(r.observation) : { event: 'no_message_yet' } } : null;
+  }
   activeChats(since) { return this.db.prepare('SELECT DISTINCT chat FROM messages WHERE self=0 AND ts>?').all(since).map(x => x.chat); }
   prune(now, retentionDays, maxPerChat) {
     this.db.prepare('DELETE FROM messages WHERE ts<?').run(now - retentionDays * 86400);
@@ -74,7 +96,7 @@ export class Store {
       this.db.prepare('DELETE FROM messages WHERE chat=? AND rowid NOT IN (SELECT rowid FROM messages WHERE chat=? ORDER BY ts DESC,rowid DESC LIMIT ?)').run(chat, chat, maxPerChat);
     }
     this.db.prepare('DELETE FROM thoughts WHERE created<?').run(now - 86400);
-    for (const table of ['decisions', 'deliveries']) this.db.prepare(`DELETE FROM ${table} WHERE ts<?`).run(now - retentionDays * 86400);
+    for (const table of ['decisions', 'deliveries', 'send_assessments', 'expectations']) this.db.prepare(`DELETE FROM ${table} WHERE ts<?`).run(now - retentionDays * 86400);
     this.db.exec('DELETE FROM handled WHERE chat NOT IN (SELECT DISTINCT chat FROM messages)');
   }
 }

@@ -46,17 +46,18 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
   function snapshot() {
     const c = loadConfig(root), file = path.join(c.dataDir, 'agent.sqlite');
     const status = readJson(path.join(c.dataDir, 'status.json'), null);
-    let decisions = [], thoughts = [];
+    let decisions = [], thoughts = [], assessments = [];
     if (fs.existsSync(file)) {
       let db;
       try {
         db = new DatabaseSync(file, { readOnly: true });
         decisions = db.prepare('SELECT chat,ts,action,score,tags FROM decisions ORDER BY ts DESC LIMIT 30').all();
         thoughts = db.prepare('SELECT chat,text,kind,score,created FROM thoughts WHERE used=0 AND created>? ORDER BY created DESC LIMIT 12').all(Date.now()/1000 - c.agent.thoughtTtlSeconds);
+        assessments = db.prepare('SELECT chat,ts,status,details FROM send_assessments ORDER BY ts DESC LIMIT 12').all().map(r => ({ ...r, details: JSON.parse(r.details) }));
       } catch { /* database may be opening for the first time */ }
       finally { db?.close(); }
     }
-    const data = { status, decisions, thoughts, logs: tail(path.join(c.dataDir, 'agent.log')), savedRevision: publicSettings(root).revision };
+    const data = { status, decisions, thoughts, assessments, logs: tail(path.join(c.dataDir, 'agent.log')), savedRevision: publicSettings(root).revision };
     let text = JSON.stringify(data);
     for (const secret of [c.apiKey, c.onebotToken, key].filter(Boolean)) text = text.split(secret).join('[redacted]');
     return JSON.parse(text);

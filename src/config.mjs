@@ -11,6 +11,9 @@ export const defaults = {
   agent: { name: 'Luma', persona: '你是 QQ 聊天中的 AI 参与者。友善、简洁、真诚，保持好奇心，结合聊天内容提供有用的回应。不要编造亲身经历，也不要冒充真人。', replyLanguage: 'auto',
     aliases: ['Luma'], allowedGroups: [], allowedUsers: [], ignoredUsers: [],
     proactive: true, dryRun: false, threshold: 4.09, interruptThreshold: 4.8,
+    sending: { enabled: true, proactiveProbability: 0.8, addressedProbability: 1,
+      settleSeconds: 15, recoverySeconds: 300, burstScale: 6,
+      maxNegativeProbability: 0.4, expectationSeconds: 300 },
     schedule: { enabled: false, activeStart: '08:00', inactiveStart: '23:00', timezone: 'Europe/Stockholm' },
     system1Probability: 0, proactiveTone: false, pauseSeconds: 45,
     debounceSeconds: 3, minThinkIntervalSeconds: 15, proactiveCooldownSeconds: 180,
@@ -35,6 +38,7 @@ export function validate(c) {
   if (!['zh-CN', 'en'].includes(c.ui.language)) throw Error('Invalid interface language');
   if (!['auto', 'zh-CN', 'en'].includes(c.agent.replyLanguage)) throw Error('Invalid reply language');
   const schedule = c.agent.schedule;
+  if (!c.agent.sending || typeof c.agent.sending.enabled !== 'boolean') throw Error('Invalid sending policy');
   if (!schedule || typeof schedule.enabled !== 'boolean') throw Error('Invalid activity schedule');
   for (const k of ['activeStart', 'inactiveStart']) if (typeof schedule[k] !== 'string' || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(schedule[k])) throw Error(`Invalid schedule.${k}: use HH:MM`);
   if (schedule.activeStart === schedule.inactiveStart) throw Error('Active and inactive start times must differ; disable the schedule for all-day activity');
@@ -50,6 +54,10 @@ export function validate(c) {
   if (!['x-api-key', 'bearer'].includes(c.provider.anthropicAuth)) throw Error('Invalid anthropicAuth');
   if (![null, 'disabled'].includes(c.provider.thinking)) throw Error('thinking must be null or disabled');
   const ranges = {
+    'agent.sending.proactiveProbability': [0, 1], 'agent.sending.addressedProbability': [0, 1],
+    'agent.sending.settleSeconds': [1, 3600], 'agent.sending.recoverySeconds': [1, 86400],
+    'agent.sending.burstScale': [1, 100], 'agent.sending.maxNegativeProbability': [0, 1],
+    'agent.sending.expectationSeconds': [1, 86400],
     'provider.maxTokens': [128, 32000], 'provider.timeoutSeconds': [1, 300],
     'provider.retries': [0, 5], 'provider.requestsPerHour': [1, 10000],
     'onebot.heartbeatSeconds': [1, 300], 'onebot.requestTimeoutSeconds': [1, 120],
