@@ -11,7 +11,7 @@ export const defaults = {
   agent: { name: 'Luma', persona: '你是 QQ 聊天中善于接话、抛出话题、带动轻松交流的 AI 伙伴。先接住对方的情绪和话头，再给出一个容易接下去的回应。可以分享贴合上下文的观察、轻巧联想、适度玩笑，或一个具体且低负担的问题；不要每句话都追问，也不要把闲聊变成客服答疑或长篇讲课。话题自然结束时，可以从共同兴趣或未完的话题轻轻开启新方向，但冷场不必硬救。气氛热闹时给别人空间，有人认真求助或表达难过时先认真回应。逐渐适应每个聊天的用语、节奏和兴趣，尊重明确反馈，不把一个人的偏好当成所有人的偏好。表达自然、有温度，不编造亲身经历，不冒充真人。', replyLanguage: 'auto',
     learning: { enabled: true, minMessages: 8, intervalSeconds: 300, maxMemories: 100, memoryDays: 30, retrievalLimit: 6 },
     observation: { enabled: true, minSeconds: 300, minMessages: 20, thresholdMode: 'both', historyLimit: 30 },
-    memory: { shortHours: 72, shortLimit: 40, shortChars: 1000, longChars: 1800, traitChars: 900, longDays: 365, traitDays: 180, maxPeople: 200 },
+    memory: { recallChars: 2400, recallHalfLifeDays: 30, minConfidence: 0.35, revisionLimit: 3, shortHours: 72, shortLimit: 40, shortChars: 1000, longChars: 1800, traitChars: 900, longDays: 365, traitDays: 180, maxPeople: 200 },
     aliases: ['Luma'], allowedGroups: [], allowedUsers: [], ignoredUsers: [],
     proactive: true, dryRun: false, threshold: 4.09, interruptThreshold: 4.8,
     sending: { enabled: true, proactiveProbability: 0.8, addressedProbability: 1,
@@ -57,7 +57,7 @@ export function validate(c) {
   if (!observation || typeof observation.enabled !== 'boolean' || !['both','either'].includes(observation.thresholdMode)) throw Error('Invalid observation settings');
   for (const [key, min, max] of [['minSeconds',1,604800],['minMessages',1,10000],['historyLimit',1,100]]) if (!Number.isInteger(observation[key]) || observation[key] < min || observation[key] > max) throw Error(`Invalid observation.${key}`);
   if (!c.agent.memory || typeof c.agent.memory !== 'object') throw Error('Invalid memory settings');
-  for (const [key, min, max] of [['shortHours',1,720], ['shortLimit',1,200], ['shortChars',100,2000], ['longChars',200,8000], ['traitChars',100,4000], ['longDays',1,3650], ['traitDays',1,3650], ['maxPeople',1,1000]]) {
+  for (const [key, min, max] of [['recallChars',200,12000], ['recallHalfLifeDays',1,3650], ['revisionLimit',1,10], ['shortHours',1,720], ['shortLimit',1,200], ['shortChars',100,2000], ['longChars',200,8000], ['traitChars',100,4000], ['longDays',1,3650], ['traitDays',1,3650], ['maxPeople',1,1000]]) {
     if (!Number.isInteger(c.agent.memory[key]) || c.agent.memory[key] < min || c.agent.memory[key] > max) throw Error(`Invalid memory.${key}: expected ${min}..${max}`);
   }
   if (!c.agent.learning || typeof c.agent.learning.enabled !== 'boolean') throw Error('Invalid learning settings');
@@ -78,6 +78,7 @@ export function validate(c) {
   if (!['x-api-key', 'bearer'].includes(c.provider.anthropicAuth)) throw Error('Invalid anthropicAuth');
   if (![null, 'disabled'].includes(c.provider.thinking)) throw Error('thinking must be null or disabled');
   const ranges = {
+    'agent.memory.minConfidence': [0, 1],
     'agent.learning.minMessages': [1, 100], 'agent.learning.intervalSeconds': [30, 86400],
     'agent.learning.maxMemories': [1, 500], 'agent.learning.memoryDays': [1, 365],
     'agent.learning.retrievalLimit': [1, 20],

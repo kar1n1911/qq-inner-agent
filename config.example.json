@@ -73,6 +73,12 @@
       "activeMaxSeconds": 1200,
       "restMinSeconds": 600,
       "restMaxSeconds": 2400
+    },
+    "memory": {
+      "recallChars": 2400,
+      "recallHalfLifeDays": 30,
+      "minConfidence": 0.35,
+      "revisionLimit": 3
     }
   },
   "storage": {

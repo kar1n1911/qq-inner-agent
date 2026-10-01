@@ -121,3 +121,88 @@ test('engine uses only current speaker notebooks, and retained candidate ideas c
     assert.ok(!JSON.stringify(calls[0].memoryContext).includes('甲喜欢园艺'));
   } finally { s.close(); }
 });
+
+test('memory evidence accumulates, stale evidence cannot overwrite, and duplicate reads do not extend expiry', () => {
+  const s = new Store(':memory:');
+  const write = (text, id, ts, at) => s.memory.apply('group:10', [{ ...update('person:20','long_term','约定',text), keywords: ['园艺'], confidence: .9, sources: [{ id, sender: '20', ts }] }], at, settings);
+  try {
+    write('周日种花','a',1000,1000);
+    const original = s.memory.rows('group:10','person:20','long_term',1001)[0];
+    write('周日种花','a',1000,2000);
+    const duplicate = s.memory.rows('group:10','person:20','long_term',2001)[0];
+    assert.equal(duplicate.expires, original.expires); assert.equal(duplicate.revision, 1);
+    write('改成周六','b',2001,2001);
+    write('旧的周日','old',999,2002);
+    const revised = s.memory.rows('group:10','person:20','long_term',2003)[0];
+    assert.equal(revised.text,'改成周六'); assert.equal(revised.sources.length,2); assert.equal(revised.revision,2);
+    assert.deepEqual(revised.keywords,['园艺']); assert.equal(revised.confidence,.9);
+    const archived = s.db.prepare('SELECT * FROM memory_revisions').all();
+    assert.equal(archived.length,1); assert.equal(archived[0].text,'周日种花');
+    assert.ok(!JSON.stringify(s.memory.context('group:10','20',2003,settings)).includes('周日种花'));
+    s.memory.reset('group:10','person:20');
+    assert.equal(s.db.prepare('SELECT count(*) AS n FROM memory_revisions').get().n,0);
+  } finally { s.close(); }
+});
+test('revision capacity is bounded, reduced limits apply live, and expiry removes archives', () => {
+  const s = new Store(':memory:');
+  try {
+    for (let i=0;i<8;i++) s.memory.apply('group:10',[{ ...update('person:20','traits','兴趣',`兴趣${i}`), sources:[{ id:`id${i}`,sender:'20',ts:1000+i }] }],1000+i,settings);
+    assert.equal(s.db.prepare('SELECT count(*) AS n FROM memory_revisions').get().n,3);
+    s.memory.configure(1010,{...settings,revisionLimit:1});
+    assert.equal(s.db.prepare('SELECT count(*) AS n FROM memory_revisions').get().n,1);
+    s.prune(1000+366*86400,30,500);
+    assert.equal(s.db.prepare('SELECT count(*) AS n FROM memory_revisions').get().n,0);
+  } finally { s.close(); }
+});
+test('query-aware notebook recall respects confidence, character budget and strict scopes', () => {
+  const s = new Store(':memory:');
+  try {
+    for (const [subject,key,text,confidence,keywords] of [
+      ['person:20','约定','周末参加花卉展览',.9,['园艺']],
+      ['person:20','音乐','喜欢古典音乐',.9,[]],
+      ['person:20','猜测','园艺园艺不确定',.1,['园艺']],
+      ['person:21','园艺','乙的秘密花园',1,['园艺']]]) {
+      s.memory.apply('group:10',[{...update(subject,'long_term',key,text),confidence,keywords,sources:[]}],1000,settings);
+    }
+    const context=s.memory.context('group:10','20',1001,{...settings,recallChars:10},'园艺');
+    assert.equal(context[1].long_term[0].slot,'约定');
+    const text=JSON.stringify(context);
+    assert.ok(!text.includes('乙的秘密')); assert.ok(!text.includes('不确定'));
+    assert.ok(context.flatMap(s=>[...s.long_term,...s.traits]).reduce((n,r)=>n+r.text.length,0)<=10);
+  } finally { s.close(); }
+});
+test('sparse retrieval handles Chinese and rare terms without unrelated short-term filler', () => {
+  const s=new Store(':memory:');
+  try {
+    s.memory.capture({...a,text:'周末参加园艺展览'},1000,settings);
+    s.memory.capture({...b,text:'今天讨论音乐和电影'},1001,settings);
+    const result=s.retrieveScoped('group:10','20','园艺展览',1002,settings);
+    assert.equal(result.length,1); assert.match(result[0].text,/园艺/); assert.ok(result[0].recall.lexical>0);
+    assert.equal(s.retrieveScoped('group:11','20','园艺展览',1002,settings).length,0);
+    assert.equal(s.retrieveScoped('group:10','20','unrelatedxyz',1002,settings).length,0);
+    assert.equal(s.retrieveScoped('group:10','20','园艺',1002,settings,{enabled:false}).length,0);
+  } finally { s.close(); }
+});
+test('model memory metadata is optional for compatibility and strictly validated when present', () => {
+  const v=update('person:20','traits','兴趣','园艺');
+  const parse = v => parseMemoryUpdates([v],[a],'group:10','20',settings)[0];
+  assert.equal(parse(v).confidence,.6); assert.deepEqual(parse(v).keywords,[]);
+  assert.deepEqual(parse({...v,keywords:['花卉','花卉']}).keywords,['花卉']);
+  for (const extra of [{confidence:NaN},{confidence:2},{keywords:['x'.repeat(33)]},{keywords:'园艺'}]) assert.throws(()=>parse({...v,...extra}));
+});
+
+test('legacy SQLite memory schema migrates without losing scoped records', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const { LayeredMemory } = await import('../src/memory.mjs');
+  const db = new DatabaseSync(':memory:');
+  try {
+    db.exec(`CREATE TABLE memory_layers(id TEXT PRIMARY KEY,chat TEXT NOT NULL,subject TEXT NOT NULL,layer TEXT NOT NULL,slot TEXT NOT NULL,text TEXT NOT NULL,sources TEXT NOT NULL,importance REAL,created REAL,updated REAL,expires REAL,revision INTEGER DEFAULT 1,UNIQUE(chat,subject,layer,slot));
+      INSERT INTO memory_layers VALUES('legacy','group:10','person:20','long_term','旧笔记','保留园艺约定','[]',0.8,1000,1000,999999,1);`);
+    const memory = new LayeredMemory(db);
+    const row = memory.context('group:10','20',1001,settings,'园艺')[1].long_term[0];
+    assert.equal(row.id,'legacy'); assert.equal(row.text,'保留园艺约定');
+    assert.equal(row.confidence,.6); assert.deepEqual(row.keywords,[]);
+    new LayeredMemory(db); // repeated startup is safe
+    assert.equal(memory.context('group:11','20',1001,settings).flatMap(s=>s.long_term).length,0);
+  } finally { db.close(); }
+});

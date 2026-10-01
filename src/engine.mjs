@@ -113,7 +113,7 @@ export class Engine {
     const newHumans = humans.slice(humans.findLastIndex(x => x.id === profile.last_id) + 1);
     const learnNow = a.learning.enabled && last.id !== profile.last_id && newHumans.length >= a.learning.minMessages && now - profile.updated >= a.learning.intervalSeconds;
     const query = humans.slice(-3).map(x => x.text).join(' ');
-    const memoryContext = () => a.learning.enabled ? this.store.memory.context(chat, last.sender, now, a.memory) : [];
+    const memoryContext = () => a.learning.enabled ? this.store.memory.context(chat, last.sender, now, a.memory, query) : [];
     const retrieve = () => this.store.retrieveScoped(chat, last.sender, query, now, a.memory,
       { excludeIds: history.map(x => x.id), enabled: a.learning.enabled, limit: a.learning.retrievalLimit });
     const chatStyle = context => context.map(scope => ({ subject: scope.subject, traits: scope.traits.map(m => ({ key: m.slot, text: m.text, sources: m.sources })) }));

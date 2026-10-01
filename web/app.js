@@ -132,7 +132,7 @@ async function refresh() {
       for (const layer of ['long_term', 'short_term', 'traits']) {
         box.append(element('h4', translate({ long_term: 'Long-term notebook', short_term: 'Short-term details', traits: 'Traits and topics' }[layer])));
         for (const memory of chatMemories.filter(m => m.subject === subject && m.layer === layer)) {
-          const item = element('details'); item.append(element('summary', `${layer === 'short_term' ? '' : memory.slot + ': '}${memory.text}`), element('pre', JSON.stringify({ sources: JSON.parse(memory.sources), importance: memory.importance, revision: memory.revision, updated: new Date(memory.updated * 1000).toISOString(), expires: new Date(memory.expires * 1000).toISOString() }, null, 2))); box.append(item);
+          const item = element('details'); item.append(element('summary', `${layer === 'short_term' ? '' : memory.slot + ': '}${memory.text}`), element('pre', JSON.stringify({ keywords: JSON.parse(memory.keywords || '[]'), confidence: memory.confidence ?? 0.6, revisions: memory.revisions || [], sources: JSON.parse(memory.sources), importance: memory.importance, revision: memory.revision, updated: new Date(memory.updated * 1000).toISOString(), expires: new Date(memory.expires * 1000).toISOString() }, null, 2))); box.append(item);
         }
       }
       $('learning-list').append(box);

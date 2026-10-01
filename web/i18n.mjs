@@ -1,6 +1,11 @@
 // Only application-owned UI text is translated. Chat contents, model IDs, logs,
 // configuration editors and other user-provided values remain untouched.
 const pairs = `
+Memory recall character budget|记忆召回字数上限
+Recall recency half-life (days)|召回时效半衰期（天）
+Minimum memory confidence|记忆最低可信度
+Retained memory revisions|保留的记忆修订版本数
+
 Without activity rhythm, all AI replies pause outside this window, including mentions and private messages. With rhythm enabled, this window shapes the next block probability. Overnight windows are supported. Quiet hours below separately suppress proactive replies.|未启用连续节奏时，作息外暂停所有回复（含私聊和 @）。启用连续节奏后，此时间表用于决定下一段的活跃概率。支持跨午夜时段。下方静默时段仍单独限制主动发言。
 Continuous activity rhythm|连续活跃与休息节奏
 Enable probabilistic activity blocks|启用概率性活跃时段

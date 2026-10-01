@@ -1,3 +1,4 @@
+import { rankMemories } from './memory-ranking.mjs';
 import { randomUUID } from 'node:crypto';
 
 export function memorySubjects(chat, sender) {
@@ -25,7 +26,11 @@ export function parseMemoryUpdates(value, history, chat, sender, settings) {
     const max = v.layer === 'long_term' ? Math.min(500, settings.longChars) : Math.min(300, settings.traitChars);
     if (v.operation === 'upsert' && (typeof v.text !== 'string' || !v.text.trim() || v.text.length > max ||
         typeof v.importance !== 'number' || !Number.isFinite(v.importance) || v.importance < 0 || v.importance > 1)) throw Error('invalid_memory_updates');
-    return { subject: v.subject, layer: v.layer, key, operation: v.operation,
+    const keywords = v.keywords ?? [];
+    if (!Array.isArray(keywords) || keywords.length > 8 || keywords.some(k => typeof k !== 'string' || !k.trim() || k.length > 32)) throw Error('invalid_memory_keywords');
+    const confidence = v.confidence ?? .6;
+    if (typeof confidence !== 'number' || !Number.isFinite(confidence) || confidence < 0 || confidence > 1) throw Error('invalid_memory_confidence');
+    return { keywords: [...new Set(keywords.map(k => k.trim()))], confidence, subject: v.subject, layer: v.layer, key, operation: v.operation,
       text: v.operation === 'upsert' ? v.text.trim() : '', importance: v.operation === 'upsert' ? v.importance : 0, sources };
   });
 }
@@ -39,12 +44,40 @@ export class LayeredMemory {
       created REAL, updated REAL, expires REAL, revision INTEGER DEFAULT 1,
       UNIQUE(chat,subject,layer,slot));
       CREATE INDEX IF NOT EXISTS memory_layers_scope ON memory_layers(chat,subject,layer,expires);`);
+    const columns = new Set(db.prepare('PRAGMA table_info(memory_layers)').all().map(r => r.name));
+    if (!columns.has('keywords')) db.exec("ALTER TABLE memory_layers ADD COLUMN keywords TEXT NOT NULL DEFAULT '[]'");
+    if (!columns.has('confidence')) db.exec('ALTER TABLE memory_layers ADD COLUMN confidence REAL NOT NULL DEFAULT 0.6');
+    db.exec(`CREATE TABLE IF NOT EXISTS memory_revisions (
+      memory_id TEXT, revision INTEGER, text TEXT, sources TEXT, updated REAL, replaced REAL,
+      PRIMARY KEY(memory_id,revision));
+      CREATE TRIGGER IF NOT EXISTS memory_revision_cleanup AFTER DELETE ON memory_layers BEGIN
+        DELETE FROM memory_revisions WHERE memory_id=OLD.id;
+      END;`);
   }
-  put(chat, subject, layer, slot, text, sources, importance, now, expires) {
-    this.db.prepare(`INSERT INTO memory_layers VALUES(?,?,?,?,?,?,?,?,?,?,?,1)
-      ON CONFLICT(chat,subject,layer,slot) DO UPDATE SET text=excluded.text,sources=excluded.sources,
-      importance=excluded.importance,updated=excluded.updated,expires=excluded.expires,revision=revision+1`).run(
-      randomUUID(), chat, subject, layer, slot, text, JSON.stringify(sources), importance, now, now, expires);
+  put(chat, subject, layer, slot, text, sources, importance, now, expires, metadata = {}, revisionLimit = 3) {
+    const old = this.db.prepare('SELECT * FROM memory_layers WHERE chat=? AND subject=? AND layer=? AND slot=?').get(chat, subject, layer, slot);
+    const previous = old ? JSON.parse(old.sources) : [];
+    const identity = source => `${source.sender}:${source.id}`;
+    const known = new Set(previous.map(identity));
+    if (old && layer !== 'short_term' && sources.length && Math.max(...sources.map(s => s.ts)) < Math.max(0, ...previous.map(s => s.ts))) return;
+    const fresh = sources.some(source => !known.has(identity(source)));
+    // Re-reading the same evidence cannot keep an old claim alive forever.
+    if (old && !fresh && old.text === text) return;
+    if (old && layer !== 'short_term' && old.text !== text) {
+      this.db.prepare('INSERT OR REPLACE INTO memory_revisions VALUES(?,?,?,?,?,?)').run(old.id, old.revision, old.text, old.sources, old.updated, now);
+      this.db.prepare('DELETE FROM memory_revisions WHERE memory_id=? AND revision NOT IN (SELECT revision FROM memory_revisions WHERE memory_id=? ORDER BY revision DESC LIMIT ?)').run(old.id, old.id, revisionLimit);
+    }
+    const evidence = new Map(previous.map(source => [identity(source), source]));
+    for (const source of sources) evidence.set(identity(source), source);
+    const merged = [...evidence.values()].sort((a,b) => b.ts-a.ts).slice(0,12);
+    const updated = old && !fresh ? old.updated : now;
+    const expiry = old && !fresh ? old.expires : expires;
+    this.db.prepare(`INSERT INTO memory_layers(id,chat,subject,layer,slot,text,sources,importance,created,updated,expires,revision,keywords,confidence)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,1,?,?) ON CONFLICT(chat,subject,layer,slot) DO UPDATE SET
+      text=excluded.text,sources=excluded.sources,importance=excluded.importance,updated=excluded.updated,
+      expires=excluded.expires,revision=revision+1,keywords=excluded.keywords,confidence=excluded.confidence`).run(
+      randomUUID(),chat,subject,layer,slot,text,JSON.stringify(merged),importance,now,updated,expiry,
+      JSON.stringify(metadata.keywords || []),metadata.confidence ?? .6);
   }
   capture(message, now, settings) {
     if (message.self) return;
@@ -52,7 +85,7 @@ export class LayeredMemory {
     for (const subject of subjects) {
       this.put(message.chat, subject, 'short_term', message.id,
         `${message.name} (${message.sender}): ${message.text}`.slice(0, settings.shortChars),
-        [{ id: message.id, sender: message.sender, ts: message.ts }], 0.5, now, now + settings.shortHours * 3600);
+        [{ id: message.id, sender: message.sender, ts: message.ts }], 0.5, now, now + settings.shortHours * 3600, { confidence: 1 });
     }
     this.enforce(message.chat, now, settings, subjects);
   }
@@ -60,19 +93,26 @@ export class LayeredMemory {
     for (const v of updates) {
       if (v.operation === 'forget') this.db.prepare('DELETE FROM memory_layers WHERE chat=? AND subject=? AND layer=? AND slot=?').run(chat, v.subject, v.layer, v.key);
       else this.put(chat, v.subject, v.layer, v.key, v.text, v.sources, v.importance, now,
-        now + (v.layer === 'long_term' ? settings.longDays : settings.traitDays) * 86400);
+        now + (v.layer === 'long_term' ? settings.longDays : settings.traitDays) * 86400, v, settings.revisionLimit);
     }
     this.enforce(chat, now, settings, [...new Set(updates.map(v => v.subject))]);
   }
   rows(chat, subject, layer, now) {
     return this.db.prepare('SELECT * FROM memory_layers WHERE chat=? AND subject=? AND layer=? AND expires>? ORDER BY importance DESC,updated DESC,rowid DESC').all(chat, subject, layer, now)
-      .map(r => ({ ...r, sources: JSON.parse(r.sources) }));
+      .map(r => ({ ...r, sources: JSON.parse(r.sources), keywords: JSON.parse(r.keywords) }));
   }
-  context(chat, sender, now, settings) {
-    return memorySubjects(chat, sender).map(subject => ({ subject,
-      long_term: this.bounded(this.rows(chat, subject, 'long_term', now).filter(r => r.updated + settings.longDays * 86400 > now), settings.longChars),
-      traits: this.bounded(this.rows(chat, subject, 'traits', now).filter(r => r.updated + settings.traitDays * 86400 > now), settings.traitChars),
-    }));
+  context(chat, sender, now, settings, query = '') {
+    const subjects = memorySubjects(chat, sender), output = subjects.map(subject => ({ subject, long_term: [], traits: [] }));
+    const rows = subjects.flatMap(subject => ['long_term','traits'].flatMap(layer => this.rows(chat, subject, layer, now)
+      .filter(r => r.updated + (layer === 'long_term' ? settings.longDays : settings.traitDays) * 86400 > now)));
+    let used = 0;
+    for (const row of rankMemories(rows, query, now, settings)) {
+      const target = output.find(s => s.subject === row.subject)[row.layer];
+      const limit = row.layer === 'long_term' ? settings.longChars : settings.traitChars;
+      if (used + row.text.length > settings.recallChars || target.length >= 24 || target.reduce((n,r) => n+r.text.length,0) + row.text.length > limit) continue;
+      target.push(row); used += row.text.length;
+    }
+    return output;
   }
   bounded(rows, chars) {
     let used = 0, count = 0;
@@ -92,6 +132,7 @@ export class LayeredMemory {
   enforce(chat, now, settings, subjectsToCheck = null) {
     this.db.prepare(`UPDATE memory_layers SET expires=min(expires,updated+CASE layer WHEN 'short_term' THEN ? WHEN 'long_term' THEN ? ELSE ? END) WHERE chat=?`).run(settings.shortHours * 3600, settings.longDays * 86400, settings.traitDays * 86400, chat);
     this.db.prepare('DELETE FROM memory_layers WHERE chat=? AND expires<=?').run(chat, now);
+    for (const r of this.db.prepare('SELECT id FROM memory_layers WHERE chat=?').all(chat)) this.db.prepare('DELETE FROM memory_revisions WHERE memory_id=? AND revision NOT IN (SELECT revision FROM memory_revisions WHERE memory_id=? ORDER BY revision DESC LIMIT ?)').run(r.id,r.id,settings.revisionLimit);
     for (const { subject } of this.db.prepare('SELECT DISTINCT subject FROM memory_layers WHERE chat=?').all(chat)) {
       if (subjectsToCheck && !subjectsToCheck.includes(subject)) continue;
       for (const layer of ['short_term', 'long_term', 'traits']) {

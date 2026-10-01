@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
+import { rankMemories } from './memory-ranking.mjs';
 import { LayeredMemory } from './memory.mjs';
 
 export function terms(text) {
@@ -58,8 +59,8 @@ export class Store {
     const notes = this.db.prepare('SELECT id,text,created AS updated FROM notes WHERE chat=? ORDER BY created DESC LIMIT 50').all(chat)
       .map(n => ({ ...n, subject: scope, layer: 'owner_note', sources: [] }));
     const short = options.enabled === false ? [] : this.memory.short(chat, sender, now, settings, options.excludeIds);
-    return [...notes, ...short].map(m => ({ ...m, saliency: similarity(query, m.text) * Math.exp(-Math.max(0, now - m.updated) / 604800) + (m.layer === 'owner_note' ? 0.15 : 0) }))
-      .filter(m => m.saliency > 0.12).sort((a, b) => b.saliency - a.saliency).slice(0, options.limit ?? 6);
+    let chars = 0;
+    return rankMemories([...notes, ...short], query, now, settings, { requireMatch: true }).filter(m => { if (chars + m.text.length > settings.recallChars) return false; chars += m.text.length; return true; }).slice(0, options.limit ?? 6);
   }
   learn(chat, update, now, lastId, settings, epoch, layered = null) {
     this.db.exec('BEGIN IMMEDIATE');
