@@ -4,7 +4,9 @@ __pycache__/
 config.json
 secrets.json
 data/
+# Runtime logs, including rotated copies when dataDir is customized.
 *.log
+*.log.*
 .agent.lock
 .dashboard.lock
 .settings-write
