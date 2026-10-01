@@ -1,6 +1,29 @@
 // Only application-owned UI text is translated. Chat contents, model IDs, logs,
 // configuration editors and other user-provided values remain untouched.
 const pairs = `
+Group observation period|入群观察期
+Observe before the first group message|群内首次发言前先观察
+Minimum observation time (seconds)|最少观察时间（秒）
+Minimum new messages|最少新消息数
+Threshold rule|阈值规则
+Both time and message count|时间和消息量均达到
+Either time or message count|时间或消息量任一达到
+History sample size|历史消息采样条数
+Direct mentions also wait. Available group information, announcements and history are analyzed before the model chooses its initial style. Imported history does not count as new messages.|被 @ 也需等待。先读取可用群资料、公告和历史，再由模型分析并选择初始说话风格。读取的历史不计入新消息数。
+No group observation yet.|暂无群观察记录。
+Group name unavailable|群名称尚不可用
+Style selected|已选择初始风格
+Observing before first message|观察中，首次发言暂缓
+Elapsed seconds|已观察秒数
+New messages|新消息数
+Group information|群资料
+Group announcements|群公告
+Group history|群历史
+Initial speaking style|初始说话风格
+available|已获取
+unavailable|不可用
+pending|待获取
+Analysis failed; waiting to retry. No group message will be sent.|分析未成功，等待重试；暂不发送群消息。
 Group memory|群体记忆
 Long-term notebook|长期笔记本
 Short-term details|短期细节

@@ -88,7 +88,7 @@ for (const kind of ['openai', 'anthropic']) test(`real HTTP + WebSocket integrat
   const server = await mockServer(kind), store = new Store(':memory:');
   const c = merge(defaults, { apiKey: 'local-model-key', provider: { kind, baseUrl: `http://127.0.0.1:${server.port}/v1`, model: 'mock', retries: 0 },
     onebot: { url: `ws://127.0.0.1:${server.port}/`, selfId: '99', reconnectMaxSeconds: 1, heartbeatSeconds: 1, requestTimeoutSeconds: 1 },
-    agent: { allowedGroups: ['10'], quietHours: null } });
+    agent: { observation: { enabled: false }, allowedGroups: ['10'], quietHours: null } });
   const bot = new OneBot(c.onebot, 'local-test-token'), stop = new AbortController();
   const provider = new Provider(c.provider, c.apiKey, store), engine = new Engine(c, store, provider, bot);
   bot.on('event', e => engine.ingest(e));
@@ -126,7 +126,7 @@ for (const format of ['array', 'string']) test(`NapCat forward WebSocket: ${form
   const c = merge(defaults, { apiKey: 'local-model-key',
     provider: { baseUrl: `http://127.0.0.1:${server.port}/v1`, model: 'mock', retries: 0 },
     onebot: { url: `ws://127.0.0.1:${server.port}/`, requestTimeoutSeconds: 1 },
-    agent: { sending: { enabled: false }, allowedGroups: ['10'], allowedUsers: ['20'], quietHours: null } });
+    agent: { observation: { enabled: false }, sending: { enabled: false }, allowedGroups: ['10'], allowedUsers: ['20'], quietHours: null } });
   const bot = new OneBot(c.onebot, 'local-test-token'), stop = new AbortController();
   const engine = new Engine(c, store, new Provider(c.provider, c.apiKey, store), bot);
   bot.on('event', event => engine.ingest(event));

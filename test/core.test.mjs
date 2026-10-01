@@ -80,7 +80,7 @@ test('DeepSeek configuration never borrows an unrelated OpenAI/Anthropic API key
   }
 });
 function config() {
-  return merge(defaults, { apiKey: 'test-only', provider: { model: 'test' }, agent: { sending: { enabled: false }, allowedGroups: ['10'], allowedUsers: ['20'], quietHours: null } });
+  return merge(defaults, { apiKey: 'test-only', provider: { model: 'test' }, agent: { observation: { enabled: false }, sending: { enabled: false }, allowedGroups: ['10'], allowedUsers: ['20'], quietHours: null } });
 }
 function event(id = '1', text = 'How can we improve our garden?', at = false) {
   return { post_type: 'message', message_type: 'group', self_id: 99, user_id: 20, group_id: 10,

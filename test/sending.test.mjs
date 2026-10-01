@@ -9,7 +9,7 @@ const prediction = { shouldSend: true, outcomes: { reply: 0.6, silence: 0.3, neg
 function fixture({ direct = false, draw = 0, forecast = prediction, dryRun = false } = {}) {
   let now = 1_000_000, sent = 0, rolls = 0;
   const store = new Store(':memory:'), calls = [];
-  const c = merge(defaults, { apiKey: 'test', provider: { model: 'mock' }, agent: { allowedGroups: ['10'], quietHours: null, dryRun } });
+  const c = merge(defaults, { apiKey: 'test', provider: { model: 'mock' }, agent: { observation: { enabled: false }, allowedGroups: ['10'], quietHours: null, dryRun } });
   const provider = { json: async (system, payload) => {
     calls.push({ system, payload });
     if (system.includes('TASK: FORM')) return { allocation: 'open', candidates: [{ kind: 'system2', text: '可以试试这个方法' }] };

@@ -145,6 +145,7 @@ export class Store {
     this.db.prepare('DELETE FROM learned_memories WHERE expires<=? OR created<?').run(now, now - retentionDays * 86400);
     // Notebook/trait retention is independent of raw-message retention.
     this.db.prepare('DELETE FROM memory_layers WHERE expires<=?').run(now);
+    if (this.db.prepare("SELECT name FROM sqlite_master WHERE name='group_orientation'").get()) this.db.prepare("UPDATE group_orientation SET sources=json_remove(sources,'$.history','$.notices') WHERE started<?").run(now - retentionDays * 86400);
     this.db.prepare("UPDATE chat_learning SET style='',sources='[]' WHERE updated<?").run(now - retentionDays * 86400);
     for (const table of ['decisions', 'deliveries', 'send_assessments', 'expectations']) this.db.prepare(`DELETE FROM ${table} WHERE ts<?`).run(now - retentionDays * 86400);
     this.db.exec('DELETE FROM handled WHERE chat NOT IN (SELECT DISTINCT chat FROM messages)');

@@ -43,6 +43,18 @@ Upgrade note: previous unscoped `learned_memories` and `chat_learning.style` are
 
 ## Finish setup
 
+### Group observation before first participation / 入群观察期
+
+Observation is enabled by default for allowlisted groups, including groups enabled before this upgrade. It starts when the agent first registers that group, or restarts after receiving a new self-account `group_increase` join notice. Duplicate join notices do not restart it twice. State and the chosen style persist across agent restarts. Private chats bypass this gate.
+
+Before the first group reply (including an @mention), both **300 elapsed seconds and 20 unique new human messages** are required by default. **Configuration → Group observation period** changes these thresholds, chooses both/either, or disables observation. Time is wall-clock time since registration; existing activity schedules still govern which incoming messages are processed. Historic samples, self echoes, replayed events, ignored users and unrelated chats do not count. If a group stays quiet, observation may wait indefinitely for enough new messages. Crossing a threshold never forces a greeting; the usual activity window and sending policy still apply.
+
+The agent requests `get_group_info`, `_get_group_notice` and `get_group_msg_history` through the current OneBot connection. These are listed in [NapCat's API compatibility documentation](https://doc.napneko.icu/develop/api); other bridges may not implement the extension endpoints. The collector bounds group metadata, up to five text announcements, and a configurable history sample (default 30). Unsupported/failed/malformed sources are recorded as unavailable, not fabricated; available live chat can still support a conservative initial style. Images and file URLs are not fetched. Historical samples are analysis-only and are not replayed into the sending engine or counted toward the threshold. Collected history/announcements are removed after the configured raw-data retention window while the selected style remains.
+
+Once the thresholds pass, a separate Chinese `ORIENT` request analyzes the supplied group context and selects an initial speaking style, a short overview, and topics. It uses the existing provider/API budget. Invalid output or provider failure holds the gate closed and retries after 60 seconds. Successful analysis is required before formation/evaluation/articulation; all those stages receive the chosen style as advisory context. This adds one model request per successful initial orientation, plus any failed attempts; later conversational learning can refine the style. Group metadata and announcements remain untrusted quoted content.
+
+**Activity & logs → Group observation period** displays elapsed time, message count, source availability and the selected style. Metadata collection begins on the first eligible group processing cycle. No real QQ history retrieval or model analysis was exercised during automated verification.
+
 In a terminal:
 
 ```bash

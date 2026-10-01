@@ -106,7 +106,7 @@ test('live limits cap short details and people, and shortening retention applies
 });
 test('engine uses only current speaker notebooks, and retained candidate ideas cannot cross speakers', async () => {
   const s = new Store(':memory:'), calls = [];
-  const c = merge(defaults, { agent: { allowedGroups: ['10'], quietHours: null, sending: { enabled: false } } });
+  const c = merge(defaults, { agent: { observation: { enabled: false }, allowedGroups: ['10'], quietHours: null, sending: { enabled: false } } });
   const engine = new Engine(c, s, { json: async (system, payload) => {
     calls.push(payload);
     if (system.includes('TASK: FORM')) return { allocation: 'open', candidates: [] };

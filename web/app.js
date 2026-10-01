@@ -100,6 +100,17 @@ async function refresh() {
       detail.append(summary, element('pre', JSON.stringify({ factors: d.factors, draw: d.draw, timing: d.timing, veto: d.veto, responseMode: d.prediction.responseMode }, null, 2)));
       box.append(detail); $('assessment-list').append(box);
     }
+    $('observation-list').replaceChildren();
+    if (!state.observations?.length) $('observation-list').append(element('p', 'No group observation yet.', 'empty'));
+    for (const o of state.observations || []) {
+      const box = element('article', null, 'thought');
+      box.append(element('h3', `${o.chat} · ${o.sources.info?.name || translate('Group name unavailable')}`));
+      box.append(element('p', `${translate(o.status === 'ready' ? 'Style selected' : 'Observing before first message')} · ${translate('Elapsed seconds')}: ${Math.max(0, Math.floor(Date.now()/1000-o.started))} · ${translate('New messages')}: ${o.message_count}`));
+      box.append(element('p', ['info','notices','history'].map(k => `${translate({info:'Group information',notices:'Group announcements',history:'Group history'}[k])}: ${translate(o.sources.availability?.[k] || 'pending')}`).join(' · ')));
+      if (o.analysis.style) box.append(element('p', `${translate('Initial speaking style')}: ${o.analysis.style}`), element('p', o.analysis.summary));
+      if (o.error) box.append(element('p', 'Analysis failed; waiting to retry. No group message will be sent.', 'hint'));
+      $('observation-list').append(box);
+    }
     const learningKey = JSON.stringify([state.learning, state.memories, document.documentElement.lang]);
     if (learningKey !== learningView) {
     learningView = learningKey;

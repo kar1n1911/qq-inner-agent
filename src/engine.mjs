@@ -3,6 +3,7 @@ import { allowed, normalize, quiet, activeAt, select, repeated } from './policy.
 import { formation, evaluation, articulationFor, forecast } from './prompts.mjs';
 import { forecastResult, sendingProbability } from './sending.mjs';
 import { parseMemoryUpdates } from './memory.mjs';
+import { GroupOrientation } from './orientation.mjs';
 
 const criteria = new Set(['relevance', 'information_gap', 'expected_impact', 'urgency', 'coherence', 'originality', 'balance', 'dynamics']);
 const scoreOk = n => typeof n === 'number' && Number.isFinite(n) && n >= 1 && n <= 5;
@@ -14,6 +15,7 @@ export class Engine {
     this.random = options.random || Math.random;
     this.chats = new Map(); this.running = new Set(); this.controller = new AbortController();
     this.lastError = null; this.lastCycle = 0;
+    this.orientation = new GroupOrientation(store, config, provider, transport, this.now, this.controller.signal);
   }
   state(chat) {
     if (!this.chats.has(chat)) {
@@ -25,11 +27,19 @@ export class Engine {
   }
   ingest(event) {
     const a = this.config.agent, now = this.now();
+    if (a.observation.enabled && event.post_type === 'notice' && event.notice_type === 'group_increase' && (event.self_id == null || String(event.self_id) === String(this.transport.selfId)) && String(event.user_id) === String(this.transport.selfId) && a.allowedGroups.includes(String(event.group_id))) {
+      const chat = `group:${event.group_id}`, previous = this.orientation.get(chat)?.epoch;
+      this.orientation.joined(chat, Number(event.time) || now);
+      const state = this.chats.get(chat);
+      if (state && previous !== this.orientation.get(chat)?.epoch) { state.version++; state.pending = false; state.pauseDone = true; }
+      return;
+    }
     if (!activeAt(now, a.schedule)) return;
     const m = normalize(event, this.transport.selfId, a, now);
     if (!m) return;
     const state = this.state(m.chat);
     if (!state || !this.store.message(m)) return;
+    this.orientation.observe(m.chat);
     if (a.learning.enabled) this.store.memory.capture(m, now, a.memory);
     this.store.observe(m, now);
     state.version++; state.lastHuman = now; state.lastId = m.id;
@@ -79,11 +89,14 @@ export class Engine {
     const state = this.chats.get(chat), a = this.config.agent, now = this.now();
     if (!state || !allowed(chat, a) || !activeAt(now, a.schedule)) return;
     const version = state.version, id = state.lastId;
+    if (!await this.orientation.beforeSpeak(chat)) { state.due = this.now() + 5; return; }
+    if (version !== state.version || this.controller.signal.aborted || !activeAt(this.now(), a.schedule)) return;
+    const orientationEpoch = this.orientation.get(chat)?.epoch;
     if (a.sending.enabled && this.store.assessment(chat, id)) { this.finish(state, chat, id, version, trigger, true); return; }
     const hint = trigger === 'pause' ? 'open' : state.hint;
     state.lastThink = now; this.lastCycle = now;
     const profile = this.store.learningState(chat);
-    const obsolete = () => version !== state.version || this.controller.signal.aborted || profile.epoch !== this.store.learningState(chat).epoch;
+    const obsolete = () => version !== state.version || this.controller.signal.aborted || profile.epoch !== this.store.learningState(chat).epoch || orientationEpoch !== this.orientation.get(chat)?.epoch;
     const history = this.store.history(chat, a.learning.enabled ? Math.max(a.historyLimit, a.learning.minMessages) : a.historyLimit);
     const last = history.filter(x => !x.self).at(-1);
     if (!last) return;
@@ -102,6 +115,7 @@ export class Engine {
     const chatStyle = context => context.map(scope => ({ subject: scope.subject, traits: scope.traits.map(m => ({ key: m.slot, text: m.text, sources: m.sources })) }));
     const initialMemory = memoryContext();
     const payload = { persona: a.persona, name: a.name, trigger, addressedHint: hint,
+      groupOrientation: this.orientation.profile(chat),
       chatStyle: chatStyle(initialMemory),
       memoryContext: initialMemory,
       learning: { requested: learnNow, subjects: initialMemory.map(s => s.subject), currentSpeaker: last.sender },
@@ -174,7 +188,7 @@ export class Engine {
       }
     }
     const response = await this.provider.json(articulationFor(a.replyLanguage), { persona: a.persona, name: a.name,
-      history: payload.history, chatStyle: payload.chatStyle, memories: payload.memories, memoryContext: payload.memoryContext, selectedIdea: selected.text, responsePlan: prediction,
+      history: payload.history, groupOrientation: payload.groupOrientation, chatStyle: payload.chatStyle, memories: payload.memories, memoryContext: payload.memoryContext, selectedIdea: selected.text, responsePlan: prediction,
       priorExpectation: payload.priorExpectation, assertiveTone: a.proactiveTone, maxCharacters: a.maxOutputChars }, signal).catch(error => {
         this.store.assessmentStatus(chat, id, 'generation_failed'); throw error;
       });
