@@ -1,4 +1,15 @@
 import { startI18n, setLanguage, translate } from './i18n.mjs';
+
+// The one personal line the console shows its owner. The phrase is written in
+// English like every other application-owned string so the i18n observer
+// translates it in place; refresh() recomputes it, so a language switch follows.
+function greetingFor(date) {
+  const hour = date.getHours();
+  if (hour < 5) return 'Good evening';
+  if (hour < 12) return 'Good morning';
+  if (hour < 18) return 'Good afternoon';
+  return 'Good evening';
+}
 const $ = id => document.getElementById(id);
 startI18n();
 let csrf = '', saved = null, dirty = false, polling = false, logs = [], online = false;
@@ -64,7 +75,8 @@ async function refresh() {
   if (!csrf || polling) return; polling = true;
   try {
     const state = await api('/api/state'), s = state.status;
-    online = true; $('dashboard-connection').textContent = 'Live connection';
+    online = true; $('dashboard-connection').textContent = 'Live connection'; document.body.classList.add('live');
+    $('greeting').textContent = greetingFor(new Date());
     const fresh = s && Date.now() - Date.parse(s.updatedAt) < 20000;
     $('service-value').textContent = state.serviceState === 'active' ? 'Running' : state.serviceState === 'inactive' ? 'Stopped' : state.serviceState;
     $('service-detail').textContent = fresh ? `${s.activeChats} active conversations` : 'No recent agent heartbeat';
@@ -152,7 +164,7 @@ async function refresh() {
     if (!state.thoughts.length) $('thought-list').append(element('p', 'No retained ideas yet. Ideas that are withheld can remain here for later reevaluation.', 'empty'));
     for (const t of state.thoughts) { const box = element('div', null, 'thought'); box.append(element('p', t.text), element('small', `${t.chat} · ${t.kind} · score ${Number(t.score).toFixed(2)}`)); $('thought-list').append(box); }
     logs = state.logs; renderLogs();
-  } catch (e) { $('dashboard-connection').textContent = 'Reconnecting…'; if (online) notice('Connection interrupted. Retrying automatically.', true); online = false; }
+  } catch (e) { document.body.classList.remove('live'); $('dashboard-connection').textContent = 'Reconnecting…'; if (online) notice('Connection interrupted. Retrying automatically.', true); online = false; }
   finally { polling = false; }
 }
 async function boot() {

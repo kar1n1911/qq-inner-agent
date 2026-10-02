@@ -1,6 +1,9 @@
 // Only application-owned UI text is translated. Chat contents, model IDs, logs,
 // configuration editors and other user-provided values remain untouched.
 const pairs = `
+Good morning|早上好
+Good afternoon|下午好
+Good evening|晚上好
 Participation principles|参与行为准则
 Base reply style|基础回复风格
 Interests (one per line)|兴趣方向（每行一项）
