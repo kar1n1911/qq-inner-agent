@@ -65,16 +65,39 @@ impl Zone {
 
     fn minutes_of_day(&self, utc: DateTime<Utc>) -> i64 {
         match self {
-            Self::Fixed(offset) => {
-                let local = utc.with_timezone(offset);
-                i64::from(local.hour() * 60 + local.minute())
-            }
-            Self::Named(tz) => {
-                let local = utc.with_timezone(tz);
-                i64::from(local.hour() * 60 + local.minute())
-            }
+            Self::Fixed(offset) => integer_minutes(utc.with_timezone(offset)),
+            Self::Named(tz) => integer_minutes(utc.with_timezone(tz)),
         }
     }
+
+    /// 保留秒的小数部分：活动节奏曲线按 `hour*60 + minute + second/60` 定位。
+    fn fractional_minute_of_day(&self, utc: DateTime<Utc>) -> f64 {
+        match self {
+            Self::Fixed(offset) => fractional_minutes(utc.with_timezone(offset)),
+            Self::Named(tz) => fractional_minutes(utc.with_timezone(tz)),
+        }
+    }
+}
+
+fn integer_minutes<Tz: TimeZone>(local: DateTime<Tz>) -> i64 {
+    i64::from(local.hour() * 60 + local.minute())
+}
+
+fn fractional_minutes<Tz: TimeZone>(local: DateTime<Tz>) -> f64 {
+    f64::from(local.hour() * 60 + local.minute()) + f64::from(local.second()) / 60.0
+}
+
+/// 把"秒（可含小数）"换算成 UTC 的 `DateTime`。
+///
+/// JS 的 `new Date(now * 1000)` 会先把毫秒截断成整数，这里照做。
+fn to_utc(now: f64) -> Option<DateTime<Utc>> {
+    let millis = (now * 1000.0).trunc();
+    if !millis.is_finite() {
+        return None;
+    }
+    let millis = millis as i64;
+    Utc.timestamp_opt(millis.div_euclid(1000), (millis.rem_euclid(1000) * 1_000_000) as u32)
+        .single()
 }
 
 /// 把"秒（可含小数）"转成该时区的本地分钟数（0..1440）。
@@ -85,21 +108,21 @@ impl Zone {
 /// 公开是为了让 parity 测试能直接与 JS 的 `Intl.DateTimeFormat` 逐点比对，从而把
 /// "时区数据库版本不同"这种问题暴露出来，而不是被 `quiet()` 的布尔结果掩盖。
 pub fn local_minutes_of_day(now: f64, timezone: Option<&str>) -> Option<i64> {
-    let millis = (now * 1000.0).trunc();
-    if !millis.is_finite() {
-        return None;
-    }
-    let millis = millis as i64;
-    let utc = Utc
-        .timestamp_opt(millis.div_euclid(1000), (millis.rem_euclid(1000) * 1_000_000) as u32)
-        .single()?;
+    let utc = to_utc(now)?;
     match timezone {
         Some(name) => Zone::parse(name).map(|zone| zone.minutes_of_day(utc)),
         None => {
             let local = utc.with_timezone(&Local);
-            Some(i64::from(local.hour() * 60 + local.minute()))
+            Some(integer_minutes(local))
         }
     }
+}
+
+/// 与 [`local_minutes_of_day`] 相同，但保留秒的小数部分。
+/// 活动节奏曲线需要秒级精度（JS 里用的是 `hour*60 + minute + second/60`）。
+pub fn local_minute_of_day(now: f64, timezone: &str) -> Option<f64> {
+    let utc = to_utc(now)?;
+    Zone::parse(timezone).map(|zone| zone.fractional_minute_of_day(utc))
 }
 
 /// 复刻 `allowed()`：`chat` 形如 `group:<id>` 或 `private:<id>`。
@@ -132,7 +155,7 @@ pub fn quiet(now: f64, hours: Option<&QuietHours>) -> bool {
     }
 }
 
-fn parse_hhmm(value: &str) -> Option<i64> {
+pub(crate) fn parse_hhmm(value: &str) -> Option<i64> {
     let (h, m) = value.split_once(':')?;
     Some(h.trim().parse::<i64>().ok()? * 60 + m.trim().parse::<i64>().ok()?)
 }
