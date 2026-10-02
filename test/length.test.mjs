@@ -50,7 +50,7 @@ test('formation lets candidates carry a mild opinion', () => {
   assert.match(formation, /不同看法/);
 });
 
-function fixture({ direct, lengthDraw }) {
+function fixture({ direct, lengthDraw, logs }) {
   let now = 1_000_000, sent = 0;
   const store = new Store(':memory:'), calls = [];
   const c = merge(defaults, {
@@ -68,7 +68,10 @@ function fixture({ direct, lengthDraw }) {
   const transport = { selfId: '99', online: true, connected: true, send: async () => ({ message_id: ++sent }) };
   // A constant expressionRandom keeps the sampled bucket deterministic no matter how
   // many draws decoration selection consumes first.
-  const engine = new Engine(c, store, provider, transport, { now: () => now, random: () => 0, expressionRandom: () => lengthDraw });
+  const engine = new Engine(c, store, provider, transport, {
+    now: () => now, random: () => 0, expressionRandom: () => lengthDraw,
+    log: (event, data) => logs?.push({ event, data }),
+  });
   engine.ingest({
     post_type: 'message', message_type: 'group', self_id: 99, user_id: 20, group_id: 10, time: now, message_id: 'first',
     message: `${direct ? '[CQ:at,qq=99]' : ''}有什么建议？`,
@@ -76,6 +79,17 @@ function fixture({ direct, lengthDraw }) {
   now += 30;
   return { store, calls, engine };
 }
+
+test('the sampled bucket is recorded in the send log so variation stays auditable', async () => {
+  const logs = [];
+  const f = fixture({ direct: false, lengthDraw: 0.5, logs }); // open turn -> short
+  try {
+    await f.engine.cycle('group:10');
+    const sent = logs.find(entry => entry.event === 'message_sent');
+    assert.ok(sent, 'the send should be logged');
+    assert.equal(sent.data.lengthTarget, 'short');
+  } finally { f.store.close(); }
+});
 
 test('a cycle threads the sampled length target into the articulation payload', async () => {
   const f = fixture({ direct: false, lengthDraw: 0.1 }); // open turn -> tiny

@@ -239,7 +239,7 @@ export class Engine {
       if (prediction) this.store.expect(chat, this.now(), a.sending.expectationSeconds, prediction);
       this.store.message({ chat, id: String(sent?.message_id ?? deliveryId), sender: this.transport.selfId, name: a.name, text, ts: this.now(), self: true });
       this.store.decision(chat, 'sent', selected.adjusted, selected.for, this.now());
-      this.lastError = null; this.log('message_sent', { chat, proactive });
+      this.lastError = null; this.log('message_sent', { chat, proactive, lengthTarget });
     } catch (error) {
       this.store.finishDelivery(deliveryId, error.uncertain ? 'uncertain' : 'failed');
       this.store.assessmentStatus(chat, id, error.uncertain ? 'uncertain' : 'failed');
