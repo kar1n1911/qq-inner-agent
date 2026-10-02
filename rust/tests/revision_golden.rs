@@ -12,7 +12,10 @@ use qq_inner_core::settings::revision;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const CASES: &[(&str, &[(&str, &str)], &str)] = &[
+/// (fixture 名, 该 fixture 的 (文件, 内容) 列表, 期望的 sha256 十六进制)
+type Case = (&'static str, &'static [(&'static str, &'static str)], &'static str);
+
+const CASES: &[Case] = &[
     (
         "both",
         &[("config.json", "{\"a\":1}"), ("secrets.json", "{\"k\":\"v\"}")],
