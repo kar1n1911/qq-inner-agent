@@ -3,7 +3,7 @@ use crate::config::{js_string, truthy};
 use rusqlite::{params, Transaction, TransactionBehavior};
 
 // 复用 rand 生成 RFC 4122 v4 UUID，不新增依赖。
-fn uuid() -> String {
+pub(crate) fn uuid() -> String {
     let mut bytes: [u8; 16] = rand::random();
     bytes[6] = (bytes[6] & 15) | 64;
     bytes[8] = (bytes[8] & 63) | 128;
@@ -19,7 +19,7 @@ fn uuid() -> String {
 }
 // JSON 列使用紧凑 UTF-8 TEXT，与 JSON.stringify/parse 数据格式互通。
 // SQL NULL 保留为 JSON null；缺失行用 Option，默认对象不补入不存在的 chat 键。
-fn decode(row: &mut Value, keys: &[&str]) -> Result<()> {
+pub(crate) fn decode(row: &mut Value, keys: &[&str]) -> Result<()> {
     for key in keys {
         if let Some(s) = row[*key].as_str() {
             row[*key] = serde_json::from_str(s)?;
@@ -28,13 +28,13 @@ fn decode(row: &mut Value, keys: &[&str]) -> Result<()> {
     Ok(())
 }
 impl Store {
-    fn immediate(&self) -> Result<Transaction<'_>> {
+    pub(crate) fn immediate(&self) -> Result<Transaction<'_>> {
         Ok(Transaction::new_unchecked(
             &self.db,
             TransactionBehavior::Immediate,
         )?)
     }
-    fn first(&self, sql: &str, args: impl Params) -> Result<Option<Value>> {
+    pub(crate) fn first(&self, sql: &str, args: impl Params) -> Result<Option<Value>> {
         Ok(self.rows(sql, args)?.into_iter().next())
     }
     pub fn recover_deliveries(&self) -> Result<()> {

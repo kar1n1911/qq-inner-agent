@@ -6,6 +6,10 @@ use std::path::Path;
 
 pub struct Store {
     db: Connection,
+    // 所有 LayeredMemory 视图共享计数，learn/reset 不会使入站容量索引失效。
+    pub(crate) memory_pending:
+        std::cell::RefCell<std::collections::HashMap<String, crate::memory::Pending>>,
+    pub(crate) memory_last_maintenance: std::cell::Cell<Option<f64>>,
 }
 impl Store {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
@@ -17,7 +21,11 @@ impl Store {
     fn initialize(db: Connection) -> Result<Self> {
         db.set_prepared_statement_cache_capacity(64);
         db.execute_batch(include_str!("store/schema.sql"))?;
-        let store = Self { db };
+        let store = Self {
+            db,
+            memory_pending: Default::default(),
+            memory_last_maintenance: Default::default(),
+        };
         // 先探测再 ALTER，兼容旧库与重复打开；触发器 DDL 集中在 schema.sql。
         for (table, column, definition) in [
             ("thoughts", "subject", "TEXT"),
@@ -40,10 +48,10 @@ impl Store {
     pub fn connection(&self) -> &Connection {
         &self.db
     }
-    fn execute(&self, sql: &str, args: impl Params) -> Result<usize> {
+    pub(crate) fn execute(&self, sql: &str, args: impl Params) -> Result<usize> {
         Ok(self.db.prepare_cached(sql)?.execute(args)?)
     }
-    fn rows(&self, sql: &str, args: impl Params) -> Result<Vec<Value>> {
+    pub(crate) fn rows(&self, sql: &str, args: impl Params) -> Result<Vec<Value>> {
         let mut statement = self.db.prepare_cached(sql)?;
         let names: Vec<String> = statement
             .column_names()
@@ -101,3 +109,8 @@ mod tests;
 
 #[path = "store/operations.rs"]
 mod operations;
+
+pub(crate) use operations::{decode, uuid};
+#[path = "store/learning.rs"]
+mod learning;
+pub use learning::{LayeredUpdate, ScopedOptions};
