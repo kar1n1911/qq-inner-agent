@@ -14,6 +14,8 @@ const target = path.join(root, 'rust', 'src', 'prompts.rs');
 
 const { boundary, formation, evaluation, articulation, forecast, articulationFor } =
   await import(path.join(root, 'src', 'prompts.mjs'));
+// ORIENT 提示词住在 orientation.mjs 里，但它同样是"行为的一部分"，一并生成。
+const { orientationPrompt } = await import(path.join(root, 'src', 'orientation.mjs'));
 
 const items = [
   ['BOUNDARY', boundary],
@@ -21,6 +23,7 @@ const items = [
   ['EVALUATION', evaluation],
   ['ARTICULATION', articulation],
   ['FORECAST', forecast],
+  ['ORIENTATION', orientationPrompt],
 ];
 
 // raw string 用 "## 作为分隔符；内容里若出现同样的序列就必须再加长。

@@ -4,6 +4,7 @@
 //! 生成,并由这里的测试保证它不会悄悄漂移。Node 不可用时跳过。
 use qq_inner_core::prompts::{
     articulation_for, ReplyLanguage, ARTICULATION, BOUNDARY, EVALUATION, FORECAST, FORMATION,
+    ORIENTATION,
 };
 use serde_json::Value;
 use std::fs;
@@ -21,10 +22,11 @@ fn every_prompt_constant_matches_the_javascript_source() {
     }
     let script = r#"
 import { boundary, formation, evaluation, articulation, forecast, articulationFor } from './src/prompts.mjs';
+import { orientationPrompt } from './src/orientation.mjs';
 import { readFileSync } from 'node:fs';
 const langs = JSON.parse(readFileSync(process.argv[1], 'utf8'));
 process.stdout.write(JSON.stringify({
-  boundary, formation, evaluation, articulation, forecast,
+  boundary, formation, evaluation, articulation, forecast, orientation: orientationPrompt,
   variants: Object.fromEntries(langs.map(l => [l, articulationFor(l)])),
 }));
 "#;
@@ -48,6 +50,7 @@ process.stdout.write(JSON.stringify({
     assert_eq!(EVALUATION, text("evaluation"));
     assert_eq!(ARTICULATION, text("articulation"));
     assert_eq!(FORECAST, text("forecast"));
+    assert_eq!(ORIENTATION, text("orientation"));
     for language in ["auto", "zh-CN", "en"] {
         let expected = js["variants"][language].as_str().expect("variant");
         assert_eq!(
