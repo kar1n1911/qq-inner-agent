@@ -31,7 +31,7 @@ ureq = { version = "2", features = ["json"] }
 rand = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1"
 thiserror = "2"
 

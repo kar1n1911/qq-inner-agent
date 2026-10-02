@@ -1,0 +1,13 @@
+# Build robustness for slow or flaky links.
+#
+# The macOS development box has been observed to abort crate downloads with
+# "failed to transfer more than 10 bytes in 30s" on an otherwise working
+# connection. Relaxing the low-speed threshold and raising the timeout fixed it
+# without changing what gets built. These settings only affect transfer
+# heuristics and retry counts.
+[http]
+low-speed-limit = 1
+timeout = 600
+
+[net]
+retry = 10
