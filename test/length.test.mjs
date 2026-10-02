@@ -46,6 +46,17 @@ test('the articulation prompt carries the length contract and the AI-tell bans',
   for (const language of ['auto', 'zh-CN', 'en']) assert.match(articulationFor(language), /lengthTarget/);
 });
 
+test('the articulation prompt carries the sticker and face guidance', () => {
+  const prompt = articulationFor('zh-CN');
+  for (const clue of ['优先 face', '只在情绪节拍上使用', '位置固定在消息末尾', '不得编造表情编号', '不要在同一段混用']) {
+    assert.ok(prompt.includes(clue), `prompt should mention: ${clue}`);
+  }
+  // The JSON contract must stay untouched by prompt wording changes.
+  assert.match(prompt, /"emoji":null,"faceId":null/);
+  // Until the engine can send a decoration-only message, the prompt must not invite one.
+  assert.ok(!prompt.includes('空文本'), 'prompt must not ask for empty text before the engine supports it');
+});
+
 test('formation lets candidates carry a mild opinion', () => {
   assert.match(formation, /不同看法/);
 });
