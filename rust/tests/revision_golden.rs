@@ -12,13 +12,14 @@ use qq_inner_core::settings::revision;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// (fixture 名, 该 fixture 的 (文件, 内容) 列表, 期望的 sha256 十六进制)
-type Case = (&'static str, &'static [(&'static str, &'static str)], &'static str);
-
-const CASES: &[Case] = &[
+type RevisionCase<'a> = (&'a str, &'a [(&'a str, &'a str)], &'a str);
+const CASES: &[RevisionCase<'_>] = &[
     (
         "both",
-        &[("config.json", "{\"a\":1}"), ("secrets.json", "{\"k\":\"v\"}")],
+        &[
+            ("config.json", "{\"a\":1}"),
+            ("secrets.json", "{\"k\":\"v\"}"),
+        ],
         "72140a075499bd712ed16fdba4c27bff81b55755508822414d6070f51d01ab04",
     ),
     (
@@ -69,7 +70,10 @@ fn revision_matches_the_javascript_golden_values() {
     for (name, files, expected) in CASES {
         let dir = materialize(&base, name, files);
         let actual = revision(&dir).expect("revision should succeed");
-        assert_eq!(&actual, expected, "fixture {name} diverged from the JS reference");
+        assert_eq!(
+            &actual, expected,
+            "fixture {name} diverged from the JS reference"
+        );
     }
 
     let _ = fs::remove_dir_all(&base);

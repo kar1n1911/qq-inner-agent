@@ -20,7 +20,7 @@ pub fn defaults() -> Value {
     serde_json::from_str(include_str!("defaults.json")).expect("embedded defaults")
 }
 
-fn truthy(v: &Value) -> bool {
+pub(crate) fn truthy(v: &Value) -> bool {
     match v {
         Value::Null => false,
         Value::Bool(b) => *b,
@@ -31,7 +31,7 @@ fn truthy(v: &Value) -> bool {
 }
 
 // JS String(x) 的 JSON 值子集；数组使用 join，null 数组成员变成空串。
-fn js_string(v: &Value) -> String {
+pub(crate) fn js_string(v: &Value) -> String {
     match v {
         Value::String(s) => s.clone(),
         Value::Null => "null".into(),

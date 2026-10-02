@@ -1,5 +1,6 @@
-//! 配置层公开接口；供后续运行时模块和 Node 交叉验证使用。
+//! 内核模块入口；供运行时模块与 Node 交叉验证使用。
 pub mod config;
+pub mod onebot;
 pub mod policy;
 pub mod prompts;
 pub mod sending;
