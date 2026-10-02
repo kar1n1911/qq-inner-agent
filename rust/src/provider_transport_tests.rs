@@ -311,14 +311,16 @@ async fn content_failures_do_not_retry() {
 
 #[tokio::test]
 async fn timeout_is_enforced_in_blocking_transport() {
+    // 超时必须明显长于「连接 + 发送」，又要明显短于 mock 的响应延迟，
+    // 否则测试会变成竞速：20ms 时客户端可能在连接阶段就超时，mock 根本收不到请求。
     let mock = Mock::new(vec![(
         200,
         success().to_string(),
         String::new(),
-        Duration::from_millis(100),
+        Duration::from_secs(2),
     )]);
     let mut p = provider(&mock);
-    p.config.timeout_seconds = 0.02;
+    p.config.timeout_seconds = 0.3;
     p.config.retries = 0.;
     assert_eq!(
         p.complete("s", "u").await,
