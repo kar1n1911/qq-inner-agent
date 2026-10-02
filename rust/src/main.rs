@@ -1,4 +1,4 @@
-//! Phase 1 配置入口；运行时配置与文件协议在独立模块中。
+//! 配置、自检与 OneBot 桥校验入口。
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use qq_inner_core::config;
@@ -28,6 +28,8 @@ enum Command {
     Selftest,
     /// Print a normalized summary with credentials redacted.
     Config,
+    /// Authenticate with the OneBot bridge and report online status.
+    Check,
 }
 
 fn resolve_root(explicit: Option<PathBuf>) -> Result<PathBuf> {
@@ -43,11 +45,34 @@ fn resolve_root(explicit: Option<PathBuf>) -> Result<PathBuf> {
     Ok(cwd)
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let cli = Cli::parse();
     let root = resolve_root(cli.root)?;
 
     match cli.command {
+        Command::Check => {
+            let c = config::load_config(&root)?.config;
+            let token = if c.onebot_token.is_truthy {
+                c.onebot_token.text
+            } else {
+                String::new()
+            };
+            let (bot, _notices) = qq_inner_core::onebot::OneBot::new(c.onebot, token);
+            match bot.check().await {
+                Ok(state) => {
+                    println!(
+                        "authentication = ok\nselfId = {}\nonline = {}",
+                        state.self_id, state.online
+                    );
+                    anyhow::ensure!(state.online, "qq_offline");
+                }
+                Err(e) => {
+                    println!("authentication = failed\nonline = false");
+                    return Err(e.into());
+                }
+            }
+        }
         Command::Config => {
             let loaded = config::load_config(&root)?;
             println!(
