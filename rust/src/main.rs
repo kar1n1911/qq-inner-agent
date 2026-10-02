@@ -1,27 +1,17 @@
-//! qq-inner-core — the Rust core for qq-inner-agent.
-//!
-//! Phase 0 skeleton. It resolves the repository root, loads `config.json`, opens
-//! an in-memory SQLite database, and reports what it found. This exists to prove
-//! the toolchain and dependency set on the deployment host before the real
-//! modules land.
-//!
-//! Roadmap (see `docs/rust-port/ARCHITECTURE.md`):
-//!   Phase 1  config + store + logging/status.json
-//!   Phase 2  onebot transport
-//!   Phase 3  provider adapters
-//!   Phase 4  engine + policy + sending + activity + orientation
-//!   Phase 5  memory + ranking + expression + learning
-//!   Phase 6  control socket + Node dashboard as a thin client
-
+//! Phase 1 配置入口；运行时配置与文件协议在独立模块中。
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use qq_inner_core::config;
 use rusqlite::Connection;
 use serde_json::Value;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
-#[command(name = "qq-inner-core", version, about = "Rust core for qq-inner-agent")]
+#[command(
+    name = "qq-inner-core",
+    version,
+    about = "Rust core for qq-inner-agent"
+)]
 struct Cli {
     /// Repository root. Defaults to $QQ_INNER_ROOT, then walks up from the
     /// current directory looking for `config.example.json`.
@@ -36,6 +26,8 @@ struct Cli {
 enum Command {
     /// Probe the repository root, configuration, and SQLite, then exit.
     Selftest,
+    /// Print a normalized summary with credentials redacted.
+    Config,
 }
 
 fn resolve_root(explicit: Option<PathBuf>) -> Result<PathBuf> {
@@ -51,22 +43,23 @@ fn resolve_root(explicit: Option<PathBuf>) -> Result<PathBuf> {
     Ok(cwd)
 }
 
-fn load_config(root: &Path) -> Result<Value> {
-    let path = root.join("config.json");
-    let text = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-    serde_json::from_str(&text).with_context(|| format!("parse {}", path.display()))
-}
-
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let root = resolve_root(cli.root)?;
 
     match cli.command {
+        Command::Config => {
+            let loaded = config::load_config(&root)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&config::summary(&loaded.config))?
+            );
+        }
         Command::Selftest => {
-            let config = load_config(&root)?;
+            // 使用同一配置加载流程；SQLite 仍仅在内存中自检。
+            let config = config::load_config(&root)?.raw;
             let conn = Connection::open_in_memory().context("open in-memory sqlite")?;
-            let sqlite: String =
-                conn.query_row("SELECT sqlite_version()", [], |row| row.get(0))?;
+            let sqlite: String = conn.query_row("SELECT sqlite_version()", [], |row| row.get(0))?;
 
             let field = |pointer: &str| {
                 config
