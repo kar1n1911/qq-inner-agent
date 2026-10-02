@@ -218,18 +218,25 @@ Node 侧先**双读**:控制套接字可用则订阅事件,否则回退到 `stat
 
 ## 7. 分期计划
 
-| 阶段 | 内容 | 验收 |
-| --- | --- | --- |
-| **P0** | 骨架、依赖验证、架构文档、revision 哈希交叉验证 | 本机与远端均能 `cargo build` |
-| **P1** | `config` + `store` + 日志/`status.json` + `settings` revision | 与 JS 对同一 `data/` 打开同一库,表结构一致;revision 哈希一致 |
-| **P2** | `onebot` 传输 | 用真实 OneBot mock 跑通鉴权/心跳/重连/发送 |
-| **P3** | `provider` | 对本地 mock HTTP 跑通两种 API 格式与全部错误码 |
-| **P4** | `engine` + `policy` + `sending` + `activity` + `orientation` | 与 JS 版决策结果对齐(同输入同输出) |
-| **P5** | `memory` + `ranking` + `expression` + `learning` | 隔离性/淘汰/过期行为对齐 |
-| **P6** | 控制套接字 + Node 仪表盘改造为瘦客户端 | 仪表盘全部页面在 Rust 内核下可用 |
-| **P7** | 前端个性化改版 | 视觉与交互改版,功能不回归 |
-| **P8** | 更像真人的提示词与行为调优 | 对比样本 + 主观评估 |
-| **P9** | 测试、实况验证、切换与回退方案 | 在远端跑通,含性能对比(内存/CPU/延迟) |
+状态随实际推进更新。**注意:`store` 已从 P1 拆出为独立阶段(P1b)** —— 它尚未派发。
+
+| 阶段 | 内容 | 验收 | 状态 |
+| --- | --- | --- | --- |
+| **P0** | 骨架、依赖验证、架构文档、代码勘察 | 本机与远端均能 `cargo build`;依赖集在**无 cmake/make/pkg-config/免密 sudo** 的主机上可编译 | ✅ 完成 |
+| **P1** | `settings`(revision / atomicJson)+ `config`(defaults / merge / validate / loadConfig / readiness) | Node↔Rust 对同一 fixture 的 defaults / loadConfig / validate / revision **逐字相等** | ✅ 代码完成,待合并 |
+| **P1b** | **`store`**:17 张表 schema、全部查询、保留期清理、`callBudget` 滚动限流 | 与 JS 打开同一库时表结构一致;查询与保留期行为对齐 | ⬜ **尚未派发** |
+| **P2** | `onebot` 传输 | 对本地 WS mock 跑通鉴权/心跳/重连/early 缓冲/echo 关联/发送格式 | 📋 规格已备 |
+| **P3** | `provider` 适配 | 对本地 HTTP mock 跑通两种 API 格式、重试退避与全部错误码 | 📋 规格已备 |
+| **P4** | `memory` + `ranking` + `expression`(跳过死代码 `learning.mjs`) | 隔离性/淘汰/过期行为对齐;并落地两项优化:**enforce 改增量+批处理**、**ranking 预计算 token 缓存** | ⬜ |
+| **P5** | `policy` + `sending` + `activity` + `orientation` | 纯函数逐一比对;时区/夏令时用 `chrono-tz` 精确匹配 JS `Intl` | ⬜ |
+| **P6** | `engine` 决策循环 | 与 JS **同输入同输出**(golden 对比);取消/版本/配额/先落库后发送的语义一致 | ⬜ |
+| **P7** | 控制套接字 + Node 仪表盘瘦客户端化 | 仪表盘全部页面在 Rust 内核下可用;Node 侧双读灰度 | ⬜ |
+| **P8** | 个性化前端改版 | 视觉与交互改版,功能不回归 | 🔄 第一轮精修已交付并视觉验证 |
+| **P9** | 更像真人的提示词与行为 | 对比样本 + 可判定指标(长度分布、句式黑名单命中率) | 🔄 JS 版已交付并测试;待同步到 Rust `prompts.rs` |
+| **P10** | 实况验证、切换与回退 | 在远端跑通;含性能对比(内存 / CPU / 延迟) | ⬜ |
+
+依赖顺序:P1 → P1b → {P2, P3} → P4 → P5 → P6 → P7 → P10。
+P8/P9 与主线解耦,可并行。
 
 ---
 
