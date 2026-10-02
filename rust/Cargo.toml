@@ -1,0 +1,42 @@
+[package]
+name = "qq-inner-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+description = "Rust core for qq-inner-agent: OneBot v11 transport, SQLite store, and the decision engine"
+publish = false
+
+[[bin]]
+name = "qq-inner-core"
+path = "src/main.rs"
+
+# Dependency constraints are deliberate. The deployment host (100.114.145.17) has
+# only cc/gcc and perl: there is no cmake, make, or pkg-config, and no system
+# sqlite/openssl headers, and passwordless sudo is unavailable. Every crate below
+# was verified to build under those conditions:
+#   - rusqlite "bundled" compiles SQLite from source through cc (no pkg-config).
+#   - ureq/rustls resolve to the *ring* provider, not aws-lc-rs (which needs cmake).
+#   - tokio-tungstenite is used without TLS: the OneBot bridge is plain ws:// on
+#     loopback.
+# Do not add a dependency that requires cmake, make, pkg-config, OpenSSL, or
+# system SQLite without re-validating a clean build on the deployment host.
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "net", "io-util", "signal"] }
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+ureq = { version = "2", features = ["json"] }
+rand = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+thiserror = "2"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
