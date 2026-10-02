@@ -4,6 +4,7 @@ pub mod config;
 pub mod onebot;
 pub mod policy;
 pub mod prompts;
+pub mod provider;
 pub mod sending;
 pub mod settings;
 pub mod text;
