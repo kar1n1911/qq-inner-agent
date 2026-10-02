@@ -19,7 +19,10 @@ use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 static SEQ: AtomicUsize = AtomicUsize::new(0);
 
 fn node_available() -> bool {
-    Command::new("node").arg("--version").output().is_ok_and(|o| o.status.success())
+    Command::new("node")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success())
 }
 
 /// 走真实的加载路径（对应 JS 的 `loadConfig`）：只写一份 config.json 覆盖项，
@@ -31,7 +34,11 @@ fn config_with(extra: Value) -> Config {
         SEQ.fetch_add(1, AtomicOrdering::Relaxed)
     ));
     fs::create_dir_all(&dir).expect("create config dir");
-    fs::write(dir.join("config.json"), serde_json::to_string(&extra).unwrap()).unwrap();
+    fs::write(
+        dir.join("config.json"),
+        serde_json::to_string(&extra).unwrap(),
+    )
+    .unwrap();
     fs::write(dir.join("secrets.json"), "{}").unwrap();
     let loaded = load_with_env(&dir, |_| None).expect("load config");
     let _ = fs::remove_dir_all(&dir);
@@ -68,11 +75,19 @@ process.stdout.write(JSON.stringify({
     let out = Command::new("node")
         .args(["--input-type=module", "-e", script])
         .arg(&payload_file)
-        .current_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap())
+        .current_dir(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap(),
+        )
         .output()
         .expect("run node");
     let _ = fs::remove_dir_all(&dir);
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     serde_json::from_slice(&out.stdout).expect("node output")
 }
 
@@ -110,7 +125,8 @@ fn local_minutes_match_icu_point_by_point() {
             local.push(json!({ "ts": ts, "zone": zone }));
         }
     }
-    let payload = json!({ "local": local, "quiet": [], "active": [], "terms": [], "similarity": [] });
+    let payload =
+        json!({ "local": local, "quiet": [], "active": [], "terms": [], "similarity": [] });
     let js = run_node(&payload);
 
     let mut index = 0;
@@ -151,7 +167,8 @@ fn quiet_matches_javascript_across_zones_and_windows() {
             }
         }
     }
-    let payload = json!({ "local": [], "quiet": cases, "active": [], "terms": [], "similarity": [] });
+    let payload =
+        json!({ "local": [], "quiet": cases, "active": [], "terms": [], "similarity": [] });
     let js = run_node(&payload);
 
     for (index, case) in cases.iter().enumerate() {
@@ -174,7 +191,10 @@ fn fixed_utc_offsets_resolve_before_falling_back_to_a_region() {
     assert_eq!(local_minutes_of_day(ts, Some("GMT")), Some(12 * 60));
     assert_eq!(local_minutes_of_day(ts, Some("UTC+8")), Some(20 * 60));
     assert_eq!(local_minutes_of_day(ts, Some("UTC-3")), Some(9 * 60));
-    assert_eq!(local_minutes_of_day(ts, Some("UTC+05:30")), Some(17 * 60 + 30));
+    assert_eq!(
+        local_minutes_of_day(ts, Some("UTC+05:30")),
+        Some(17 * 60 + 30)
+    );
     assert_eq!(local_minutes_of_day(ts, Some("GMT+2")), Some(14 * 60));
     assert_eq!(local_minutes_of_day(ts, Some("+08:00")), Some(20 * 60));
     // 大小写与首尾空白不敏感。
@@ -194,7 +214,10 @@ fn quiet_returns_false_without_configuration() {
         end: 8.0,
         timezone: Some("UTC".into()),
     };
-    assert!(!quiet(1_767_225_600.0, Some(&same)), "equal start/end means no quiet hours");
+    assert!(
+        !quiet(1_767_225_600.0, Some(&same)),
+        "equal start/end means no quiet hours"
+    );
 }
 
 #[test]
@@ -216,7 +239,8 @@ fn active_at_matches_javascript_across_zones() {
             cases.push(json!({ "ts": ts, "schedule": schedule }));
         }
     }
-    let payload = json!({ "local": [], "quiet": [], "active": cases, "terms": [], "similarity": [] });
+    let payload =
+        json!({ "local": [], "quiet": [], "active": cases, "terms": [], "similarity": [] });
     let js = run_node(&payload);
 
     for (index, case) in cases.iter().enumerate() {
@@ -294,7 +318,13 @@ fn terms_and_similarity_match_javascript_on_a_tricky_corpus() {
     }
 }
 
-fn candidate(id: &str, kind: CandidateKind, motivation: f64, relevance: f64, originality: f64) -> Candidate {
+fn candidate(
+    id: &str,
+    kind: CandidateKind,
+    motivation: f64,
+    relevance: f64,
+    originality: f64,
+) -> Candidate {
     Candidate {
         id: id.into(),
         kind,
@@ -309,7 +339,10 @@ fn candidate(id: &str, kind: CandidateKind, motivation: f64, relevance: f64, ori
 
 #[test]
 fn selection_honours_thresholds_and_allocation() {
-    let agent = config_with(json!({ "agent": { "proactive": true, "threshold": 4.09, "interruptThreshold": 4.8 } })).agent;
+    let agent = config_with(
+        json!({ "agent": { "proactive": true, "threshold": 4.09, "interruptThreshold": 4.8 } }),
+    )
+    .agent;
     let rated = vec![
         candidate("a", CandidateKind::System2, 5.0, 5.0, 5.0),
         candidate("b", CandidateKind::System2, 4.5, 3.0, 3.0),
@@ -317,15 +350,18 @@ fn selection_honours_thresholds_and_allocation() {
     ];
 
     // 被点名时一定选最高分，不看阈值。
-    let picked = qq_inner_core::policy::select(&rated, Allocation::SelfChat, &agent, 0.0, || 0.0).unwrap();
+    let picked =
+        qq_inner_core::policy::select(&rated, Allocation::SelfChat, &agent, 0.0, || 0.0).unwrap();
     assert_eq!(picked.candidate.id, "a");
 
     // 开放轮次用 threshold。
-    let picked = qq_inner_core::policy::select(&rated, Allocation::Open, &agent, 0.0, || 1.0).unwrap();
+    let picked =
+        qq_inner_core::policy::select(&rated, Allocation::Open, &agent, 0.0, || 1.0).unwrap();
     assert_eq!(picked.candidate.id, "a");
 
     // 别人被点名时用更高的 interruptThreshold：a 仍达标。
-    let picked = qq_inner_core::policy::select(&rated, Allocation::Other, &agent, 0.0, || 1.0).unwrap();
+    let picked =
+        qq_inner_core::policy::select(&rated, Allocation::Other, &agent, 0.0, || 1.0).unwrap();
     assert_eq!(picked.candidate.id, "a");
 
     // 都不达标且不触发 system1 时应返回 None。
@@ -333,23 +369,33 @@ fn selection_honours_thresholds_and_allocation() {
     assert!(qq_inner_core::policy::select(&weak, Allocation::Open, &agent, 0.0, || 1.0).is_none());
 
     // 但 system1 概率命中时可以退化为 system1 候选。默认概率是 0，因此这里显式调高。
-    let system1_agent = config_with(json!({ "agent": { "proactive": true, "system1Probability": 1 } })).agent;
+    let system1_agent =
+        config_with(json!({ "agent": { "proactive": true, "system1Probability": 1 } })).agent;
     let system1 = vec![candidate("s", CandidateKind::System1, 1.0, 3.0, 3.0)];
-    let picked = qq_inner_core::policy::select(&system1, Allocation::Open, &system1_agent, 0.0, || 0.0).unwrap();
+    let picked =
+        qq_inner_core::policy::select(&system1, Allocation::Open, &system1_agent, 0.0, || 0.0)
+            .unwrap();
     assert_eq!(picked.candidate.id, "s");
 
     // 非主动模式下，除了被点名都返回 None。
     let passive = config_with(json!({ "agent": { "proactive": false } })).agent;
-    assert!(qq_inner_core::policy::select(&rated, Allocation::Open, &passive, 0.0, || 0.0).is_none());
-    assert!(qq_inner_core::policy::select(&rated, Allocation::SelfChat, &passive, 0.0, || 0.0).is_some());
+    assert!(
+        qq_inner_core::policy::select(&rated, Allocation::Open, &passive, 0.0, || 0.0).is_none()
+    );
+    assert!(
+        qq_inner_core::policy::select(&rated, Allocation::SelfChat, &passive, 0.0, || 0.0)
+            .is_some()
+    );
 }
 
 #[test]
 fn turns_silent_raises_the_score_but_is_capped() {
     let agent = config_with(json!({ "agent": { "proactive": true } })).agent;
     let rated = vec![candidate("a", CandidateKind::System2, 4.0, 5.0, 5.0)];
-    let none = qq_inner_core::policy::select(&rated, Allocation::SelfChat, &agent, 0.0, || 0.0).unwrap();
-    let many = qq_inner_core::policy::select(&rated, Allocation::SelfChat, &agent, 500.0, || 0.0).unwrap();
+    let none =
+        qq_inner_core::policy::select(&rated, Allocation::SelfChat, &agent, 0.0, || 0.0).unwrap();
+    let many =
+        qq_inner_core::policy::select(&rated, Allocation::SelfChat, &agent, 500.0, || 0.0).unwrap();
     assert!(many.adjusted > none.adjusted);
     // 上限是 motivation × 1.2，再被 5.0 截断。
     assert!(many.adjusted <= 5.0);
@@ -361,7 +407,10 @@ fn length_buckets_never_give_the_throwaway_bucket_to_an_addressed_turn() {
     for i in 0..=1000 {
         let draw = i as f64 / 1000.0;
         assert_ne!(pick_length_target("self", || draw), "tiny");
-        assert!(matches!(pick_length_target("open", || draw), "tiny" | "short" | "medium" | "long"));
+        assert!(matches!(
+            pick_length_target("open", || draw),
+            "tiny" | "short" | "medium" | "long"
+        ));
     }
     assert_eq!(pick_length_target("open", || 0.34), "tiny");
     assert_eq!(pick_length_target("open", || 0.35), "short");
@@ -372,20 +421,33 @@ fn length_buckets_never_give_the_throwaway_bucket_to_an_addressed_turn() {
 
 #[test]
 fn repetition_detection_matches_the_javascript_rule() {
-    let history = vec!["今天天气不错".to_string(), "先试试这个简单方法。".to_string()];
-    assert!(repeated("今天天气不错", &history), "identical text counts as a repeat");
+    let history = vec![
+        "今天天气不错".to_string(),
+        "先试试这个简单方法。".to_string(),
+    ];
+    assert!(
+        repeated("今天天气不错", &history),
+        "identical text counts as a repeat"
+    );
     assert!(repeated("  今天天气不错  ", &history), "comparison trims");
-    assert!(repeated("先试试这个简单方法", &history), "high similarity counts as a repeat");
+    assert!(
+        repeated("先试试这个简单方法", &history),
+        "high similarity counts as a repeat"
+    );
     assert!(!repeated("完全不同的一句话内容", &history));
 }
 
 #[test]
 fn allowed_requires_an_explicit_match() {
-    let agent = config_with(json!({ "agent": { "allowedGroups": ["10"], "allowedUsers": ["20"] } })).agent;
+    let agent =
+        config_with(json!({ "agent": { "allowedGroups": ["10"], "allowedUsers": ["20"] } })).agent;
     assert!(allowed("group:10", &agent));
     assert!(allowed("private:20", &agent));
     assert!(!allowed("group:11", &agent));
-    assert!(!allowed("private:10", &agent), "a group id must not match the private list");
+    assert!(
+        !allowed("private:10", &agent),
+        "a group id must not match the private list"
+    );
     assert!(!allowed("channel:10", &agent));
     assert!(!allowed("group:", &agent));
 }

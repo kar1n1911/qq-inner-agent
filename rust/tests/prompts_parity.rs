@@ -10,7 +10,10 @@ use std::fs;
 use std::process::Command;
 
 fn node_available() -> bool {
-    Command::new("node").arg("--version").output().is_ok_and(|o| o.status.success())
+    Command::new("node")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success())
 }
 
 #[test]
@@ -31,15 +34,27 @@ process.stdout.write(JSON.stringify({
     let dir = std::env::temp_dir().join(format!("qq-inner-prompts-{}", std::process::id()));
     fs::create_dir_all(&dir).expect("create temp dir");
     let lang_file = dir.join("langs.json");
-    fs::write(&lang_file, serde_json::to_string(&["auto", "zh-CN", "en"]).unwrap()).unwrap();
+    fs::write(
+        &lang_file,
+        serde_json::to_string(&["auto", "zh-CN", "en"]).unwrap(),
+    )
+    .unwrap();
     let out = Command::new("node")
         .args(["--input-type=module", "-e", script])
         .arg(&lang_file)
-        .current_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap())
+        .current_dir(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap(),
+        )
         .output()
         .expect("run node");
     let _ = fs::remove_dir_all(&dir);
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let js: Value = serde_json::from_slice(&out.stdout).expect("node output");
 
     let text = |key: &str| js[key].as_str().expect("string field");
@@ -91,10 +106,21 @@ fn the_model_output_contract_is_still_stated() {
 /// 更像真人的约束不能在移植过程中丢失。
 #[test]
 fn the_human_like_constraints_survive() {
-    for clue in ["lengthTarget", "tiny", "优先 face", "只在情绪节拍上使用", "不同看法"] {
-        let present = [FORMATION, ARTICULATION].iter().any(|prompt| prompt.contains(clue));
+    for clue in [
+        "lengthTarget",
+        "tiny",
+        "优先 face",
+        "只在情绪节拍上使用",
+        "不同看法",
+    ] {
+        let present = [FORMATION, ARTICULATION]
+            .iter()
+            .any(|prompt| prompt.contains(clue));
         assert!(present, "the prompt set should still state: {clue}");
     }
     // 引擎还不支持"只发表情",提示词里就不能出现这个措辞。
-    assert!(!ARTICULATION.contains("空文本"), "prompt must not invite an empty-text reply yet");
+    assert!(
+        !ARTICULATION.contains("空文本"),
+        "prompt must not invite an empty-text reply yet"
+    );
 }

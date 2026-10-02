@@ -26,6 +26,11 @@ struct Cli {
 enum Command {
     /// Probe the repository root, configuration, and SQLite, then exit.
     Selftest,
+    /// Print actual SQLite schema (in memory unless --database is supplied).
+    DbSchema {
+        #[arg(long)]
+        database: Option<PathBuf>,
+    },
     /// Print a normalized summary with credentials redacted.
     Config,
     /// Authenticate with the OneBot bridge and report online status.
@@ -51,6 +56,13 @@ async fn main() -> Result<()> {
     let root = resolve_root(cli.root)?;
 
     match cli.command {
+        Command::DbSchema { database } => {
+            let store = match database {
+                Some(path) => qq_inner_core::store::Store::open(path)?,
+                None => qq_inner_core::store::Store::in_memory()?,
+            };
+            println!("{}", serde_json::to_string_pretty(&store.schema()?)?);
+        }
         Command::Check => {
             let c = config::load_config(&root)?.config;
             let token = if c.onebot_token.is_truthy {

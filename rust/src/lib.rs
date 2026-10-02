@@ -5,4 +5,5 @@ pub mod policy;
 pub mod prompts;
 pub mod sending;
 pub mod settings;
+pub mod store;
 pub mod text;

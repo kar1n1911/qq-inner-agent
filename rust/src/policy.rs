@@ -91,7 +91,10 @@ pub fn local_minutes_of_day(now: f64, timezone: Option<&str>) -> Option<i64> {
     }
     let millis = millis as i64;
     let utc = Utc
-        .timestamp_opt(millis.div_euclid(1000), (millis.rem_euclid(1000) * 1_000_000) as u32)
+        .timestamp_opt(
+            millis.div_euclid(1000),
+            (millis.rem_euclid(1000) * 1_000_000) as u32,
+        )
         .single()?;
     match timezone {
         Some(name) => Zone::parse(name).map(|zone| zone.minutes_of_day(utc)),
@@ -273,8 +276,12 @@ pub fn select(
 /// 长度均匀是最强的"机器味"信号。被直接点名时禁用 `tiny` —— 不能用一个"哈哈"敷衍提问。
 const LENGTH_BUCKETS_ADDRESSED: [(&str, f64); 3] =
     [("short", 0.70), ("medium", 0.28), ("long", 0.02)];
-const LENGTH_BUCKETS_OPEN: [(&str, f64); 4] =
-    [("tiny", 0.35), ("short", 0.45), ("medium", 0.18), ("long", 0.02)];
+const LENGTH_BUCKETS_OPEN: [(&str, f64); 4] = [
+    ("tiny", 0.35),
+    ("short", 0.45),
+    ("medium", 0.18),
+    ("long", 0.02),
+];
 
 pub fn pick_length_target(hint: &str, random: impl FnOnce() -> f64) -> &'static str {
     let buckets: &[(&str, f64)] = if hint == "self" {
@@ -296,7 +303,7 @@ pub fn pick_length_target(hint: &str, random: impl FnOnce() -> f64) -> &'static 
 /// 复刻 `repeated()`：与 agent 自己最近说过的话重复（完全相同，或相似度 > 0.88）。
 pub fn repeated(text: &str, self_messages: &[String]) -> bool {
     let trimmed = text.trim();
-    self_messages.iter().any(|previous| {
-        previous.trim() == trimmed || similarity(text, previous) > 0.88
-    })
+    self_messages
+        .iter()
+        .any(|previous| previous.trim() == trimmed || similarity(text, previous) > 0.88)
 }
