@@ -115,3 +115,66 @@ per-task 的常量各自只含契约,不再复述人设;人设只在 `①` 出�
    `skip`/`partial`/升格规则,并写进测试;
 3. **仪表盘回路**:按 subject 查看/修订/忘记学习结果(与控制协议 `learning.list`/`learning.reset` 一起做);
 4. Rust 侧同步:提示词走生成器自动同步;学习分诊需在 `memory.rs` 里实现同一套判定与升格规则。
+
+---
+
+## 附:现状勘察(代码事实,非设计)
+
+> 本节记录 2026-10-02 对现有实现的核查结果,供后续对照。
+
+### A. 记忆存储模型
+
+| 表 | 作用 |
+| --- | --- |
+| `memory_layers` | 三层记忆的唯一载体。`UNIQUE(chat,subject,layer,slot)`,并带 `sources`/`importance`/`confidence`/`keywords`/`created`/`updated`/`expires`/`revision`;`keywords` 与 `confidence` 是后加的列(用 `PRAGMA table_info` 探测后 ALTER) |
+| `memory_revisions` | 修订归档;文本变化时先写入旧值,`AFTER DELETE` 触发器负责清理 |
+| `expressions` | 黑话/表达学习,键为 `(chat,subject,kind,term)` |
+| `decoration_usage` | 每个 chat 的装饰(表情/face)上次使用时间,用于冷却 |
+
+**键空间**:`chat` 为 `group:<id>` / `private:<id>`;`subject` 为 `group` 或 `person:<QQ号>`;
+`layer` 为 `short_term` / `long_term` / `traits`;`slot` 是话题键。**同一个人在不同群、以及私聊中的记录彼此独立。**
+
+**三层默认额度**:`short_term` 72 小时 / 40 条 / 每条 1000 字符;`long_term` 365 天 / 1800 字符 / 24 项;
+`traits` 180 天 / 900 字符 / 24 项。原文聊天日志的保留期(默认 30 天)与之独立。
+
+**两条写入规则**(在 `memory.put()` 内):
+
+- **不降级**:若新证据的时间戳**早于**已有证据,直接丢弃该次写入(`short_term` 例外);
+- **有变更才归档**:文本变化时先把旧值写入 `memory_revisions`,再覆盖。
+
+### B. 自动化学习的实际情况:只有一层是全自动的
+
+| 类型 | 入口 | 需要模型? | 触发条件 |
+| --- | --- | --- | --- |
+| **完全自动** | `memory.capture(message, now, settings)` | **否** | 每条人类消息;在 `engine.ingest` 中于"去重写库之后、`observe` 之前"调用,受 `agent.learning.enabled` 控制 |
+| **模型驱动(笔记本/特质)** | `FORM` 返回 `learning.layers` → `parseMemoryUpdates` → `store.learn` → `memory.apply` | 是 | 三重门控:`learning.enabled` **且** 出现新的非自身消息 **且** `newHumans >= learning.minMessages`(默认 8)**且** `now - profile.updated >= learning.intervalSeconds`(默认 300) |
+| **模型驱动(表达)** | `FORM` 返回 `learning.expressions` → `parseExpressions` → `expressions.apply` | 是 | 同上,外加 `expression.learn` 开关 |
+
+也就是说:
+
+- **"带署名的短期原话"完全不需要模型**,由代码直接记录 —— 这是唯一的全自动路径;
+- `long_term` / `traits` / `expressions` **都由模型在一次 `FORM` 调用里顺带产出**,经 `parseMemoryUpdates` /
+  `parseExpressions` 的严格校验(来源 id 必须命中真实人类消息、group 需 ≥2 位不同成员、person 只能引用本人)
+  后,在 `BEGIN IMMEDIATE` 事务里落库,并用 `epoch` 防止陈旧写入;
+- 学习写入用 `store.learn(...)` 包装,同一事务里先落库再刷新 payload,保证当轮的提示词能看到刚学到的东西。
+
+### C. 重要发现:`src/learning.mjs` 在生产路径上是**死代码**
+
+- `parseLearning` 只出现在**它自己的定义**(`src/learning.mjs`)与 `test/learning.test.mjs` 中;
+  **没有任何 `src/` 模块导入它**;
+- 它的功能是完整的:校验 `memories`(≤3 条、每条 ≤300 字、证据 1–4 条且必须命中真实人类消息)、
+  `style`(≤600 字)、`forgetIds`(≤3),并从**真实消息**推导 `sources`(不接受模型给的名字);
+- 它对应的输出形状是 `{ style, memories, forgetIds }`,与现在 `memory.mjs` 使用的
+  `{ layers, expressions }` 是**两套不同的契约**。
+
+**推断**:早期存在一条独立的"学习任务"管线(`style` + `memories` + `forgetIds`),
+后来被分层方案(`memory_layers` + `layers`/`expressions`)取代,旧文件与其测试被保留、但与生产路径断开。
+
+**这对你的三条要求的意义**:
+
+- "学习内容保存到本地" —— **已经做到**,三层记忆 + 表达都在本地 SQLite;
+- "模型可以通过聊天学习" —— **已经做到**,但受 8 条消息 / 300 秒的节奏门控,且只在 `FORM` 这一处触发;
+- "认知哪些该学/不该学/部分学" —— **目前没有显式判定**。现状只有"校验通过就写入"加上
+  `confidence`/`importance` 两个数值,没有任何 `skip` 语义,也没有"部分学习"的升格机制。
+  这正是本文第四节要补的东西。
+
