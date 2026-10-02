@@ -1,14 +1,16 @@
-//! 对应 `src/provider.mjs` 的**纯逻辑**部分:端点构造、`parseObject`、错误分类与响应解析。
-//!
-//! HTTP 传输本身（`ureq` 是阻塞式，需要 `spawn_blocking` 包裹）与预算计数留到接入 store 的
-//! 阶段，因为 `callBudget` 需要数据库连接。这里先把"最容易出错的字符串与错误码映射"钉死，
-//! 它们与 JS 可以逐字比对。
+//! Provider 纯逻辑与 HTTP 传输；阻塞/取消及预算契约见 `rust/PROVIDER.md`。
 use serde_json::Value;
 use thiserror::Error;
 
 /// 与 JS 抛出的错误码逐字一致 —— 这些字符串会出现在日志与仪表盘上。
 #[derive(Debug, Error, PartialEq, Eq, Clone)]
 pub enum ProviderError {
+    #[error("save_api_key_first")]
+    SaveApiKeyFirst,
+    #[error("invalid_model_list")]
+    InvalidModelList,
+    #[error("{0}")]
+    ModelsHttp(String),
     #[error("invalid_json")]
     InvalidJson,
     #[error("invalid_json_object")]
@@ -196,3 +198,7 @@ pub fn extract_text(kind: ProviderKind, data: &Value) -> Result<String, Provider
     }
     Ok(content)
 }
+
+#[path = "provider_transport.rs"]
+mod transport;
+pub use transport::Provider;
