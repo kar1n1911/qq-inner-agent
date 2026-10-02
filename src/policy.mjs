@@ -68,6 +68,23 @@ export function select(rated, allocation, a, turnsSilent = 0, random = Math.rand
   if (allocation === 'open' && random() < a.system1Probability) return appropriate.find(x => x.kind === 'system1') || null;
   return null;
 }
+// Reply-length buckets. Uniform reply length is one of the strongest "AI" tells:
+// a person's messages vary a lot from one turn to the next, while a model left to
+// itself converges on one comfortable size. Asking it to "keep it short" does not
+// fix that; sampling an explicit target per turn and naming it in the prompt does.
+// A direct request must never be answered with a throwaway one-liner, so `tiny` is
+// excluded when the agent is addressed.
+const LENGTH_BUCKETS = {
+  addressed: [['short', 0.70], ['medium', 0.28], ['long', 0.02]],
+  open: [['tiny', 0.35], ['short', 0.45], ['medium', 0.18], ['long', 0.02]],
+};
+export function pickLengthTarget(hint, random = Math.random) {
+  const buckets = hint === 'self' ? LENGTH_BUCKETS.addressed : LENGTH_BUCKETS.open;
+  const draw = random();
+  let cumulative = 0;
+  for (const [name, weight] of buckets) { cumulative += weight; if (draw < cumulative) return name; }
+  return 'short';
+}
 export function repeated(text, history) {
   return history.filter(x => x.self).some(x => x.text.trim() === text.trim() || similarity(text, x.text) > 0.88);
 }

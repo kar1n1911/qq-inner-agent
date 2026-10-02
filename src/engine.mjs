@@ -1,5 +1,5 @@
 import { readiness } from './config.mjs';
-import { allowed, normalize, quiet, select, repeated } from './policy.mjs';
+import { allowed, normalize, quiet, select, repeated, pickLengthTarget } from './policy.mjs';
 import { formation, evaluation, articulationFor, forecast } from './prompts.mjs';
 import { forecastResult, sendingProbability } from './sending.mjs';
 import { parseMemoryUpdates } from './memory.mjs';
@@ -197,7 +197,9 @@ export class Engine {
       }
     }
     const decorations = decorationChoices(this.store,chat,this.now(),a.emoji,this.expressionRandom);
-    const response = await this.provider.json(articulationFor(a.replyLanguage), { personality: payload.personality, expressions: payload.expressions, decorations, persona: a.persona, name: a.name,
+    // Sample a target length for this turn so replies stop converging on one size.
+    const lengthTarget = pickLengthTarget(hint, this.expressionRandom);
+    const response = await this.provider.json(articulationFor(a.replyLanguage), { personality: payload.personality, expressions: payload.expressions, decorations, lengthTarget, persona: a.persona, name: a.name,
       history: payload.history, groupOrientation: payload.groupOrientation, chatStyle: payload.chatStyle, memories: payload.memories, memoryContext: payload.memoryContext, selectedIdea: selected.text, responsePlan: prediction,
       priorExpectation: payload.priorExpectation, assertiveTone: a.proactiveTone, maxCharacters: a.maxOutputChars }, signal).catch(error => {
         this.store.assessmentStatus(chat, id, 'generation_failed'); throw error;
