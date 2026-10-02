@@ -224,7 +224,7 @@ Node 侧先**双读**:控制套接字可用则订阅事件,否则回退到 `stat
 | --- | --- | --- | --- |
 | **P0** | 骨架、依赖验证、架构文档、代码勘察 | 本机与远端均能 `cargo build`;依赖集在**无 cmake/make/pkg-config/免密 sudo** 的主机上可编译 | ✅ 完成 |
 | **P1** | `settings`(revision / atomicJson)+ `config`(defaults / merge / validate / loadConfig / readiness) | Node↔Rust 对同一 fixture 的 defaults / loadConfig / validate / revision **逐字相等** | ✅ 已合并；macOS 与远端 Linux 各 55 项测试通过（含真实 Node 交叉验证） |
-| **P1b** | **`store`**:17 张表 schema、全部查询、保留期清理、`callBudget` 滚动限流 | 与 JS 打开同一库时表结构一致;查询与保留期行为对齐 | 🔄 进行中（codex；范围已缩小：schema + 引擎立刻要用的核心查询优先） |
+| **P1b** | **`store`**:17 张表 schema、全部查询、保留期清理、`callBudget` 滚动限流 | 与 JS 打开同一库时表结构一致;查询与保留期行为对齐 | ✅ 已合并（`schema.sql` 17 张表逐字一致 + 24/24 方法 + 共库双向读写测试；双平台 64 项测试通过） |
 | **P2** | `onebot` 传输 | 对本地 WS mock 跑通鉴权/心跳/重连/early 缓冲/echo 关联/发送格式 | ✅ 已合并（`onebot.rs` 503 行 + mock 测试 405 行；双平台验证） |
 | **P3** | `provider` 适配 | 对本地 HTTP mock 跑通两种 API 格式、重试退避与全部错误码 | 🔄 纯逻辑已合并（端点/`parseObject`/状态码分类/正文提取）；HTTP 传输与 `callBudget` 待接入 store |
 | **P4** | `memory` + `ranking` + `expression`(跳过死代码 `learning.mjs`) | 隔离性/淘汰/过期行为对齐;并落地两项优化:**enforce 改增量+批处理**、**ranking 预计算 token 缓存** | ⬜ 规格已备；`text.rs` 已提供 terms/similarity |
