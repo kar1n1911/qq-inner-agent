@@ -114,3 +114,7 @@ pub(crate) use operations::{decode, uuid};
 #[path = "store/learning.rs"]
 mod learning;
 pub use learning::{LayeredUpdate, ScopedOptions};
+
+#[path = "store/orientation.rs"]
+mod orientation;
+pub use orientation::{ActivityRow, OrientationRow};
