@@ -7,4 +7,5 @@ pub mod prompts;
 pub mod provider;
 pub mod sending;
 pub mod settings;
+pub mod store;
 pub mod text;

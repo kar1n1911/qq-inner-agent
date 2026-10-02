@@ -3,8 +3,8 @@
 //! 硬编码的期望值是用**真实的 JS 实现**跑出来后记录在这里的；另外还有一个直接调用
 //! Node 的交叉验证测试（Node 不可用时跳过），用来覆盖参数矩阵而不必逐个抄写。
 use qq_inner_core::sending::{
-    forecast_result, sending_probability, Forecast, Outcomes, ResponseMode, SendingSettings, Timing,
-    Veto,
+    forecast_result, sending_probability, Forecast, Outcomes, ResponseMode, SendingSettings,
+    Timing, Veto,
 };
 use serde_json::{json, Value};
 use std::fs;
@@ -22,13 +22,23 @@ fn settings() -> SendingSettings {
 }
 
 fn timing(proactive: bool, age: f64, gap: f64, recent_humans: f64, score: f64) -> Timing {
-    Timing { proactive, age, gap, recent_humans, score }
+    Timing {
+        proactive,
+        age,
+        gap,
+        recent_humans,
+        score,
+    }
 }
 
 fn forecast(should_send: bool, negative: f64, mode: ResponseMode) -> Forecast {
     Forecast {
         should_send,
-        outcomes: Outcomes { reply: 0.6, silence: 0.3, negative },
+        outcomes: Outcomes {
+            reply: 0.6,
+            silence: 0.3,
+            negative,
+        },
         response_mode: mode,
         plan: "答一句".into(),
     }
@@ -115,7 +125,10 @@ fn forecast_result_normalises_and_drops_unknown_outcome_keys() {
     assert_eq!(got.response_mode, ResponseMode::Ask);
     assert_eq!(got.plan, "空格");
     let rendered = serde_json::to_value(&got).unwrap();
-    assert_eq!(rendered["outcomes"], json!({ "reply": 0.6, "silence": 0.3, "negative": 0.1 }));
+    assert_eq!(
+        rendered["outcomes"],
+        json!({ "reply": 0.6, "silence": 0.3, "negative": 0.1 })
+    );
     assert!(rendered["outcomes"].get("extra").is_none());
 }
 
@@ -168,7 +181,10 @@ fn a_plan_of_exactly_four_hundred_units_is_accepted() {
 }
 
 fn node_available() -> bool {
-    Command::new("node").arg("--version").output().is_ok_and(|o| o.status.success())
+    Command::new("node")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success())
 }
 
 /// 直接把参数矩阵交给真实的 JS 实现，逐位比较概率与因子。
@@ -223,11 +239,19 @@ process.stdout.write(JSON.stringify(cases.map(c => {
         .args(["--input-type=module", "-e", script])
         .arg(&case_file)
         // 仓库根（rust/ 的上一级），这样 ./src/sending.mjs 才解析得到。
-        .current_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap())
+        .current_dir(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap(),
+        )
         .output()
         .expect("run node");
     let _ = fs::remove_dir_all(&dir);
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let js: Vec<Value> = serde_json::from_slice(&out.stdout).expect("node output");
 
     assert_eq!(js.len(), expected_inputs.len());
@@ -241,7 +265,14 @@ process.stdout.write(JSON.stringify(cases.map(c => {
             f.outcomes.negative,
             got.probability
         );
-        for key in ["base", "settle", "recovery", "pace", "motivation", "forecast"] {
+        for key in [
+            "base",
+            "settle",
+            "recovery",
+            "pace",
+            "motivation",
+            "forecast",
+        ] {
             let js_factor: u64 = expected["f"][key].as_str().unwrap().parse().unwrap();
             let rust_factor = match key {
                 "base" => got.factors.base,

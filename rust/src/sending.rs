@@ -110,7 +110,11 @@ pub fn forecast_result(value: &Value) -> Result<Forecast, ForecastError> {
     }
     Ok(Forecast {
         should_send,
-        outcomes: Outcomes { reply, silence, negative },
+        outcomes: Outcomes {
+            reply,
+            silence,
+            negative,
+        },
         response_mode: mode,
         plan: trimmed.to_string(),
     })
@@ -231,5 +235,9 @@ pub fn sending_probability(
             * factors.motivation
             * factors.forecast
     };
-    Admission { factors, probability, veto }
+    Admission {
+        factors,
+        probability,
+        veto,
+    }
 }
