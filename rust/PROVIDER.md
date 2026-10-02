@@ -12,10 +12,10 @@ HTTP 与 SQLite 预算事务在 `tokio::task::spawn_blocking` 中运行，数据
 
 模型列表保留 JS 的独立行为：不重试，HTTP 错误为 `models_http_<N>`，列表结构错误为 `invalid_model_list`；它不触发补全的配置封锁。按任务要求增加共享预算与既有封锁检查（JS 独立 listModels 没有这两个检查）。DeepSeek hostname 精确匹配 `api.deepseek.com` 时固定请求 `https://api.deepseek.com/models`，只用 Bearer，不发送 Anthropic 版本/workspace 头。其他主机使用已有 `models_endpoint` 和配置中的鉴权方式。列表先过滤、去重、取前 500，再按 UTF-16 顺序排序。
 
-测试使用回环 `TcpListener` 与内存 SQLite，不访问外部网络、不读取真实 secrets。可注入的私有时钟/睡眠测试钩子用于验证完整退避序列而不实际等待数分钟；超时与取消测试使用真实短延迟。运行：
+测试使用回环 `TcpListener` 与内存 SQLite，不访问外部网络、不读取真实 secrets。可注入的私有时钟/睡眠测试钩子用于验证完整退避序列而不实际等待数分钟；超时与取消测试使用真实短延迟。交叉验证类测试需要 `node` 在 PATH 上（见 `rust/README.md`）。运行：
 
 ```sh
-cargo build --offline --release
-cargo clippy --offline --all-targets -- -D warnings
-cargo test --offline
+cargo build --release
+cargo clippy --all-targets -- -D warnings
+cargo test
 ```
