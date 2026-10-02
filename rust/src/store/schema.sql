@@ -1,3 +1,4 @@
+-- 集中保留 JS 五个模块的建表定义；所有 REAL 时间列均为秒。
 PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS messages(chat TEXT, id TEXT, sender TEXT, name TEXT, text TEXT, ts REAL, self INTEGER DEFAULT 0, PRIMARY KEY(chat,id));
       CREATE TABLE IF NOT EXISTS thoughts(id TEXT PRIMARY KEY, chat TEXT, text TEXT, kind TEXT, created REAL, used INTEGER DEFAULT 0, score REAL DEFAULT 0);
@@ -27,10 +28,10 @@ CREATE TABLE IF NOT EXISTS memory_revisions (
         DELETE FROM memory_revisions WHERE memory_id=OLD.id;
       END;
 CREATE TABLE IF NOT EXISTS expressions(chat TEXT,subject TEXT,kind TEXT,term TEXT,meaning TEXT,situation TEXT,example TEXT,confidence REAL,sources TEXT,updated REAL,last_used REAL DEFAULT 0,PRIMARY KEY(chat,subject,kind,term));
-      CREATE TABLE IF NOT EXISTS decoration_usage(chat TEXT PRIMARY KEY,ts REAL);;
+      CREATE TABLE IF NOT EXISTS decoration_usage(chat TEXT PRIMARY KEY,ts REAL);
 CREATE TABLE IF NOT EXISTS activity_rhythm (
       id INTEGER PRIMARY KEY CHECK(id=1), signature TEXT, started REAL, until REAL,
       active INTEGER, probability REAL, draw REAL);
 CREATE TABLE IF NOT EXISTS group_orientation(chat TEXT PRIMARY KEY, started REAL, message_count INTEGER DEFAULT 0,
       status TEXT DEFAULT 'observing', collected INTEGER DEFAULT 0, sources TEXT DEFAULT '{}', analysis TEXT DEFAULT '{}', retry_at REAL DEFAULT 0,
-      error TEXT, epoch INTEGER DEFAULT 0, joined_at REAL DEFAULT 0);;
+      error TEXT, epoch INTEGER DEFAULT 0, joined_at REAL DEFAULT 0);

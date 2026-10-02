@@ -100,19 +100,41 @@ fn shared_js_database_schema_and_json_roundtrip() {
         serde_json::from_str::<Value>(&tags).unwrap(),
         json!(["中文",{"nested":null}])
     );
-    db.prepare_cached("INSERT INTO messages VALUES('g','rust','2','Rust','回应',101,0)")
-        .unwrap()
-        .execute([])
+    assert_eq!(s.history("g", None).unwrap()[0]["text"], "hello🙂");
+    assert_eq!(
+        s.assessment("g", "js").unwrap().unwrap()["details"],
+        json!({"ok":true,"list":[1,null]})
+    );
+    assert_eq!(
+        s.learning_state("g").unwrap()["sources"],
+        json!([{"id":"js"}])
+    );
+    assert_eq!(
+        s.expectation("g", 101.).unwrap().unwrap()["forecast"],
+        json!({"reply":true})
+    );
+    s.message(&json!({"chat":"g","id":"rust","sender":"2","name":"Rust","text":"回应","ts":101.}))
         .unwrap();
-    db.prepare_cached("INSERT INTO decisions VALUES('rust','g',101,'wait',2,?)")
-        .unwrap()
-        .execute([json!({"a":[true,null,"中文"]}).to_string()])
+    s.decision("g", "wait", 2., &json!({"a":[true,null,"中文"]}), 101.)
         .unwrap();
+    s.assess("g", "rust", 101., "ready", &json!({"rust":["中文",null]}))
+        .unwrap();
+    s.expect("g", 101., 60., &json!({"rust":true})).unwrap();
+    s.observe(&json!({"chat":"g","hint":"self"}), 101.).unwrap();
     let read = node(&f, "read");
     assert_eq!(read["messages"][1]["text"], "回应");
     assert_eq!(
         read["decisions"][1]["tags"],
         json!({"a":[true,null,"中文"]})
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(read["assessment"]["details"].as_str().unwrap()).unwrap(),
+        json!({"rust":["中文",null]})
+    );
+    assert_eq!(read["expectation"]["forecast"], json!({"rust":true}));
+    assert_eq!(
+        read["expectation"]["observation"],
+        json!({"event":"human_message","addressed":true,"at":101})
     );
     let mode: String = db
         .prepare_cached("PRAGMA journal_mode")
