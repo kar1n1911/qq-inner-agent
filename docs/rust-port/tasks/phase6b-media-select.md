@@ -93,3 +93,30 @@
 
 1. **分两次提交**:先 JS,再 Rust。
 2. 用一段话回报:实现了什么、测试怎么跑、**信号剔除规则怎么验证的**、与设计的偏差或不确定点。
+
+---
+
+## 📌 补充:**注意力漂移**取代二值化的"高/低相关度"
+
+`docs/prompt-and-learning-design.md` **第 10.4 节**(与 MaiBot 的 `attention_drift` 同构)。
+前面第 3 节写的"目标相关度高/低"是**意图**,实现要用这三个参数:
+
+| 参数 | 作用 | 取值 |
+| --- | --- | --- |
+| `drift_level` | 允许偏离当前话题多远 | `subtle` / `active` / `scattered` / `wild` |
+| `anchor_policy` | 跑偏之后多强地回钩当前上下文 | `strict` / `balanced` / `loose` |
+| `reaction_style` | 短反应的风格 | `reserved` / `natural` / `lively` |
+
+**映射**:
+
+- **活跃** → `drift_level` 低(subtle / active)+ `anchor_policy` 偏 `strict` —— 接得住当前话题;
+- **冷清** → `drift_level` 高(scattered)+ `anchor_policy` 偏 `loose` —— 允许跳到外围;
+- `reaction_style` 随**该群人类短消息的密度**学出来。
+
+**上限(硬要求)**:
+
+- `wild` **只允许**在"冷清 **且** 该群历史上接受过离谱话题"时使用;
+- **"温和"仍是冷清期的硬门槛** —— **漂移再大也不能带刺**;
+- `drift_level` / `anchor_policy` / `reaction_style` 都**可配置、可关闭**,并能按群覆盖。
+
+**测试**:`wild` 在不满足条件时不会被选中;高漂移时温度门槛仍然生效(带刺内容照样被丢弃)。
