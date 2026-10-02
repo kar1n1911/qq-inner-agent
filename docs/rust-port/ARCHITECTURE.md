@@ -223,16 +223,16 @@ Node 侧先**双读**:控制套接字可用则订阅事件,否则回退到 `stat
 | 阶段 | 内容 | 验收 | 状态 |
 | --- | --- | --- | --- |
 | **P0** | 骨架、依赖验证、架构文档、代码勘察 | 本机与远端均能 `cargo build`;依赖集在**无 cmake/make/pkg-config/免密 sudo** 的主机上可编译 | ✅ 完成 |
-| **P1** | `settings`(revision / atomicJson)+ `config`(defaults / merge / validate / loadConfig / readiness) | Node↔Rust 对同一 fixture 的 defaults / loadConfig / validate / revision **逐字相等** | ✅ 代码完成,待合并 |
-| **P1b** | **`store`**:17 张表 schema、全部查询、保留期清理、`callBudget` 滚动限流 | 与 JS 打开同一库时表结构一致;查询与保留期行为对齐 | ⬜ **尚未派发** |
-| **P2** | `onebot` 传输 | 对本地 WS mock 跑通鉴权/心跳/重连/early 缓冲/echo 关联/发送格式 | 📋 规格已备 |
-| **P3** | `provider` 适配 | 对本地 HTTP mock 跑通两种 API 格式、重试退避与全部错误码 | 📋 规格已备 |
-| **P4** | `memory` + `ranking` + `expression`(跳过死代码 `learning.mjs`) | 隔离性/淘汰/过期行为对齐;并落地两项优化:**enforce 改增量+批处理**、**ranking 预计算 token 缓存** | ⬜ |
-| **P5** | `policy` + `sending` + `activity` + `orientation` | 纯函数逐一比对;时区/夏令时用 `chrono-tz` 精确匹配 JS `Intl` | ⬜ |
-| **P6** | `engine` 决策循环 | 与 JS **同输入同输出**(golden 对比);取消/版本/配额/先落库后发送的语义一致 | ⬜ |
-| **P7** | 控制套接字 + Node 仪表盘瘦客户端化 | 仪表盘全部页面在 Rust 内核下可用;Node 侧双读灰度 | ⬜ |
+| **P1** | `settings`(revision / atomicJson)+ `config`(defaults / merge / validate / loadConfig / readiness) | Node↔Rust 对同一 fixture 的 defaults / loadConfig / validate / revision **逐字相等** | ✅ 已合并；macOS 与远端 Linux 各 55 项测试通过（含真实 Node 交叉验证） |
+| **P1b** | **`store`**:17 张表 schema、全部查询、保留期清理、`callBudget` 滚动限流 | 与 JS 打开同一库时表结构一致;查询与保留期行为对齐 | 🔄 进行中（codex；范围已缩小：schema + 引擎立刻要用的核心查询优先） |
+| **P2** | `onebot` 传输 | 对本地 WS mock 跑通鉴权/心跳/重连/early 缓冲/echo 关联/发送格式 | ✅ 已合并（`onebot.rs` 503 行 + mock 测试 405 行；双平台验证） |
+| **P3** | `provider` 适配 | 对本地 HTTP mock 跑通两种 API 格式、重试退避与全部错误码 | 🔄 纯逻辑已合并（端点/`parseObject`/状态码分类/正文提取）；HTTP 传输与 `callBudget` 待接入 store |
+| **P4** | `memory` + `ranking` + `expression`(跳过死代码 `learning.mjs`) | 隔离性/淘汰/过期行为对齐;并落地两项优化:**enforce 改增量+批处理**、**ranking 预计算 token 缓存** | ⬜ 规格已备；`text.rs` 已提供 terms/similarity |
+| **P5** | `policy` + `sending` + `activity` + `orientation` | 纯函数逐一比对;时区/夏令时用 `chrono-tz` 精确匹配 JS `Intl` | 🔄 纯函数已合并（`sending` / `activity` / `policy`）；`normalize` 与需 store 的持久化待做 |
+| **P6** | `engine` 决策循环 | 与 JS **同输入同输出**(golden 对比);取消/版本/配额/先落库后发送的语义一致 | ⬜ 规格已备（`phase6-engine.md`） |
+| **P7** | 控制套接字 + Node 仪表盘瘦客户端化 | 仪表盘全部页面在 Rust 内核下可用;Node 侧双读灰度 | ⬜ 控制协议已定（见第 5 节） |
 | **P8** | 个性化前端改版 | 视觉与交互改版,功能不回归 | 🔄 第一轮精修已交付并视觉验证 |
-| **P9** | 更像真人的提示词与行为 | 对比样本 + 可判定指标(长度分布、句式黑名单命中率) | 🔄 JS 版已交付并测试;待同步到 Rust `prompts.rs` |
+| **P9** | 更像真人的提示词与行为 | 对比样本 + 可判定指标(长度分布、句式黑名单命中率) | ✅ JS 版已交付；Rust 侧由 `tools/gen-prompts.mjs` 从 JS 同步，并有逐字比对 |
 | **P10** | 实况验证、切换与回退 | 在远端跑通;含性能对比(内存 / CPU / 延迟) | ⬜ |
 
 依赖顺序:P1 → P1b → {P2, P3} → P4 → P5 → P6 → P7 → P10。
