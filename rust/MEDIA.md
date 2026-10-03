@@ -29,7 +29,7 @@ let report = collector.ingest(&store, &event, &bot.state().self_id, &agent, now)
 
 ## 存储与边界
 
-- `Store::enable_media()` 幂等创建四张新表，已有表不变。`media_assets` 是群/私聊
+- `Store::enable_media()` 幂等创建五张新表，已有表不变。`media_assets` 是群/私聊
   隔离的索引，`media_contexts` 只含消息 id 和角色（usage/before/after）。正文只能关联
   `messages` 读取；历史被清理后引用可能不再解析，不保留正文副本。
 - `media_receipts` 按消息与段序号避免重放加计数；一条消息中重复的两段仍计两次。
@@ -72,3 +72,40 @@ cargo build --release
 cargo clippy --all-targets -- -D warnings
 cargo test
 ```
+
+## 来源可公开性（13.8 补充要求）
+
+`media_assets.source_tier` 默认 **unknown**，与 private 一样禁止出群，群内仍可使用。
+新增 `distinct_senders`（默认 0）、`source_override`（默认 NULL）、
+`public_corpus_match`（默认 0）。`media_senders` 以 `(chat, hash, sender)` 唯一键准确
+计不同人类数，重复消息/段不增加人数；人数、素材计数和来源判定在同一事务内提交。
+旧库在 `enable_media()` 中通过 `PRAGMA table_info` 探测后 ALTER；只从仍存在的 usage
+引用及人类消息回填人数。已删除历史无法恢复，所以旧库人数是可证明的下界，不从
+occurrences 猜人数。淘汰素材同时删除发送者索引。
+
+已核对 `onebot.rs::receive`：通知携带原始 JSON，未筛除扩展字段；采集器数组段也原样
+保留。现有仓库事件样例可验证的只有 image 的 `file/url`、face 的 `id` 等，没有实际
+桥返回的 `sub_type`、收藏表情/sticker 或 emoji 标记样本及其公开性语义。配置中的
+`agent.emoji` 是发送装饰设置，不是入站来源证据。因此不臆造字段映射；即使收到
+未验证的 sticker/emoji 标志，也不能把群友照片升级为公开。新增测试中的这些标记
+仅为防误放行的合成负例，不代表已确认协议。
+
+`media_source::classify(Evidence, widespread_threshold)` 是纯函数：人工覆盖优先，
+其次是本地公开语料 SHA-256 完全匹配；其余 unknown。人数越多越可能是群内常用素材，
+但无法证明公开可搜，故传播度仅产生辅助 `widespread` 信号，**永不单独放行**。
+`media_source::can_use(tier, source_chat, target_chat)` 是纯准入函数：同一 chat 的三个档
+都允许；不同群仅 public 允许；私聊不参与跨群共享。此阶段不实现跨群检索或发送。
+
+`media::Config.public_corpus_dir` 可指定运维已确认公开的本地语料目录（默认 None）。
+构造启用的 Collector 时递归散列普通文件，忽略符号链接及超限文件；缺失/不可读视为空，
+不凭文件名推断，不下载任何语料。目录变更后重建 Collector 才刷新快照。已命中的
+正面证据在素材存续期保留；若语料标错，使用人工 private 覆盖撤销放行。
+来源判定没有网络调用，更不会上传图片或反向图搜；原有临时 URL 的入站下载仍只用于落盘。
+
+后台 API：`Store::set_media_source_override(chat, hash, Some(media_source::Override::Public))`
+或 `Private`，`None` 清除覆盖并按已保存证据重算。覆盖按 chat/hash 隔离，重复采集及
+数据库重开均保留，人工 private 优先于语料匹配；素材被容量策略淘汰时覆盖随记录删除。
+
+测试精确断言默认未知、人工覆盖优先级/撤销/持久化、不同发送者数、旧库迁移和出群闸门；
+传播信号只断言随人数增加的方向。本地语料哈希使用公开 abc 向量，不从实现反推期望值。
+当前工作区设计文档尚无 13.8 正文，本节实现依据本次任务给出的新增要求。

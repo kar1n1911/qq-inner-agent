@@ -4,6 +4,7 @@ pub mod config;
 pub mod conversation;
 pub mod expression;
 pub mod media;
+pub mod media_source;
 pub mod memory;
 pub mod onebot;
 pub mod orientation;
