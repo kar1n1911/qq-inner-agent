@@ -14,6 +14,7 @@ import { Provider, listModels } from './provider.mjs';
 import { Store } from './store.mjs';
 import { OneBot } from './onebot.mjs';
 import { Diagnostics } from './diagnostics.mjs';
+import { ControlClient } from './control.mjs';
 
 const exec = promisify(execFile), hash = s => createHash('sha256').update(s).digest();
 const equal = (a, b) => timingSafeEqual(hash(String(a)), hash(String(b)));
@@ -35,7 +36,9 @@ function tail(file, limit = 100) {
     return lines.filter(Boolean).slice(-limit).map(line => { try { return JSON.parse(line); } catch { return null; } }).filter(Boolean);
   } finally { fs.closeSync(fd); }
 }
-export function createDashboard({ root, settings, key, serviceControl, serviceStatus, makeBot }) {
+export function createDashboard({ root, settings, key, serviceControl, serviceStatus, makeBot, controlOptions }) {
+  const control = new ControlClient(loadConfig(root).dataDir, controlOptions);
+  let capture = null;
   const diagnostics = new Diagnostics(() => loadConfig(root), makeBot);
   const sessions = new Map(), attempts = new Map(); let saving = false, testing = false;
   const origins = new Set(settings.origins), hosts = new Set([...origins].map(o => new URL(o).host));
@@ -44,9 +47,11 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
     try { return (await exec('systemctl', ['--user', 'show', 'qq-inner-agent.service', '-p', 'ActiveState', '--value'], { timeout: 2000 })).stdout.trim(); }
     catch { return 'unknown'; }
   };
-  function snapshot() {
+  function fileSnapshot() {
     const c = loadConfig(root), file = path.join(c.dataDir, 'agent.sqlite');
-    const status = readJson(path.join(c.dataDir, 'status.json'), null);
+    let status = null, logs = [];
+    try { status = readJson(path.join(c.dataDir, 'status.json'), null); } catch { /* 心跳文件异常也不能阻断回退。 */ }
+    try { logs = tail(path.join(c.dataDir, 'agent.log')); } catch { /* 日志轮换或权限错误时返回空列表。 */ }
     let decisions = [], thoughts = [], assessments = [], learning = [], memories = [], observations = [], expressions = [];
     if (fs.existsSync(file)) {
       let db;
@@ -63,10 +68,63 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
       } catch { /* database may be opening for the first time */ }
       finally { db?.close(); }
     }
-    const data = { status, decisions, thoughts, assessments, learning, memories, observations, expressions, logs: tail(path.join(c.dataDir, 'agent.log')), savedRevision: publicSettings(root).revision };
+    const data = { status, decisions, thoughts, assessments, learning, memories, observations, expressions, logs, savedRevision: publicSettings(root).revision };
     let text = JSON.stringify(data);
     for (const secret of [c.apiKey, c.onebotToken, key].filter(Boolean)) text = text.split(secret).join('[redacted]');
     return JSON.parse(text);
+  }
+  async function snapshot() {
+    // 回退路径必须始终可用：先保留文件/只读 SQLite 快照，任何控制错误都不影响 HTTP 状态页。
+    const data = fileSnapshot();
+    if (!control.available) return data;
+    const c = loadConfig(root);
+    const results = await Promise.allSettled([
+      control.request('state.get'), control.request('learning.list', { limit: 1000 }), control.request('logs.tail', { lines: 100 })
+    ]);
+    if (results[0].status === 'fulfilled' && results[0].value && typeof results[0].value === 'object' && !Array.isArray(results[0].value)) {
+      const { learningCounts, ...status } = results[0].value; data.status = status;
+    }
+    const entries = results[1].status === 'fulfilled' && results[1].value?.entries;
+    if (Array.isArray(entries) && entries.every(e => e && typeof e === 'object')) {
+      data.memories = entries.filter(e => e.layer && e.expires > Date.now()/1000).slice(0, 200);
+      data.learning = [...new Set(data.memories.map(m => m.chat))].map(chat => ({ chat }));
+      // v1 先返回全部记忆再返回表达；到达总上限时表达可能不完整，沿用 SQLite 的完整结果。
+      if (entries.length < 1000) data.expressions = entries.filter(e => !e.layer && e.updated > Date.now()/1000-c.agent.expression.retentionDays*86400).slice(0, 200);
+    }
+    const lines = results[2].status === 'fulfilled' && results[2].value?.lines;
+    if (Array.isArray(lines)) data.logs = lines.map(line => { try { return JSON.parse(line); } catch { return null; } }).filter(Boolean);
+    let text = JSON.stringify(data);
+    for (const secret of [c.apiKey, c.onebotToken, key].filter(Boolean)) text = text.split(secret).join('[redacted]');
+    return JSON.parse(text);
+  }
+  async function receiveStatus() {
+    if (!control.available) return diagnostics.status();
+    try {
+      const result = await control.request('debug.receive.status');
+      if (!capture && !result.listening) return { state: 'idle', events: [] };
+      capture ||= { account: '', until: null, error: null };
+      capture = { ...capture, state: result.listening ? 'listening' : capture.state === 'stopped' ? 'stopped' : 'finished', events: result.events };
+      return capture;
+    } catch { return diagnostics.status(); }
+  }
+  async function remoteDiagnostic(method) {
+    if (method === 'debug.send') {
+      const state = await control.request('state.get');
+      const result = await control.request(method, {}, { timeoutMs: 30000 });
+      // v1 不返回随机生成的发送正文；保留旧字段与类型，不伪造实际正文。
+      return { account: state.selfId || '', messageId: result.messageId ?? null, text: '',
+        message: 'Bridge accepted the self-message. Check your QQ self-chat to confirm delivery.' };
+    }
+    if (method === 'debug.receive.start') {
+      const state = await control.request('state.get');
+      const result = await control.request(method);
+      capture = { state: 'listening', account: state.selfId || '', until: result.until, events: [], error: null };
+    } else {
+      await receiveStatus();
+      await control.request(method);
+      if (capture) capture.state = 'stopped';
+    }
+    return capture || { state: 'idle', events: [] };
   }
   const clientAddress = (req, peer) => peer?.address || req.socket.remoteAddress;
   const handler = async (req, res, peer) => {
@@ -107,14 +165,15 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
       if (req.method !== 'GET' && !equal(req.headers['x-csrf-token'] || '', session.csrf)) throw fail(403, 'Session verification failed; sign in again.');
       if (url.pathname === '/api/session' && req.method === 'GET') { json(res, 200, { csrf: session.csrf }); return; }
       if (url.pathname === '/api/models' && req.method === 'POST') {
-        try { const c = loadConfig(root); json(res, 200, { models: await listModels(c.provider, c.apiKey) }); }
+        try { const c = loadConfig(root); json(res, 200, { models: control.available ? (await control.request('models.list', {}, { timeoutMs: 30000 })).models : await listModels(c.provider, c.apiKey) }); }
         catch (e) { json(res, 502, { error: e instanceof Error && e.code ? e.code : 'model_list_unavailable_use_manual_entry' }); }
         return;
       }
-      if (url.pathname === '/api/debug/receive' && req.method === 'GET') { json(res, 200, diagnostics.status()); return; }
+      if (url.pathname === '/api/debug/receive' && req.method === 'GET') { json(res, 200, await receiveStatus()); return; }
       if (req.method === 'POST' && ['/api/debug/send', '/api/debug/receive', '/api/debug/stop'].includes(url.pathname)) {
         try {
-          const result = url.pathname === '/api/debug/send' ? await diagnostics.send()
+          // 已发出的诊断请求绝不在断线后重试，防止重复发消息。
+          const result = control.available ? await remoteDiagnostic(url.pathname === '/api/debug/send' ? 'debug.send' : url.pathname === '/api/debug/receive' ? 'debug.receive.start' : 'debug.receive.stop') : url.pathname === '/api/debug/send' ? await diagnostics.send()
             : url.pathname === '/api/debug/receive' ? await diagnostics.listen() : await diagnostics.stop();
           json(res, 200, result);
         } catch (e) {
@@ -136,13 +195,14 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
         finally { saving = false; }
         return;
       }
-      if (url.pathname === '/api/state' && req.method === 'GET') { json(res, 200, { ...snapshot(), serviceState: await serviceStatus() }); return; }
+      if (url.pathname === '/api/state' && req.method === 'GET') { json(res, 200, { ...await snapshot(), serviceState: await serviceStatus() }); return; }
       if (url.pathname === '/api/learning/reset' && req.method === 'POST') {
         const input = await body(req);
         if (typeof input.chat !== 'string' || !/^(group|private):[1-9]\d{0,19}$/.test(input.chat)) throw fail(400, 'Invalid chat');
         if (input.subject !== undefined && !(input.subject === 'group' && input.chat.startsWith('group:')) &&
             !(typeof input.subject === 'string' && /^person:[1-9]\d{0,19}$/.test(input.subject) &&
               (input.chat.startsWith('group:') || input.subject.slice(7) === input.chat.slice(8)))) throw fail(400, 'Invalid memory subject');
+        if (control.available) { await control.request('learning.reset', { chat: input.chat, ...(input.subject === undefined ? {} : { subject: input.subject }) }); json(res, 200, { ok: true }); return; }
         const c = loadConfig(root); fs.mkdirSync(c.dataDir, { recursive: true, mode: 0o700 });
         const store = new Store(path.join(c.dataDir, 'agent.sqlite'));
         try { store.resetLearning(input.chat, Date.now()/1000, input.subject ?? null); } finally { store.close(); }
@@ -158,6 +218,10 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
         testing = true; let store;
         try {
           const c = loadConfig(root); if (!c.apiKey || !c.provider.model) throw fail(400, 'Save an API key and model first');
+          if (control.available) {
+            await control.request('test.model', {}, { timeoutMs: 120000 });
+            json(res, 200, { ok: true, message: 'API authentication and JSON response verified. No QQ message sent.' }); return;
+          }
           store = new Store(path.join(c.dataDir, 'agent.sqlite'));
           const p = new Provider(c.provider, c.apiKey, store);
           const response = await p.json('只返回 JSON：{"ok":true}。', { test: '仅测试 API 连通性，不包含 QQ 聊天内容' });
@@ -168,6 +232,10 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
         return;
       }
       if (url.pathname === '/api/contacts' && req.method === 'GET') {
+        if (control.available) {
+          try { json(res, 200, await control.request('contacts.list', {}, { timeoutMs: 30000 })); return; }
+          catch { /* 只读联系人查询可安全回退到原连接。 */ }
+        }
         const c = loadConfig(root), bot = new OneBot(c.onebot, c.onebotToken), stop = new AbortController();
         let timer;
         const ready = new Promise((resolve, reject) => {
@@ -185,7 +253,7 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
       throw fail(404, 'Not found');
     } catch (e) { if (!res.headersSent) json(res, e.status || 500, { error: e.status ? e.message : 'Dashboard operation failed' }); else res.end(); }
   };
-  return { handler, snapshot, close: () => diagnostics.stop() };
+  return { handler, snapshot, control, close: () => { control.close(); return diagnostics.stop(); } };
 }
 
 function redirectToHttps(req, host, knownHosts) {

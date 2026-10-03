@@ -5,11 +5,22 @@ import { loadConfig, readiness } from './config.mjs';
 import { Store } from './store.mjs';
 import { Provider } from './provider.mjs';
 import { OneBot } from './onebot.mjs';
+import { ControlClient } from './control.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 process.umask(0o077);
 const c = loadConfig(root), action = process.argv[2];
-fs.mkdirSync(c.dataDir, { recursive: true, mode: 0o700 });
-if (action === 'add-memory') {
+if (action !== 'core-status') fs.mkdirSync(c.dataDir, { recursive: true, mode: 0o700 });
+if (action === 'core-status') {
+  const client = new ControlClient(c.dataDir);
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(Error('control_unavailable')), 2000);
+      client.on('available', available => { if (available) { clearTimeout(timer); resolve(); } });
+    });
+    console.log(JSON.stringify({ available: true, status: await client.request('state.get') }, null, 2));
+  } catch (e) { console.log(JSON.stringify({ available: client.available, error: e.code || e.message })); process.exitCode = 1; }
+  finally { client.close(); }
+} else if (action === 'add-memory') {
   const [chat, ...words] = process.argv.slice(3);
   if (!/^(group|private):[1-9]\d*$/.test(chat || '') || !words.length) throw Error('Usage: ./agent add-memory group:123 "A short factual note"');
   const store = new Store(path.join(c.dataDir, 'agent.sqlite'));

@@ -4,21 +4,28 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 NODE="${AGENT_NODE:-$ROOT/.runtime/node}"
 if [[ ! -x "$NODE" ]]; then NODE="$(command -v node || true)"; fi
-if [[ -z "$NODE" || ! -x "$NODE" ]]; then echo 'Node.js 22.13+ is required. Set AGENT_NODE to its path.' >&2; exit 1; fi
+require_node() {
+  if [[ -z "$NODE" || ! -x "$NODE" ]]; then echo 'Node.js 22.13+ is required. Set AGENT_NODE to its path.' >&2; exit 1; fi
+}
+CORE="${AGENT_CORE:-$ROOT/rust/target/release/qq-inner-core}"
+require_core() {
+  if [[ ! -x "$CORE" ]]; then echo 'Rust core is missing. Run cargo build --release --manifest-path rust/Cargo.toml or set AGENT_CORE.' >&2; exit 1; fi
+}
 export NODE_NO_WARNINGS=1
 umask 077
 case "${1:-help}" in
-  start) exec flock --nonblock -E 75 "$ROOT/.agent.lock" "$NODE" src/main.mjs ;;
+  start) require_core; exec flock --nonblock -E 75 "$ROOT/.agent.lock" "$CORE" --root "$ROOT" start ;;
   setup) exec python3 scripts/setup.py ;;
   install-service) exec python3 scripts/install_service.py ;;
   install-dashboard) exec python3 scripts/install_dashboard.py ;;
-  dashboard) exec flock --nonblock -E 75 "$ROOT/.dashboard.lock" "$NODE" src/dashboard.mjs ;;
+  dashboard) require_node; exec flock --nonblock -E 75 "$ROOT/.dashboard.lock" "$NODE" src/dashboard.mjs ;;
   dashboard-key) cat "$ROOT/data/dashboard-access.txt" ;;
-  test) exec "$NODE" --test test/*.test.mjs ;;
-  check|contacts|add-memory) exec "$NODE" src/cli.mjs "$@" ;;
+  test) require_node; exec "$NODE" --test test/*.test.mjs ;;
+  check|contacts|add-memory) require_core; exec "$CORE" --root "$ROOT" "$@" ;;
+  core-status) require_node; exec "$NODE" src/cli.mjs core-status ;;
   status) systemctl --user status qq-inner-agent.service --no-pager || true; if [[ -f data/status.json ]]; then cat data/status.json; fi ;;
   logs) exec journalctl --user -u qq-inner-agent.service -f ;;
   stop) exec systemctl --user stop qq-inner-agent.service ;;
   restart) exec systemctl --user restart qq-inner-agent.service ;;
-  *) echo 'Usage: ./agent {setup|check [--api]|contacts|install-service|install-dashboard|dashboard|dashboard-key|start|status|logs|stop|restart|test|add-memory CHAT TEXT}' ;;
+  *) echo 'Usage: ./agent {setup|check|contacts|install-service|install-dashboard|dashboard|dashboard-key|start|core-status|status|logs|stop|restart|test|add-memory CHAT TEXT}' ;;
 esac
