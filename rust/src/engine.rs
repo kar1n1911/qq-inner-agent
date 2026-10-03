@@ -230,7 +230,7 @@ impl Engine {
         media_config.validate()?;
         if media_config.enabled {
             media_select::enable(
-                &store
+                &*store
                     .lock()
                     .map_err(|_| anyhow::anyhow!("store_poisoned"))?,
             )?;
@@ -337,7 +337,7 @@ impl Engine {
             return Ok(());
         }
         if let Some(collector) = &self.collector {
-            let report = collector.ingest(&self.db()?, event, &self_id, a, now)?;
+            let report = collector.ingest(&*self.db()?, event, &self_id, a, now)?;
             for code in report.failures {
                 (self.options.log)("media_collect_failed", json!({"code":code}));
             }

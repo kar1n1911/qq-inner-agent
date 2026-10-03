@@ -48,10 +48,10 @@ impl Store {
     pub fn connection(&self) -> &Connection {
         &self.db
     }
-    pub(crate) fn execute(&self, sql: &str, args: impl Params) -> Result<usize> {
+    pub fn execute(&self, sql: &str, args: impl Params) -> Result<usize> {
         Ok(self.db.prepare_cached(sql)?.execute(args)?)
     }
-    pub(crate) fn rows(&self, sql: &str, args: impl Params) -> Result<Vec<Value>> {
+    pub fn rows(&self, sql: &str, args: impl Params) -> Result<Vec<Value>> {
         let mut statement = self.db.prepare_cached(sql)?;
         let names: Vec<String> = statement
             .column_names()

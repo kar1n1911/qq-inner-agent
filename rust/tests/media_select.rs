@@ -1,6 +1,6 @@
 //! 设计不变量精确断言；估计值只验范围、单调性，不从实现生成期望。
 use qq_inner_core::{
-    conversation::{self, Classification, Evidence, Relation, Stage},
+    conversation::{Classification, Evidence, Relation, Stage},
     media_select::{self as ms, Attention, Config, Drift, Feedback, GroupActivity, Outcome},
     media_source::Override,
     store::Store,
@@ -282,9 +282,9 @@ fn zero_draw_cannot_bypass_temperature_even_with_wild_drift() {
     message(
         &db,
         "group:10",
-        "closing",
-        NOW - 600.,
-        "火箭 发射 好的",
+        "drift-check",
+        NOW,
+        "火箭 发射 收到",
         false,
     );
     assert!(
