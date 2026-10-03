@@ -2,6 +2,7 @@
 pub mod activity;
 pub mod config;
 pub mod conversation;
+pub mod engine;
 pub mod expression;
 pub mod media;
 pub mod media_source;
