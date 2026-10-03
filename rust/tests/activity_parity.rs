@@ -14,7 +14,10 @@ use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 static SEQ: AtomicUsize = AtomicUsize::new(0);
 
 fn node_available() -> bool {
-    Command::new("node").arg("--version").output().is_ok_and(|o| o.status.success())
+    Command::new("node")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success())
 }
 
 fn schedule(enabled: bool, active_start: &str, inactive_start: &str, timezone: &str) -> Schedule {
@@ -49,7 +52,11 @@ fn cases() -> Vec<(f64, Schedule, Rhythm)> {
         schedule(true, "00:00", "23:59", "UTC"),
         schedule(false, "08:00", "23:00", "Europe/Stockholm"),
     ];
-    let rhythms = [rhythm(0.22, 0.85, 0.65, 0.02), rhythm(0.05, 0.9, 0.5, 0.1), rhythm(1.0, 0.8, 0.7, 0.0)];
+    let rhythms = [
+        rhythm(0.22, 0.85, 0.65, 0.02),
+        rhythm(0.05, 0.9, 0.5, 0.1),
+        rhythm(1.0, 0.8, 0.7, 0.0),
+    ];
     // 2026 年若干个时刻，含两次欧洲夏令时切换的前后。
     let instants = [
         1_767_225_600.0, // 2026-01-01T00:00:00Z
@@ -72,8 +79,11 @@ fn cases() -> Vec<(f64, Schedule, Rhythm)> {
     // 显式覆盖静默区间 x=0..1；窗口跨午夜，端点与中点均包含。
     for r in &rhythms {
         for i in 0..=20 {
-            out.push((1_781_478_000.0 + i as f64 * 1620.0,
-                schedule(true, "08:00", "23:00", "UTC"), r.clone()));
+            out.push((
+                1_781_478_000.0 + i as f64 * 1620.0,
+                schedule(true, "08:00", "23:00", "UTC"),
+                r.clone(),
+            ));
         }
     }
     out
@@ -88,7 +98,9 @@ fn activity_probability_matches_javascript_within_a_tiny_tolerance() {
     let cases = cases();
     let payload: Vec<Value> = cases
         .iter()
-        .map(|(now, schedule, rhythm)| json!({ "now": now, "schedule": schedule, "rhythm": rhythm }))
+        .map(
+            |(now, schedule, rhythm)| json!({ "now": now, "schedule": schedule, "rhythm": rhythm }),
+        )
         .collect();
 
     let script = r#"
@@ -110,16 +122,25 @@ process.stdout.write(JSON.stringify(cases.map(c => bits(activityProbability(c.no
     let out = Command::new("node")
         .args(["--input-type=module", "-e", script])
         .arg(&payload_file)
-        .current_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap())
+        .current_dir(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap(),
+        )
         .output()
         .expect("run node");
     let _ = fs::remove_dir_all(&dir);
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let js: Vec<Value> = serde_json::from_slice(&out.stdout).expect("node output");
     assert_eq!(js.len(), cases.len());
 
     for (index, (now, schedule, rhythm)) in cases.iter().enumerate() {
-        let expected = f64::from_bits(u64::from_str_radix(js[index].as_str().expect("js bits"), 16).unwrap());
+        let expected =
+            f64::from_bits(u64::from_str_radix(js[index].as_str().expect("js bits"), 16).unwrap());
         let got = activity_probability(*now, schedule, rhythm);
         assert!(
             (got - expected).abs() <= 1e-12,
@@ -153,7 +174,10 @@ fn the_middle_of_the_rest_window_reaches_the_center_probability() {
     );
     // 靠近窗口边缘时 gaussian 趋近 edge，dip 趋近 0，结果趋近 edgeProbability。
     let near_edge = activity_probability(1_781_494_200.0 - 265.0 * 60.0, &s, &r); // 约 23:05
-    assert!(near_edge > middle, "the edges must be more active than the middle");
+    assert!(
+        near_edge > middle,
+        "the edges must be more active than the middle"
+    );
     assert!(near_edge <= r.edge_probability + 1e-12);
     // 活跃窗口内直接返回白天的基准概率。
     let active = activity_probability(1_781_524_800.0, &s, &r); // 12:00 UTC 在 08:00–23:00 内

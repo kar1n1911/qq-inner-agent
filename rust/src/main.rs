@@ -239,7 +239,7 @@ impl Runtime {
         ));
         let (bot, notices) = OneBot::new(c.onebot.clone(), c.onebot_token.text.clone());
         let bot = existing_bot.unwrap_or_else(|| Arc::new(bot));
-        let engine = Engine::new(
+        let engine = Engine::new_with_media(
             c.clone(),
             store.clone(),
             provider.clone(),
@@ -249,6 +249,18 @@ impl Runtime {
                 log: log.clone(),
                 ..Options::default()
             },
+            serde_json::from_value(
+                loaded.raw["agent"]
+                    .get("mediaSelect")
+                    .cloned()
+                    .unwrap_or_else(|| json!({})),
+            )?,
+            serde_json::from_value(
+                loaded.raw["agent"]
+                    .get("media")
+                    .cloned()
+                    .unwrap_or_else(|| json!({})),
+            )?,
         )?;
         let (abort, _) = watch::channel(false);
         Ok(Self {
@@ -273,11 +285,16 @@ impl Runtime {
         let signal = self.abort.subscribe();
         self.connection = Some(tokio::spawn(async move { bot.run(signal).await }));
     }
-    fn notice(&self, notice: Notification) {
+    async fn notice(&self, notice: Notification) {
         match notice {
             Notification::Status(state) => (self.log)("onebot", json!({"state":state})),
             Notification::Event(event) => {
-                if self.engine.ingest(&event).is_err() {
+                // 入站采集含同步文件/下载 I/O；单个顺序阻塞任务，不阻塞 Tokio worker。
+                let engine = self.engine.clone();
+                if !matches!(
+                    tokio::task::spawn_blocking(move || engine.ingest(&event)).await,
+                    Ok(Ok(()))
+                ) {
                     (self.log)("event_rejected", json!({}));
                 }
             }
@@ -327,7 +344,7 @@ impl Runtime {
             let _ = connection.await;
         }
         while let Ok(notice) = self.notices.try_recv() {
-            self.notice(notice);
+            self.notice(notice).await;
         }
     }
     async fn reload(
@@ -360,7 +377,7 @@ impl Runtime {
                 _ = shutdown.changed() => { self.abort.send_replace(true); stop.await; return Ok(()); }
                 _ = &mut stop => break,
                 _ = report.tick() => self.report()?,
-                Some(notice) = self.notices.recv() => self.notice(notice),
+                Some(notice) = self.notices.recv() => self.notice(notice).await,
             }
         }
         if *shutdown.borrow() {
@@ -484,7 +501,7 @@ async fn run(root: PathBuf) -> Result<()> {
                         if *shutdown.borrow() { break; }
                     }
                 }
-                Some(notice) = rt.notices.recv() => rt.notice(notice),
+                Some(notice) = rt.notices.recv() => rt.notice(notice).await,
                 _ = async { if let Some(connection) = &mut rt.connection { let _ = connection.await; } } => {
                     rt.connection = None;
                     (rt.log)("connection_loop_failed", json!({}));

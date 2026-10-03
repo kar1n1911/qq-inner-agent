@@ -68,35 +68,101 @@ impl<'a, R: FnMut() -> f64> ActivityRhythm<'a, R> {
     pub fn new(store: &'a Store, schedule: &'a Schedule, rhythm: &'a Rhythm, random: R) -> Self {
         // 按 JS defaults 的插入顺序编码，并去掉整数浮点的 .0，兼容共库重启。
         fn object(value: serde_json::Value, keys: &[&str]) -> String {
-            format!("{{{}}}", keys.iter().map(|k| {
-                let v = &value[*k];
-                let encoded = if v.is_number() { crate::config::js_string(v) } else { v.to_string() };
-                format!("\"{k}\":{encoded}")
-            }).collect::<Vec<_>>().join(","))
+            format!(
+                "{{{}}}",
+                keys.iter()
+                    .map(|k| {
+                        let v = &value[*k];
+                        let encoded = if v.is_number() {
+                            crate::config::js_string(v)
+                        } else {
+                            v.to_string()
+                        };
+                        format!("\"{k}\":{encoded}")
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
         }
-        let s = object(serde_json::to_value(schedule).unwrap(), &["enabled", "activeStart", "inactiveStart", "timezone"]);
-        let r = object(serde_json::to_value(rhythm).unwrap(), &["enabled", "dayProbability", "edgeProbability", "centerProbability", "sigma", "activeMinSeconds", "activeMaxSeconds", "restMinSeconds", "restMaxSeconds"]);
-        Self { store, schedule, rhythm, signature: format!("[{s},{r}]"), random }
+        let s = object(
+            serde_json::to_value(schedule).unwrap(),
+            &["enabled", "activeStart", "inactiveStart", "timezone"],
+        );
+        let r = object(
+            serde_json::to_value(rhythm).unwrap(),
+            &[
+                "enabled",
+                "dayProbability",
+                "edgeProbability",
+                "centerProbability",
+                "sigma",
+                "activeMinSeconds",
+                "activeMaxSeconds",
+                "restMinSeconds",
+                "restMaxSeconds",
+            ],
+        );
+        Self {
+            store,
+            schedule,
+            rhythm,
+            signature: format!("[{s},{r}]"),
+            random,
+        }
     }
     pub fn snapshot(&mut self, now: f64) -> Result<ActivitySnapshot> {
         if !self.rhythm.enabled {
-            return Ok(ActivitySnapshot { enabled: false, active: active_at(now, self.schedule), started: None, until: None, probability: None, draw: None, current_probability: None });
+            return Ok(ActivitySnapshot {
+                enabled: false,
+                active: active_at(now, self.schedule),
+                started: None,
+                until: None,
+                probability: None,
+                draw: None,
+                current_probability: None,
+            });
         }
         let old = self.store.activity_state()?;
         // 配置签名变化、时钟回拨、到期均重抽；不强制交替，相邻活跃块可连续。
         let row = match old {
-            Some(row) if row.signature == self.signature && now >= row.started && now < row.until => row,
+            Some(row)
+                if row.signature == self.signature && now >= row.started && now < row.until =>
+            {
+                row
+            }
             _ => {
                 // 本地静默进度与 DST 均复用已有 Zone；不把当地一天假定成固定 UTC 日。
                 let probability = activity_probability(now, self.schedule, self.rhythm);
                 let draw = (self.random)();
                 let active = draw < probability;
-                let (min, max) = if active { (self.rhythm.active_min_seconds, self.rhythm.active_max_seconds) } else { (self.rhythm.rest_min_seconds, self.rhythm.rest_max_seconds) };
-                let row = ActivityRow { signature: self.signature.clone(), started: now, until: now + min + ((self.random)() * (max - min + 1.)).floor(), active: i64::from(active), probability, draw };
+                let (min, max) = if active {
+                    (
+                        self.rhythm.active_min_seconds,
+                        self.rhythm.active_max_seconds,
+                    )
+                } else {
+                    (self.rhythm.rest_min_seconds, self.rhythm.rest_max_seconds)
+                };
+                let row = ActivityRow {
+                    signature: self.signature.clone(),
+                    started: now,
+                    until: now + min + ((self.random)() * (max - min + 1.)).floor(),
+                    active: i64::from(active),
+                    probability,
+                    draw,
+                };
                 self.store.save_activity(&row)?;
                 row
             }
         };
-        Ok(ActivitySnapshot { enabled: true, active: row.active != 0, started: Some(row.started), until: Some(row.until), probability: Some(row.probability), draw: Some(row.draw), current_probability: Some(activity_probability(now, self.schedule, self.rhythm)) })
+        Ok(ActivitySnapshot {
+            enabled: true,
+            active: row.active != 0,
+            started: Some(row.started),
+            until: Some(row.until),
+            probability: Some(row.probability),
+            draw: Some(row.draw),
+            current_probability: Some(activity_probability(now, self.schedule, self.rhythm)),
+        })
     }
 }

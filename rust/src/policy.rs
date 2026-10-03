@@ -95,8 +95,11 @@ fn to_utc(now: f64) -> Option<DateTime<Utc>> {
         return None;
     }
     let millis = millis as i64;
-    Utc.timestamp_opt(millis.div_euclid(1000), (millis.rem_euclid(1000) * 1_000_000) as u32)
-        .single()
+    Utc.timestamp_opt(
+        millis.div_euclid(1000),
+        (millis.rem_euclid(1000) * 1_000_000) as u32,
+    )
+    .single()
 }
 
 /// 把"秒（可含小数）"转成该时区的本地分钟数（0..1440）。
@@ -295,8 +298,12 @@ pub fn select(
 /// 长度均匀是最强的"机器味"信号。被直接点名时禁用 `tiny` —— 不能用一个"哈哈"敷衍提问。
 const LENGTH_BUCKETS_ADDRESSED: [(&str, f64); 3] =
     [("short", 0.70), ("medium", 0.28), ("long", 0.02)];
-const LENGTH_BUCKETS_OPEN: [(&str, f64); 4] =
-    [("tiny", 0.35), ("short", 0.45), ("medium", 0.18), ("long", 0.02)];
+const LENGTH_BUCKETS_OPEN: [(&str, f64); 4] = [
+    ("tiny", 0.35),
+    ("short", 0.45),
+    ("medium", 0.18),
+    ("long", 0.02),
+];
 
 pub fn pick_length_target(hint: &str, random: impl FnOnce() -> f64) -> &'static str {
     let buckets: &[(&str, f64)] = if hint == "self" {
@@ -318,9 +325,9 @@ pub fn pick_length_target(hint: &str, random: impl FnOnce() -> f64) -> &'static 
 /// 复刻 `repeated()`：与 agent 自己最近说过的话重复（完全相同，或相似度 > 0.88）。
 pub fn repeated(text: &str, self_messages: &[String]) -> bool {
     let trimmed = text.trim();
-    self_messages.iter().any(|previous| {
-        previous.trim() == trimmed || similarity(text, previous) > 0.88
-    })
+    self_messages
+        .iter()
+        .any(|previous| previous.trim() == trimmed || similarity(text, previous) > 0.88)
 }
 
 /// 消息形状与 JS 相同；self 是 Rust 关键字，因此字段名使用 is_self。
@@ -378,7 +385,12 @@ pub(crate) fn replace_cq(s: &str, mut replace: impl FnMut(&str) -> Option<String
     out
 }
 
-pub fn normalize(event: &serde_json::Value, self_id: &str, agent: &Agent, now: f64) -> Option<Message> {
+pub fn normalize(
+    event: &serde_json::Value,
+    self_id: &str,
+    agent: &Agent,
+    now: f64,
+) -> Option<Message> {
     use crate::config::{js_string, truthy};
     use serde_json::Value;
     let kind = event["message_type"].as_str()?;
@@ -386,38 +398,79 @@ pub fn normalize(event: &serde_json::Value, self_id: &str, agent: &Agent, now: f
         return None;
     }
     let sender = js_string(&event["user_id"]);
-    if !truthy(&event["user_id"]) || self_id.is_empty() || sender == self_id
+    if !truthy(&event["user_id"])
+        || self_id.is_empty()
+        || sender == self_id
         || (truthy(&event["self_id"]) && js_string(&event["self_id"]) != self_id)
-        || agent.ignored_users.contains(&sender) {
+        || agent.ignored_users.contains(&sender)
+    {
         return None;
     }
-    let target = &event[if kind == "group" { "group_id" } else { "user_id" }];
-    if !truthy(target) || event["message_id"].is_null() { return None; }
+    let target = &event[if kind == "group" {
+        "group_id"
+    } else {
+        "user_id"
+    }];
+    if !truthy(target) || event["message_id"].is_null() {
+        return None;
+    }
     let chat = format!("{kind}:{}", js_string(target));
-    if !allowed(&chat, agent) { return None; }
-    let ts = if truthy(&event["time"]) { crate::onebot::js_number(&event["time"]) } else { now };
-    if !ts.is_finite() || now - ts > agent.active_window_seconds || ts > now + 60.0 { return None; }
+    if !allowed(&chat, agent) {
+        return None;
+    }
+    let ts = if truthy(&event["time"]) {
+        crate::onebot::js_number(&event["time"])
+    } else {
+        now
+    };
+    if !ts.is_finite() || now - ts > agent.active_window_seconds || ts > now + 60.0 {
+        return None;
+    }
     let mut at_self = false;
     let mut at_other = false;
     let mut mention = |id: &str| {
-        if id == self_id { at_self = true; } else if id != "all" { at_other = true; }
+        if id == self_id {
+            at_self = true;
+        } else if id != "all" {
+            at_other = true;
+        }
     };
     let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
     let mut text = String::new();
     if let Some(segments) = event["message"].as_array() {
         for seg in segments {
             match seg["type"].as_str() {
-                Some("text") if seg["data"]["text"].is_string() => text.push_str(seg["data"]["text"].as_str().unwrap()),
+                Some("text") if seg["data"]["text"].is_string() => {
+                    text.push_str(seg["data"]["text"].as_str().unwrap())
+                }
                 Some("at") => {
-                    let qq = seg["data"].get("qq").map(js_string).unwrap_or_else(|| "undefined".into());
+                    let qq = seg["data"]
+                        .get("qq")
+                        .map(js_string)
+                        .unwrap_or_else(|| "undefined".into());
                     mention(&qq);
-                    let display = if truthy(&seg["data"]["qq"]) { qq } else { String::new() };
+                    let display = if truthy(&seg["data"]["qq"]) {
+                        qq
+                    } else {
+                        String::new()
+                    };
                     text.push_str(&format!(" [@{display}] "));
                 }
-                Some("face") if { let id = js_string(&seg["data"]["id"]); digits(&id) && id.len() <= 5 } => text.push_str(&format!(" [QQface:{}] ", js_string(&seg["data"]["id"]))),
+                Some("face")
+                    if {
+                        let id = js_string(&seg["data"]["id"]);
+                        digits(&id) && id.len() <= 5
+                    } =>
+                {
+                    text.push_str(&format!(" [QQface:{}] ", js_string(&seg["data"]["id"])))
+                }
                 Some("reply") => text.push_str(" [reply] "),
                 _ => {
-                    let kind = if truthy(&seg["type"]) { js_string(&seg["type"]) } else { "attachment".into() };
+                    let kind = if truthy(&seg["type"]) {
+                        js_string(&seg["type"])
+                    } else {
+                        "attachment".into()
+                    };
                     text.push_str(&format!(" [{}] ", clip_chars(&kind, 24)));
                 }
             }
@@ -426,7 +479,9 @@ pub fn normalize(event: &serde_json::Value, self_id: &str, agent: &Agent, now: f
         text = replace_cq(s, |body| {
             let tail = body.strip_prefix("at,qq=")?;
             let id = tail.split(',').next()?;
-            if id != "all" && !digits(id) { return None; }
+            if id != "all" && !digits(id) {
+                return None;
+            }
             mention(id);
             Some(format!(" [@{id}] "))
         });
@@ -434,19 +489,49 @@ pub fn normalize(event: &serde_json::Value, self_id: &str, agent: &Agent, now: f
             let id = body.strip_prefix("face,id=")?;
             (digits(id) && id.len() <= 5).then(|| format!("[QQface:{id}]"))
         });
-        text = replace_cq(&text, |body| (!body.is_empty()).then(|| "[attachment]".into()));
+        text = replace_cq(&text, |body| {
+            (!body.is_empty()).then(|| "[attachment]".into())
+        });
         // 解码顺序不可交换；&amp;#91; 本轮不会二次解码成 [。
-        text = text.replace("&#44;", ",").replace("&#91;", "[").replace("&#93;", "]").replace("&amp;", "&");
+        text = text
+            .replace("&#44;", ",")
+            .replace("&#91;", "[")
+            .replace("&#93;", "]")
+            .replace("&amp;", "&");
     }
     text = clip_chars(js_trim(&text), agent.max_input_chars as usize);
-    if text.is_empty() { return None; }
+    if text.is_empty() {
+        return None;
+    }
     let lower = text.to_lowercase();
     let named = agent.aliases.iter().any(|alias| {
         let alias = alias.to_lowercase();
-        lower.starts_with(&format!("{alias}:")) || lower.starts_with(&format!("{alias}：")) || lower.starts_with(&format!("@{alias} "))
+        lower.starts_with(&format!("{alias}:"))
+            || lower.starts_with(&format!("{alias}："))
+            || lower.starts_with(&format!("@{alias} "))
     });
-    let name = [&event["sender"]["card"], &event["sender"]["nickname"], &event["user_id"]]
-        .into_iter().find(|v| truthy(v)).unwrap_or(&Value::Null);
-    Some(Message { chat, id: js_string(&event["message_id"]), sender, name: clip_chars(&js_string(name), 80), text, ts: ts.min(now), is_self: false,
-        hint: if kind == "private" || at_self || named { Hint::SelfChat } else if at_other { Hint::Other } else { Hint::Open } })
+    let name = [
+        &event["sender"]["card"],
+        &event["sender"]["nickname"],
+        &event["user_id"],
+    ]
+    .into_iter()
+    .find(|v| truthy(v))
+    .unwrap_or(&Value::Null);
+    Some(Message {
+        chat,
+        id: js_string(&event["message_id"]),
+        sender,
+        name: clip_chars(&js_string(name), 80),
+        text,
+        ts: ts.min(now),
+        is_self: false,
+        hint: if kind == "private" || at_self || named {
+            Hint::SelfChat
+        } else if at_other {
+            Hint::Other
+        } else {
+            Hint::Open
+        },
+    })
 }

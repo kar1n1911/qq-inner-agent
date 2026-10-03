@@ -5,6 +5,7 @@ pub mod conversation;
 pub mod engine;
 pub mod expression;
 pub mod media;
+pub mod media_select;
 pub mod media_source;
 pub mod memory;
 pub mod onebot;

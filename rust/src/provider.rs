@@ -151,9 +151,9 @@ pub fn classify_status(status: u16) -> StatusClass {
 /// 把状态码映射成 JS 用的错误码字符串。
 pub fn status_error(status: u16) -> ProviderError {
     match classify_status(status) {
-        StatusClass::CheckConfig => ProviderError::HttpCheckConfig(format!(
-            "http_{status}_check_provider_config"
-        )),
+        StatusClass::CheckConfig => {
+            ProviderError::HttpCheckConfig(format!("http_{status}_check_provider_config"))
+        }
         StatusClass::Fatal => ProviderError::Http(format!("http_{status}")),
         StatusClass::Ok => ProviderError::InvalidProviderResponse,
         StatusClass::Transient => ProviderError::TransientHttp,
@@ -182,7 +182,11 @@ pub fn extract_text(kind: ProviderKind, data: &Value) -> Result<String, Provider
         }
         ProviderKind::OpenAi => {
             let choice = data.get("choices").and_then(|c| c.get(0));
-            if choice.and_then(|c| c.get("finish_reason")).and_then(Value::as_str) == Some("length") {
+            if choice
+                .and_then(|c| c.get("finish_reason"))
+                .and_then(Value::as_str)
+                == Some("length")
+            {
                 return Err(ProviderError::OutputTruncated);
             }
             choice

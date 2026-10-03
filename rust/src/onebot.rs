@@ -191,6 +191,39 @@ impl OneBot {
         )
         .await
     }
+    /// 素材专用发送：禁止 text/at 等段，原始上下文没有可进入输出的字段。
+    pub async fn send_media(&self, chat: &str, segment: Value) -> Reply {
+        let state = self.state();
+        if !state.connected || !state.online {
+            return Err(OneBotError::new("qq_offline", false));
+        }
+        let Some(id) = chat
+            .strip_prefix("group:")
+            .and_then(|id| id.parse::<u64>().ok())
+            .filter(|id| *id > 0)
+        else {
+            return Err(OneBotError::new("invalid_chat", false));
+        };
+        let valid = match segment["type"].as_str() {
+            Some("face") => segment["data"]["id"].as_str().is_some_and(|id| {
+                !id.is_empty() && id.len() <= 5 && id.bytes().all(|b| b.is_ascii_digit())
+            }),
+            Some("image") => segment["data"]["file"]
+                .as_str()
+                .is_some_and(|file| file.starts_with("file://")),
+            _ => false,
+        };
+        if !valid {
+            return Err(OneBotError::new("invalid_media_segment", false));
+        }
+        // 重建白名单字段；即使调用者附带昵称或旧正文也不会透传。
+        let data = if segment["type"] == "face" {
+            json!({"id":segment["data"]["id"]})
+        } else {
+            json!({"file":segment["data"]["file"]})
+        };
+        self.call("send_group_msg",json!({"group_id":id,"message":[{"type":segment["type"],"data":data}],"auto_escape":true})).await
+    }
     fn request_timeout(&self) -> Duration {
         Duration::from_secs_f64(self.config.request_timeout_seconds)
     }

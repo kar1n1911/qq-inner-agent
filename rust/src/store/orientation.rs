@@ -28,22 +28,45 @@ pub struct OrientationRow {
 }
 impl Store {
     pub fn activity_state(&self) -> Result<Option<ActivityRow>> {
-        self.rows("SELECT * FROM activity_rhythm WHERE id=1", [])?.into_iter().next()
-            .map(|v| Ok(serde_json::from_value(v)?)).transpose()
+        self.rows("SELECT * FROM activity_rhythm WHERE id=1", [])?
+            .into_iter()
+            .next()
+            .map(|v| Ok(serde_json::from_value(v)?))
+            .transpose()
     }
     pub fn save_activity(&self, row: &ActivityRow) -> Result<()> {
-        self.execute("INSERT OR REPLACE INTO activity_rhythm VALUES(1,?,?,?,?,?,?)", params![row.signature, row.started, row.until, row.active, row.probability, row.draw])?;
+        self.execute(
+            "INSERT OR REPLACE INTO activity_rhythm VALUES(1,?,?,?,?,?,?)",
+            params![
+                row.signature,
+                row.started,
+                row.until,
+                row.active,
+                row.probability,
+                row.draw
+            ],
+        )?;
         Ok(())
     }
     pub fn orientation_state(&self, chat: &str) -> Result<Option<OrientationRow>> {
-        self.rows("SELECT * FROM group_orientation WHERE chat=?", [chat])?.into_iter().next().map(|mut v| {
-            for key in ["sources", "analysis"] { v[key] = serde_json::from_str(v[key].as_str().unwrap_or("{}"))?; }
-            Ok(serde_json::from_value(v)?)
-        }).transpose()
+        self.rows("SELECT * FROM group_orientation WHERE chat=?", [chat])?
+            .into_iter()
+            .next()
+            .map(|mut v| {
+                for key in ["sources", "analysis"] {
+                    v[key] = serde_json::from_str(v[key].as_str().unwrap_or("{}"))?;
+                }
+                Ok(serde_json::from_value(v)?)
+            })
+            .transpose()
     }
     pub fn ensure_orientation(&self, chat: &str, now: f64) -> Result<OrientationRow> {
-        self.execute("INSERT OR IGNORE INTO group_orientation(chat,started) VALUES(?,?)", params![chat, now])?;
-        self.orientation_state(chat)?.ok_or_else(|| anyhow::anyhow!("missing_orientation"))
+        self.execute(
+            "INSERT OR IGNORE INTO group_orientation(chat,started) VALUES(?,?)",
+            params![chat, now],
+        )?;
+        self.orientation_state(chat)?
+            .ok_or_else(|| anyhow::anyhow!("missing_orientation"))
     }
     pub fn orientation_joined(&self, chat: &str, timestamp: f64, now: f64) -> Result<()> {
         self.ensure_orientation(chat, now)?;
@@ -59,7 +82,10 @@ impl Store {
         Ok(())
     }
     pub fn orientation_sources(&self, chat: &str, epoch: i64, sources: &Value) -> Result<bool> {
-        Ok(self.execute("UPDATE group_orientation SET collected=1,sources=? WHERE chat=? AND epoch=?", params![sources.to_string(),chat,epoch])? > 0)
+        Ok(self.execute(
+            "UPDATE group_orientation SET collected=1,sources=? WHERE chat=? AND epoch=?",
+            params![sources.to_string(), chat, epoch],
+        )? > 0)
     }
     pub fn orientation_ready(&self, chat: &str, epoch: i64, analysis: &Value) -> Result<bool> {
         Ok(self.execute("UPDATE group_orientation SET status='ready',analysis=?,error=NULL,retry_at=0 WHERE chat=? AND epoch=?", params![analysis.to_string(),chat,epoch])? > 0)

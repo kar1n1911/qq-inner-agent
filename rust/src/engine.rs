@@ -6,6 +6,7 @@ use crate::{
     expression::{
         decorate, decoration_choices, parse_expressions, personality_context, ExpressionMemory,
     },
+    media_select,
     memory::{array, num, parse_memory_updates, text, LayeredMemory},
     onebot::{OneBot, OneBotError, State as TransportState},
     orientation::{GroupOrientation, OrientationProvider, OrientationTransport},
@@ -27,6 +28,18 @@ use tokio::{sync::watch, task::JoinHandle};
 
 pub trait EngineTransport: OrientationTransport {
     fn state(&self) -> TransportState;
+    fn send_media<'a>(
+        &'a self,
+        _chat: &'a str,
+        _segment: Value,
+    ) -> BoxFuture<'a, std::result::Result<Value, OneBotError>> {
+        Box::pin(async {
+            Err(OneBotError {
+                code: "media_transport_unavailable".into(),
+                uncertain: false,
+            })
+        })
+    }
     fn send<'a>(
         &'a self,
         chat: &'a str,
@@ -37,6 +50,13 @@ pub trait EngineTransport: OrientationTransport {
 impl EngineTransport for OneBot {
     fn state(&self) -> TransportState {
         OneBot::state(self)
+    }
+    fn send_media<'a>(
+        &'a self,
+        chat: &'a str,
+        segment: Value,
+    ) -> BoxFuture<'a, std::result::Result<Value, OneBotError>> {
+        Box::pin(OneBot::send_media(self, chat, segment))
     }
     fn send<'a>(
         &'a self,
@@ -150,6 +170,8 @@ pub struct Engine {
     provider: Arc<dyn OrientationProvider>,
     transport: Arc<dyn EngineTransport>,
     options: Options,
+    media_config: media_select::Config,
+    collector: Option<crate::media::Collector>,
     core: Mutex<Core>,
     aborted: watch::Sender<bool>,
     // 多个 stop/wait_idle 调用者不能各自拿走任务后提前报告空闲。
@@ -185,6 +207,37 @@ impl Engine {
         transport: Arc<dyn EngineTransport>,
         options: Options,
     ) -> Result<Arc<Self>> {
+        Self::new_with_media(
+            config,
+            store,
+            provider,
+            transport,
+            options,
+            Default::default(),
+            Default::default(),
+        )
+    }
+    /// Rust 独立配置入口，不改变既有 config 序列化与默认 parity 路径。
+    pub fn new_with_media(
+        config: Config,
+        store: Arc<Mutex<Store>>,
+        provider: Arc<dyn OrientationProvider>,
+        transport: Arc<dyn EngineTransport>,
+        options: Options,
+        media_config: media_select::Config,
+        collection: crate::media::Config,
+    ) -> Result<Arc<Self>> {
+        media_config.validate()?;
+        if media_config.enabled {
+            media_select::enable(
+                &store
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("store_poisoned"))?,
+            )?;
+        }
+        let collector = collection
+            .enabled
+            .then(|| crate::media::Collector::new(&config.data_dir, collection));
         let (aborted, signal) = watch::channel(false);
         let orientation = GroupOrientation::new(
             store.clone(),
@@ -200,6 +253,8 @@ impl Engine {
             provider,
             transport,
             options,
+            media_config,
+            collector,
             orientation,
             core: Mutex::new(Core::default()),
             aborted,
@@ -281,6 +336,12 @@ impl Engine {
         if !self.db()?.message(&value)? {
             return Ok(());
         }
+        if let Some(collector) = &self.collector {
+            let report = collector.ingest(&self.db()?, event, &self_id, a, now)?;
+            for code in report.failures {
+                (self.options.log)("media_collect_failed", json!({"code":code}));
+            }
+        }
         self.orientation.observe(&m.chat)?;
         let db = self.db()?;
         if a.learning.enabled {
@@ -333,6 +394,110 @@ impl Engine {
             }
         }
     }
+    async fn media_cycle(&self, chat: &str, start: CycleStart) -> Result<()> {
+        // 沿用观察准入、单群单飞、版本、主动冷却和配额；群作息不套用 global quiet。
+        let a = &self.config.agent;
+        {
+            let mut core = self.core();
+            if let Some(s) = core.get_mut(chat) {
+                s.last_think = self.now();
+                s.due = self.now() + 60.;
+            }
+            let db = self.db()?;
+            media_select::observe(&db, chat, self.now(), &self.media_config)?;
+        }
+        let mut abort = self.aborted.subscribe();
+        let oriented = tokio::select! { biased; _=abort.changed()=>return Ok(()), r=self.orientation.before_speak(chat)=>r? };
+        if !oriented {
+            return Ok(());
+        }
+        let (selection, segment, delivery) = {
+            let core = self.core();
+            let db = self.db()?;
+            let now = self.now();
+            if *self.aborted.borrow()
+                || core
+                    .get(chat)
+                    .is_none_or(|s| s.version != start.version || s.pending)
+                || !policy::allowed(chat, a)
+                || !a.proactive
+                || !self.snapshot(&db, now)?.active
+            {
+                return Ok(());
+            }
+            let counts = db.counts(chat, now)?;
+            if num(&counts, "total") >= a.max_messages_per_hour
+                || num(&counts, "proactive") >= a.max_proactive_per_hour
+                || now - num(&counts, "last") < a.proactive_cooldown_seconds
+            {
+                return Ok(());
+            }
+            let Some(selection) = media_select::select(
+                &db,
+                chat,
+                now,
+                &self.media_config,
+                (self.options.selection_random)(),
+            )?
+            else {
+                return Ok(());
+            };
+            let segment = selection.candidate.segment(&self.config.data_dir)?;
+            if a.dry_run {
+                (self.options.log)(
+                    "media_dry_run",
+                    json!({"chat":chat,"hash":selection.candidate.hash}),
+                );
+                return Ok(());
+            }
+            let transport = self.transport.state();
+            if !transport.connected || !transport.online {
+                return Ok(());
+            }
+            let delivery = db.delivery(chat, true, now)?;
+            (selection, segment, delivery)
+        };
+        let sent = self.transport.send_media(chat, segment).await;
+        let _core = self.core();
+        let db = self.db()?;
+        match sent {
+            Ok(sent) => {
+                db.finish_delivery(&delivery, "sent", sent.get("message_id"))?;
+                let id = sent
+                    .get("message_id")
+                    .filter(|v| !v.is_null())
+                    .map(js_string)
+                    .unwrap_or(delivery);
+                let now = self.now();
+                db.message(&json!({"chat":chat,"id":id,"sender":self.transport.self_id(),"name":a.name.text,"text":"","ts":now,"self":true}))?;
+                db.execute(
+                    "INSERT OR IGNORE INTO media_pending VALUES(?,?,?,?,?,?,?,?)",
+                    rusqlite::params![
+                        chat,
+                        id,
+                        selection.candidate.source_chat,
+                        selection.candidate.hash,
+                        selection.bucket,
+                        now,
+                        serde_json::to_string(&selection.classification)?,
+                        selection.wild as i32
+                    ],
+                )?;
+                (self.options.log)(
+                    "media_sent",
+                    json!({"chat":chat,"hash":selection.candidate.hash}),
+                );
+            }
+            Err(e) => {
+                db.finish_delivery(
+                    &delivery,
+                    if e.uncertain { "uncertain" } else { "failed" },
+                    None,
+                )?;
+            }
+        }
+        Ok(())
+    }
     pub fn tick(self: &Arc<Self>) -> Result<()> {
         let mut core = self.core();
         let now = self.now();
@@ -370,12 +535,14 @@ impl Engine {
             }
             let trigger = if s.pending {
                 "message"
+            } else if self.media_config.enabled && chat.starts_with("group:") {
+                "media"
             } else if !s.pause_done && now - s.last_human >= a.pause_seconds {
                 "pause"
             } else {
                 continue;
             };
-            let quiet = policy::quiet(now, a.quiet_hours.as_ref());
+            let quiet = trigger != "media" && policy::quiet(now, a.quiet_hours.as_ref());
             if trigger == "pause" && (!a.proactive || quiet) {
                 continue;
             }
@@ -402,7 +569,11 @@ impl Engine {
         for (chat, trigger, start) in ready {
             let engine = self.clone();
             core.tasks.push(tokio::spawn(async move {
-                let result = engine.cycle(&chat, trigger, start).await;
+                let result = if trigger == "media" {
+                    engine.media_cycle(&chat, start).await
+                } else {
+                    engine.cycle(&chat, trigger, start).await
+                };
                 let mut core = engine.core();
                 if let Err(error) = result {
                     let code = error.to_string();

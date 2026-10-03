@@ -14,7 +14,10 @@ use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 static SEQ: AtomicUsize = AtomicUsize::new(0);
 
 fn node_available() -> bool {
-    Command::new("node").arg("--version").output().is_ok_and(|o| o.status.success())
+    Command::new("node")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success())
 }
 
 fn run_node(payload: &Value) -> Value {
@@ -48,11 +51,19 @@ process.stdout.write(JSON.stringify({ endpoints, parses, models }));
     let out = Command::new("node")
         .args(["--input-type=module", "-e", script])
         .arg(&payload_file)
-        .current_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap())
+        .current_dir(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap(),
+        )
         .output()
         .expect("run node");
     let _ = fs::remove_dir_all(&dir);
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     serde_json::from_slice(&out.stdout).expect("node output")
 }
 
@@ -128,7 +139,11 @@ fn models_endpoint_matches_what_list_models_actually_requests() {
         let base = case["base"].as_str().unwrap();
         let k = kind(case["kind"].as_str().unwrap());
         let expected = js["models"][index].as_str().unwrap();
-        assert_eq!(models_endpoint(base, k), expected, "models({base:?}, {k:?})");
+        assert_eq!(
+            models_endpoint(base, k),
+            expected,
+            "models({base:?}, {k:?})"
+        );
     }
 }
 
@@ -163,15 +178,21 @@ fn parse_object_matches_javascript_including_error_codes() {
     for (index, text) in parses.iter().enumerate() {
         match parse_object(text) {
             Ok(value) => {
-                assert_eq!(js["parses"][index]["ok"], json!(true), "{text:?} should parse");
-                let expected: Value = serde_json::from_str(
-                    strip_expected(text),
-                )
-                .expect("expected json");
+                assert_eq!(
+                    js["parses"][index]["ok"],
+                    json!(true),
+                    "{text:?} should parse"
+                );
+                let expected: Value =
+                    serde_json::from_str(strip_expected(text)).expect("expected json");
                 assert_eq!(value, expected, "parse_object({text:?})");
             }
             Err(error) => {
-                assert_eq!(js["parses"][index]["ok"], json!(false), "{text:?} should fail");
+                assert_eq!(
+                    js["parses"][index]["ok"],
+                    json!(false),
+                    "{text:?} should fail"
+                );
                 assert_eq!(
                     error.to_string(),
                     js["parses"][index]["code"].as_str().unwrap(),
@@ -202,7 +223,11 @@ fn strip_expected(text: &str) -> &str {
 fn status_classification_follows_the_javascript_if_chain() {
     // 配置类：退避 300 秒且不重试。
     for status in [400, 401, 403, 404, 422] {
-        assert_eq!(classify_status(status), StatusClass::CheckConfig, "status {status}");
+        assert_eq!(
+            classify_status(status),
+            StatusClass::CheckConfig,
+            "status {status}"
+        );
         assert_eq!(
             status_error(status).to_string(),
             format!("http_{status}_check_provider_config")
@@ -210,12 +235,20 @@ fn status_classification_follows_the_javascript_if_chain() {
     }
     // 其余 4xx（非 429）：致命，不重试。
     for status in [402, 405, 409, 418, 499] {
-        assert_eq!(classify_status(status), StatusClass::Fatal, "status {status}");
+        assert_eq!(
+            classify_status(status),
+            StatusClass::Fatal,
+            "status {status}"
+        );
         assert_eq!(status_error(status).to_string(), format!("http_{status}"));
     }
     // 429 与 5xx：可重试。
     for status in [429, 500, 502, 503, 504] {
-        assert_eq!(classify_status(status), StatusClass::Transient, "status {status}");
+        assert_eq!(
+            classify_status(status),
+            StatusClass::Transient,
+            "status {status}"
+        );
         assert_eq!(status_error(status), ProviderError::TransientHttp);
     }
     // <400 视为正常。
@@ -235,23 +268,52 @@ fn extract_text_matches_the_javascript_response_handling() {
             { "type": "text", "text": "第二段" }
         ]
     });
-    assert_eq!(extract_text(ProviderKind::Anthropic, &anthropic).unwrap(), "第一段\n第二段");
+    assert_eq!(
+        extract_text(ProviderKind::Anthropic, &anthropic).unwrap(),
+        "第一段\n第二段"
+    );
 
     // 截断与空正文。
-    let truncated = json!({ "stop_reason": "max_tokens", "content": [{ "type": "text", "text": "半截" }] });
-    assert_eq!(extract_text(ProviderKind::Anthropic, &truncated), Err(ProviderError::OutputTruncated));
-    let blank = json!({ "stop_reason": "end_turn", "content": [{ "type": "text", "text": "   " }] });
-    assert_eq!(extract_text(ProviderKind::Anthropic, &blank), Err(ProviderError::EmptyModelResponse));
+    let truncated =
+        json!({ "stop_reason": "max_tokens", "content": [{ "type": "text", "text": "半截" }] });
+    assert_eq!(
+        extract_text(ProviderKind::Anthropic, &truncated),
+        Err(ProviderError::OutputTruncated)
+    );
+    let blank =
+        json!({ "stop_reason": "end_turn", "content": [{ "type": "text", "text": "   " }] });
+    assert_eq!(
+        extract_text(ProviderKind::Anthropic, &blank),
+        Err(ProviderError::EmptyModelResponse)
+    );
     let missing = json!({ "stop_reason": "end_turn" });
-    assert_eq!(extract_text(ProviderKind::Anthropic, &missing), Err(ProviderError::EmptyModelResponse));
+    assert_eq!(
+        extract_text(ProviderKind::Anthropic, &missing),
+        Err(ProviderError::EmptyModelResponse)
+    );
 
     // OpenAI。
-    let openai = json!({ "choices": [{ "finish_reason": "stop", "message": { "content": "答一句" } }] });
-    assert_eq!(extract_text(ProviderKind::OpenAi, &openai).unwrap(), "答一句");
-    let openai_truncated = json!({ "choices": [{ "finish_reason": "length", "message": { "content": "半截" } }] });
-    assert_eq!(extract_text(ProviderKind::OpenAi, &openai_truncated), Err(ProviderError::OutputTruncated));
-    let openai_empty = json!({ "choices": [{ "finish_reason": "stop", "message": { "content": "" } }] });
-    assert_eq!(extract_text(ProviderKind::OpenAi, &openai_empty), Err(ProviderError::EmptyModelResponse));
+    let openai =
+        json!({ "choices": [{ "finish_reason": "stop", "message": { "content": "答一句" } }] });
+    assert_eq!(
+        extract_text(ProviderKind::OpenAi, &openai).unwrap(),
+        "答一句"
+    );
+    let openai_truncated =
+        json!({ "choices": [{ "finish_reason": "length", "message": { "content": "半截" } }] });
+    assert_eq!(
+        extract_text(ProviderKind::OpenAi, &openai_truncated),
+        Err(ProviderError::OutputTruncated)
+    );
+    let openai_empty =
+        json!({ "choices": [{ "finish_reason": "stop", "message": { "content": "" } }] });
+    assert_eq!(
+        extract_text(ProviderKind::OpenAi, &openai_empty),
+        Err(ProviderError::EmptyModelResponse)
+    );
     let openai_missing = json!({ "choices": [] });
-    assert_eq!(extract_text(ProviderKind::OpenAi, &openai_missing), Err(ProviderError::EmptyModelResponse));
+    assert_eq!(
+        extract_text(ProviderKind::OpenAi, &openai_missing),
+        Err(ProviderError::EmptyModelResponse)
+    );
 }
