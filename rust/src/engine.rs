@@ -280,6 +280,23 @@ impl Engine {
         })
         .snapshot(now)
     }
+    // 持久化成功后转发同一份决策字段，控制服务仅订阅日志，不重跑决策。
+    fn record_decision(
+        &self,
+        db: &Store,
+        chat: &str,
+        action: &str,
+        score: f64,
+        tags: &Value,
+        ts: f64,
+    ) -> Result<()> {
+        db.decision(chat, action, score, tags, ts)?;
+        (self.options.log)(
+            "decision",
+            json!({"chat":chat,"action":action,"score":score,"tags":tags,"ts":ts}),
+        );
+        Ok(())
+    }
     pub fn available(&self, now: f64) -> Result<bool> {
         Ok(self.snapshot(&*self.db()?, now)?.active)
     }
@@ -937,7 +954,8 @@ impl Engine {
             if selected.is_none()
                 || (proactive && (!a.proactive || policy::quiet(now, a.quiet_hours.as_ref())))
             {
-                db.decision(
+                self.record_decision(
+                    &db,
                     chat,
                     "withhold",
                     selected.as_ref().map_or(0., |s| s.adjusted),
@@ -1004,7 +1022,8 @@ impl Engine {
             );
             if !admitted {
                 let veto = serde_json::to_value(gate.veto)?;
-                db.decision(
+                self.record_decision(
+                    &db,
                     chat,
                     veto.as_str().unwrap_or("probability_withhold"),
                     selected.adjusted,
@@ -1097,7 +1116,7 @@ impl Engine {
                     .iter()
                     .chain(&selected.candidate.against_tags)
                     .collect();
-                db.decision(chat, "dry_run", selected.adjusted, &json!(tags), now)?;
+                self.record_decision(&db, chat, "dry_run", selected.adjusted, &json!(tags), now)?;
                 db.r#use(&selected.candidate.id)?;
                 self.finish(&mut core, &db, &t, false)?;
                 (self.options.log)("dry_run", json!({"chat":chat,"score":selected.adjusted}));
@@ -1148,7 +1167,8 @@ impl Engine {
                     js_string(&sent["message_id"])
                 };
                 db.message(&json!({"chat":chat,"id":id,"sender":self.transport.self_id(),"name":a.name.text,"text":content,"ts":self.now(),"self":true}))?;
-                db.decision(
+                self.record_decision(
+                    &db,
                     chat,
                     "sent",
                     selected.adjusted,
@@ -1167,7 +1187,8 @@ impl Engine {
                 };
                 db.finish_delivery(&delivery_id, status, None)?;
                 db.assessment_status(chat, &t.id, status)?;
-                db.decision(
+                self.record_decision(
+                    &db,
                     chat,
                     if error.uncertain {
                         "delivery_uncertain"

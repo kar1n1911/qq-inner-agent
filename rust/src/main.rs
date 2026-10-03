@@ -5,7 +5,7 @@
 //! remaining Store owners before closing SQLite. Reload also rechecks the marker/revision
 //! around loading and defers an unstable snapshot to the next watcher tick (JS checks only before).
 //! P6a differences remain documented in ENGINE.md.
-//! No P7 control socket is opened; the OneBot task owns and closes the TCP/WebSocket resource.
+//! 控制套接字与运行时一起启动、重载资源引用并在停止时清理。
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use qq_inner_core::config;
@@ -137,6 +137,7 @@ async fn main() -> Result<()> {
 
 use qq_inner_core::{
     activity::ActivityRhythm,
+    control::{Backend, Events, LiveRemote, Server},
     engine::{Clock, Engine, Logger, Options},
     expression::ExpressionMemory,
     memory::LayeredMemory,
@@ -221,6 +222,7 @@ struct Runtime {
     reload_error: Option<&'static str>,
     now: Clock,
     log: Logger,
+    control: Option<Arc<Backend>>,
 }
 impl Runtime {
     fn new(
@@ -264,6 +266,7 @@ impl Runtime {
         )?;
         let (abort, _) = watch::channel(false);
         Ok(Self {
+            control: None,
             config: c,
             raw: loaded.raw,
             store,
@@ -289,6 +292,9 @@ impl Runtime {
         match notice {
             Notification::Status(state) => (self.log)("onebot", json!({"state":state})),
             Notification::Event(event) => {
+                if let Some(control) = &self.control {
+                    control.observe(&event);
+                }
                 // 入站采集含同步文件/下载 I/O；单个顺序阻塞任务，不阻塞 Tokio worker。
                 let engine = self.engine.clone();
                 if !matches!(
@@ -406,6 +412,20 @@ impl Runtime {
             replacement.connection = self.connection.take();
             replacement.abort = self.abort.clone();
         }
+        replacement.control = self.control.take();
+        if let Some(control) = &replacement.control {
+            control.replace(
+                Arc::new(LiveRemote {
+                    bot: replacement.bot.clone(),
+                    provider: replacement.provider.clone(),
+                    config: replacement.config.clone(),
+                }),
+                vec![
+                    replacement.config.api_key.text.clone(),
+                    replacement.config.onebot_token.text.clone(),
+                ],
+            );
+        }
         *self = replacement;
         (self.log)("config_applied", json!({"revision": &self.applied[..12]}));
         Ok(())
@@ -467,7 +487,13 @@ async fn run(root: PathBuf) -> Result<()> {
     let store = Arc::new(Mutex::new(Store::open(c.data_dir.join("agent.sqlite"))?));
     store.lock().unwrap().recover_deliveries()?;
     let now = Options::default().now;
-    let log = logger(c.data_dir.clone(), now.clone());
+    let events = Events::default();
+    let file_log = logger(c.data_dir.clone(), now.clone());
+    let event_log = events.clone();
+    let log: Logger = Arc::new(move |event, data| {
+        event_log.publish(event, data.clone());
+        file_log(event, data);
+    });
     let mut rt = Runtime::new(loaded, store, settings::revision(&root)?, now, log, None)?;
     rt.engine.restore()?;
     (rt.log)(
@@ -476,6 +502,21 @@ async fn run(root: PathBuf) -> Result<()> {
     );
     rt.maintain(true)?;
     rt.report()?;
+    let backend = Arc::new(Backend::new(
+        rt.config.data_dir.clone(),
+        rt.store.clone(),
+        Arc::new(LiveRemote {
+            bot: rt.bot.clone(),
+            provider: rt.provider.clone(),
+            config: rt.config.clone(),
+        }),
+        vec![
+            rt.config.api_key.text.clone(),
+            rt.config.onebot_token.text.clone(),
+        ],
+    ));
+    let control = Server::bind(&rt.config.data_dir, backend.clone(), events)?;
+    rt.control = Some(backend);
     rt.connect();
     let mut tick = timer(1);
     let mut report = timer(5);
@@ -511,6 +552,7 @@ async fn run(root: PathBuf) -> Result<()> {
         }
         Ok(())
     }.await;
+    control.stop().await;
     let stopped = rt.shutdown().await;
     signals.abort();
     result.and(stopped)
@@ -524,9 +566,9 @@ mod tests {
     impl Temp {
         fn new() -> Self {
             let path = std::env::temp_dir().join(format!(
-                "qia-runtime-{}-{}",
+                "qr-{}-{}",
                 std::process::id(),
-                rand::random::<u64>()
+                rand::random::<u32>()
             ));
             fs::create_dir_all(&path).unwrap();
             Self(path)
@@ -948,6 +990,7 @@ console.log(JSON.stringify(result));
                 serde_json::from_slice(&fs::read(dir.0.join("state/status.json")).unwrap())
                     .unwrap();
             assert_eq!(status["onebotConnected"], false);
+            assert!(!dir.0.join("state/control.sock").exists());
             assert!(!dir.0.join("state/agent.sqlite-wal").exists());
             let db = rusqlite::Connection::open(dir.0.join("state/agent.sqlite")).unwrap();
             db.execute_batch("BEGIN EXCLUSIVE; ROLLBACK;").unwrap();

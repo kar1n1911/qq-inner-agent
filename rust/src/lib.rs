@@ -1,6 +1,7 @@
 //! 内核模块入口；供运行时模块与 Node 交叉验证使用。
 pub mod activity;
 pub mod config;
+pub mod control;
 pub mod conversation;
 pub mod engine;
 pub mod expression;

@@ -543,7 +543,13 @@ async fn scripted_conversations_match_real_js_decision_by_decision() {
     let cases = scenarios();
     let mut actual = Vec::new();
     for c in &cases {
-        actual.push(script(c).await);
+        let mut result = script(c).await;
+        // P7a 新增 Rust 控制事件，JS 无此接口；单独行为测试，不纳入旧日志 oracle。
+        result["trace"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|entry| entry[0] != "log" || entry[1] != "decision");
+        actual.push(result);
     }
     // Node 缺失只跳过 oracle，Rust 场景仍全部执行。
     if !Command::new("node")
@@ -1038,4 +1044,26 @@ async fn message_before_first_task_poll_does_not_bypass_debounce() {
     e.wait_idle().await;
     assert_eq!(h.rows("SELECT * FROM deliveries").len(), 1);
     e.stop().await;
+}
+
+#[tokio::test]
+async fn control_decision_event_reports_below_threshold_withhold() {
+    let result = script(&base(
+        "control_event",
+        json!({"threshold":4,"system1Probability":0}),
+        vec![model(json!({"score":1})), ingest("m1", "怎么浇水？"), run()],
+    ))
+    .await;
+    let events: Vec<_> = result["trace"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|entry| entry[0] == "log" && entry[1] == "decision")
+        .collect();
+    assert_eq!(
+        events,
+        vec![&json!(["log","decision",{
+            "chat":"group:10","action":"withhold","score":0.0,"tags":[],"ts":43200.0
+        }])]
+    );
 }
