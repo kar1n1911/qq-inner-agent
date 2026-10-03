@@ -417,7 +417,7 @@ fn uuid() -> String {
         &hex[20..]
     )
 }
-fn js_number(v: &Value) -> f64 {
+pub(crate) fn js_number(v: &Value) -> f64 {
     match v {
         Value::Null => 0.0,
         Value::Bool(b) => {

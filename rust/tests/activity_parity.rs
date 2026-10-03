@@ -69,6 +69,13 @@ fn cases() -> Vec<(f64, Schedule, Rhythm)> {
             }
         }
     }
+    // 显式覆盖静默区间 x=0..1；窗口跨午夜，端点与中点均包含。
+    for r in &rhythms {
+        for i in 0..=20 {
+            out.push((1_781_478_000.0 + i as f64 * 1620.0,
+                schedule(true, "08:00", "23:00", "UTC"), r.clone()));
+        }
+    }
     out
 }
 
@@ -88,7 +95,9 @@ fn activity_probability_matches_javascript_within_a_tiny_tolerance() {
 import { activityProbability } from './src/activity.mjs';
 import { readFileSync } from 'node:fs';
 const cases = JSON.parse(readFileSync(process.argv[1], 'utf8'));
-process.stdout.write(JSON.stringify(cases.map(c => activityProbability(c.now, c.schedule, c.rhythm))));
+// 用 IEEE-754 位传回，避免 serde_json 十进制解析额外引入 1 ULP。
+const bits = n => { const b = Buffer.alloc(8); b.writeDoubleBE(n); return b.toString('hex'); };
+process.stdout.write(JSON.stringify(cases.map(c => bits(activityProbability(c.now, c.schedule, c.rhythm)))));
 "#;
     let dir = std::env::temp_dir().join(format!(
         "qq-inner-activity-{}-{}",
@@ -110,7 +119,7 @@ process.stdout.write(JSON.stringify(cases.map(c => activityProbability(c.now, c.
     assert_eq!(js.len(), cases.len());
 
     for (index, (now, schedule, rhythm)) in cases.iter().enumerate() {
-        let expected = js[index].as_f64().expect("js number");
+        let expected = f64::from_bits(u64::from_str_radix(js[index].as_str().expect("js bits"), 16).unwrap());
         let got = activity_probability(*now, schedule, rhythm);
         assert!(
             (got - expected).abs() <= 1e-12,

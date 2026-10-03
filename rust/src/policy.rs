@@ -1,8 +1,7 @@
 //! 对应 `src/policy.mjs` 的纯逻辑部分。
 //!
 //! 这里覆盖：准入判断、静默时段、活跃时间表、候选选择、长度分档、重复检测。
-//! **`normalize()`（OneBot 事件 → 内部消息）不在这里** —— 它与传输层的事件形状耦合，
-//! 由引擎阶段一并实现。
+//! `normalize()` 将 OneBot 事件转换为内部强类型消息。
 //!
 //! 时区是最容易与 JS 产生偏差的地方：JS 走 ICU 的 `Intl.DateTimeFormat`，这里走
 //! `chrono-tz`，两者的数据库版本不同。`tests/policy_parity.rs` 会用真实 Node 在多个
@@ -322,4 +321,132 @@ pub fn repeated(text: &str, self_messages: &[String]) -> bool {
     self_messages.iter().any(|previous| {
         previous.trim() == trimmed || similarity(text, previous) > 0.88
     })
+}
+
+/// 消息形状与 JS 相同；self 是 Rust 关键字，因此字段名使用 is_self。
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Message {
+    pub chat: String,
+    pub id: String,
+    pub sender: String,
+    pub name: String,
+    pub text: String,
+    pub ts: f64,
+    #[serde(rename = "self")]
+    pub is_self: bool,
+    pub hint: Hint,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Hint {
+    #[serde(rename = "self")]
+    SelfChat,
+    #[serde(rename = "other")]
+    Other,
+    #[serde(rename = "open")]
+    Open,
+}
+
+pub(crate) fn js_trim(s: &str) -> &str {
+    s.trim_matches(|c: char| matches!(c, '\u{0009}'..='\u{000d}'|'\u{0020}'|'\u{00a0}'|'\u{1680}'|'\u{2000}'..='\u{200a}'|'\u{2028}'|'\u{2029}'|'\u{202f}'|'\u{205f}'|'\u{3000}'|'\u{feff}'))
+}
+
+/// 明确的移植差异：Rust String 不容纳孤立代理项，截断按 char 而非 JS UTF-16
+/// 码元；因此补充平面字符不会被切半，同样上限下可能比 JS 多保留字符。
+pub(crate) fn clip_chars(s: &str, limit: usize) -> String {
+    s.chars().take(limit).collect()
+}
+
+/// 无正则依赖的 CQ 替换；返回 None 时继续搜索内部的 CQ 起点，匹配 JS 正则行为。
+pub(crate) fn replace_cq(s: &str, mut replace: impl FnMut(&str) -> Option<String>) -> String {
+    let mut out = String::new();
+    let mut rest = s;
+    while let Some(start) = rest.find("[CQ:") {
+        out.push_str(&rest[..start]);
+        rest = &rest[start..];
+        if let Some(end) = rest.find(']') {
+            if let Some(value) = replace(&rest[4..end]) {
+                out.push_str(&value);
+                rest = &rest[end + 1..];
+                continue;
+            }
+        }
+        out.push_str("[CQ:");
+        rest = &rest[4..];
+    }
+    out.push_str(rest);
+    out
+}
+
+pub fn normalize(event: &serde_json::Value, self_id: &str, agent: &Agent, now: f64) -> Option<Message> {
+    use crate::config::{js_string, truthy};
+    use serde_json::Value;
+    let kind = event["message_type"].as_str()?;
+    if event["post_type"] != "message" || !matches!(kind, "group" | "private") {
+        return None;
+    }
+    let sender = js_string(&event["user_id"]);
+    if !truthy(&event["user_id"]) || self_id.is_empty() || sender == self_id
+        || (truthy(&event["self_id"]) && js_string(&event["self_id"]) != self_id)
+        || agent.ignored_users.contains(&sender) {
+        return None;
+    }
+    let target = &event[if kind == "group" { "group_id" } else { "user_id" }];
+    if !truthy(target) || event["message_id"].is_null() { return None; }
+    let chat = format!("{kind}:{}", js_string(target));
+    if !allowed(&chat, agent) { return None; }
+    let ts = if truthy(&event["time"]) { crate::onebot::js_number(&event["time"]) } else { now };
+    if !ts.is_finite() || now - ts > agent.active_window_seconds || ts > now + 60.0 { return None; }
+    let mut at_self = false;
+    let mut at_other = false;
+    let mut mention = |id: &str| {
+        if id == self_id { at_self = true; } else if id != "all" { at_other = true; }
+    };
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let mut text = String::new();
+    if let Some(segments) = event["message"].as_array() {
+        for seg in segments {
+            match seg["type"].as_str() {
+                Some("text") if seg["data"]["text"].is_string() => text.push_str(seg["data"]["text"].as_str().unwrap()),
+                Some("at") => {
+                    let qq = seg["data"].get("qq").map(js_string).unwrap_or_else(|| "undefined".into());
+                    mention(&qq);
+                    let display = if truthy(&seg["data"]["qq"]) { qq } else { String::new() };
+                    text.push_str(&format!(" [@{display}] "));
+                }
+                Some("face") if { let id = js_string(&seg["data"]["id"]); digits(&id) && id.len() <= 5 } => text.push_str(&format!(" [QQface:{}] ", js_string(&seg["data"]["id"]))),
+                Some("reply") => text.push_str(" [reply] "),
+                _ => {
+                    let kind = if truthy(&seg["type"]) { js_string(&seg["type"]) } else { "attachment".into() };
+                    text.push_str(&format!(" [{}] ", clip_chars(&kind, 24)));
+                }
+            }
+        }
+    } else if let Some(s) = event["message"].as_str() {
+        text = replace_cq(s, |body| {
+            let tail = body.strip_prefix("at,qq=")?;
+            let id = tail.split(',').next()?;
+            if id != "all" && !digits(id) { return None; }
+            mention(id);
+            Some(format!(" [@{id}] "))
+        });
+        text = replace_cq(&text, |body| {
+            let id = body.strip_prefix("face,id=")?;
+            (digits(id) && id.len() <= 5).then(|| format!("[QQface:{id}]"))
+        });
+        text = replace_cq(&text, |body| (!body.is_empty()).then(|| "[attachment]".into()));
+        // 解码顺序不可交换；&amp;#91; 本轮不会二次解码成 [。
+        text = text.replace("&#44;", ",").replace("&#91;", "[").replace("&#93;", "]").replace("&amp;", "&");
+    }
+    text = clip_chars(js_trim(&text), agent.max_input_chars as usize);
+    if text.is_empty() { return None; }
+    let lower = text.to_lowercase();
+    let named = agent.aliases.iter().any(|alias| {
+        let alias = alias.to_lowercase();
+        lower.starts_with(&format!("{alias}:")) || lower.starts_with(&format!("{alias}：")) || lower.starts_with(&format!("@{alias} "))
+    });
+    let name = [&event["sender"]["card"], &event["sender"]["nickname"], &event["user_id"]]
+        .into_iter().find(|v| truthy(v)).unwrap_or(&Value::Null);
+    Some(Message { chat, id: js_string(&event["message_id"]), sender, name: clip_chars(&js_string(name), 80), text, ts: ts.min(now), is_self: false,
+        hint: if kind == "private" || at_self || named { Hint::SelfChat } else if at_other { Hint::Other } else { Hint::Open } })
 }
