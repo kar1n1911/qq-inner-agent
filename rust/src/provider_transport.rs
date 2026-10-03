@@ -12,6 +12,7 @@ type AttemptResult = Result<Value, (ProviderError, Option<String>)>;
 
 #[derive(Clone)]
 pub struct Provider {
+    calls: Arc<std::sync::atomic::AtomicU64>,
     config: config::Provider,
     key: String,
     store: Arc<Mutex<Store>>,
@@ -25,6 +26,7 @@ impl Provider {
     /// config 应来自已校验的配置；共享 Store 的锁只覆盖预算事务，不覆盖网络请求。
     pub fn new(config: config::Provider, key: impl Into<String>, store: Arc<Mutex<Store>>) -> Self {
         Self {
+            calls: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             config,
             key: key.into(),
             store,
@@ -38,6 +40,11 @@ impl Provider {
             #[cfg(test)]
             sleep: None,
         }
+    }
+
+    /// Accepted attempts in this provider generation, including retries/failures.
+    pub fn calls(&self) -> u64 {
+        self.calls.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     fn kind(&self) -> ProviderKind {
@@ -203,6 +210,10 @@ impl Provider {
                 .map_err(|_| ProviderError::ProviderUnavailable)?
             {
                 return Err(ProviderError::HourlyBudget);
+            }
+            if !models {
+                self.calls
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
         }
         let response = match body {
