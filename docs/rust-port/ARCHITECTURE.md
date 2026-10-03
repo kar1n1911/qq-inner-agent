@@ -240,7 +240,7 @@ Node 侧先**双读**:控制套接字可用则订阅事件,否则回退到 `stat
 | **P2** | `onebot` 传输 | 对本地 WS mock 跑通鉴权/心跳/重连/early 缓冲/echo 关联/发送格式 | ✅ 已合并（`onebot.rs` 503 行 + mock 测试 405 行；双平台验证） |
 | **P3** | `provider` 适配 | 对本地 HTTP mock 跑通两种 API 格式、重试退避与全部错误码 | ✅ 已合并（纯逻辑 + HTTP 传输 + 重试退避 + 小时预算；10 个传输层测试；双平台 74 项通过） |
 | **P4** | `memory` + `ranking` + `expression`(跳过死代码 `learning.mjs`) | 隔离性/淘汰/过期行为对齐;并落地两项优化:**enforce 改增量+批处理**、**ranking 预计算 token 缓存** | ✅ 已合并（分层记忆/排序/表达 + 增量批处理维护；`memory_parity` 870 行 + JS oracle 与 Node↔Rust 基准；双平台 89 项通过） |
-| **P5** | `policy` + `sending` + `activity` + `orientation` | 纯函数逐一比对;时区/夏令时用 `chrono-tz` 精确匹配 JS `Intl` | 🔄 纯函数已合并（`sending` / `activity` / `policy`）；`normalize` 与需 store 的持久化待做 |
+| **P5** | `policy` + `sending` + `activity` + `orientation` | 纯函数逐一比对;时区/夏令时用 `chrono-tz` 精确匹配 JS `Intl` | ✅ 已合并（`normalize` + activity 持久化 + orientation；`phase5_parity` 587 行/86 断言 + JS oracle；双平台 96 项通过） |
 | **P5b** | 群内装饰素材:采集、落盘、去重、上下文索引、交流阶段分类 | 同一张图只落一份;失败不写记录;分类器对模糊输入如实返回不确定 | ⬜ 规格已备(**新功能:先 JS 后 Rust**) |
 | **P6** | `engine` 决策循环 | 与 JS **同输入同输出**(golden 对比);取消/版本/配额/先落库后发送的语义一致 | ⬜ 规格已备（`phase6-engine.md`） |
 | **P6b** | 装饰素材的选择与发送:`groupActivity`、群作息、按场合适配度、概率触发、信号剔除 | 收束/单发后的沉默**不得**记为负面;温度不足不选;检索无匹配不发 | ⬜ 规格已备(**新功能:先 JS 后 Rust**) |
