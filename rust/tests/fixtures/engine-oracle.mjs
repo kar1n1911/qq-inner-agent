@@ -24,7 +24,7 @@ for (const test of input) {
   };
   const provider = {json:async (system,payload) => {
     const stage = system.match(/TASK: (\w+)/)[1];
-    trace.push(['model',stage,payload.addressedHint ?? null,payload.trigger ?? null,payload.history?.map(m=>m.id) ?? []]);
+    trace.push(['model',stage,payload.addressedHint ?? null,payload.trigger ?? null,payload.history?.map(m=>m.id) ?? [],payload.lengthTarget ?? null]);
     if (!store.callBudget(now,test.budget ?? 1000)) throw Object.assign(Error('budget'),{code:'hourly_api_budget'});
     if (model.effectStage === stage) {
       const effect = model.effect; delete model.effectStage;
@@ -42,9 +42,10 @@ for (const test of input) {
     if (stage === 'ARTICULATE') return {text:model.reply ?? '可以先看看盆土是否已经干透。'};
     return {style:'谨慎接话',summary:'园艺讨论',topics:['园艺']};
   }};
-  // P6a 排除长度接线。JS 仍生成 lengthTarget，mock 正文不依赖它；显式不比较该字段/日志键。
+  // P6c：真实 JS 的长度 payload 和 message_sent 日志也进入 golden。
+  const draws = [...(test.expressionDraws ?? [])];
   Math.random = () => 0.9;
-  engine = new Engine(config,store,provider,transport,{now:()=>now,random:()=>0,expressionRandom:()=>0.5,activityRandom:()=>0,log:(event,data)=>{delete data.lengthTarget;trace.push(['log',event,data]);}});
+  engine = new Engine(config,store,provider,transport,{now:()=>now,random:()=>0,expressionRandom:()=>draws.shift() ?? 0.5,activityRandom:()=>0,log:(event,data)=>{trace.push(['log',event,data]);}});
   for (const step of test.steps) {
     if (step.op === 'model') model = {...step.value};
     if (step.op === 'ingest') engine.ingest(event(step));

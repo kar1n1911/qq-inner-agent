@@ -291,6 +291,18 @@ async fn sending_format_and_validation() {
             .unwrap();
         assert_eq!(call.await.unwrap().unwrap()["message_id"], 9);
     }
+    // 单 face 的传输不允许夹带空 text 段。
+    let a = b.clone();
+    let call = tokio::spawn(async move { a.send("group:123", "", Some("14")).await });
+    let req = next(&mut m.requests).await;
+    assert_eq!(
+        req["params"]["message"],
+        json!([{"type":"face","data":{"id":"14"}}])
+    );
+    m.frames
+        .send(response(&req, json!({"message_id":10}), json!(0), "ok"))
+        .unwrap();
+    assert_eq!(call.await.unwrap().unwrap()["message_id"], 10);
     stop(s, t).await;
 }
 #[tokio::test]

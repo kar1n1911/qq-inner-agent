@@ -228,6 +228,13 @@ impl Engine {
         collection: crate::media::Config,
     ) -> Result<Arc<Self>> {
         media_config.validate()?;
+        if config.agent.emoji.learn_frequency || config.agent.emoji.face_only {
+            crate::humanize::enable(
+                &*store
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("store_poisoned"))?,
+            )?;
+        }
         if media_config.enabled {
             media_select::enable(
                 &*store
@@ -352,6 +359,9 @@ impl Engine {
         let value = serde_json::to_value(&m)?;
         if !self.db()?.message(&value)? {
             return Ok(());
+        }
+        if a.emoji.learn_frequency {
+            crate::humanize::capture(&*self.db()?, &m.chat, &m.id, event)?;
         }
         if let Some(collector) = &self.collector {
             let report = collector.ingest(&*self.db()?, event, &self_id, a, now)?;
@@ -1037,14 +1047,33 @@ impl Engine {
         } else {
             None
         };
-        // 36–37：本阶段按明确排除项不接 lengthTarget；提示词保持原样，见 ENGINE.md。
+        // 36–37：P6c parity：与 JS 一样先装饰抽样，再复用已有长度抽样，绝不加开关。
         let decorations = {
             let _core = self.core();
             decoration_choices(&*self.db()?, chat, self.now(), &a.emoji, || {
                 (self.options.expression_random)()
             })?
         };
-        let mut payload = json!({"decorations":decorations,"persona":a.persona.text,"name":a.name.text,"selectedIdea":selected.candidate.text,"responsePlan":prediction,"assertiveTone":a.proactive_tone,"maxCharacters":a.max_output_chars});
+        let length_target = policy::pick_length_target(
+            if t.hint == Hint::SelfChat {
+                "self"
+            } else {
+                "open"
+            },
+            || (self.options.expression_random)(),
+        );
+        let face_only_allowed = a.emoji.face_only
+            && length_target != "long"
+            && crate::humanize::face_only_allowed(
+                &*self.db()?,
+                chat,
+                t.hint,
+                selected.candidate.motivation,
+                &t.history,
+                self.now(),
+                a.emoji.cooldown_seconds,
+            )?;
+        let mut payload = json!({"lengthTarget":length_target,"decorations":decorations,"persona":a.persona.text,"name":a.name.text,"selectedIdea":selected.candidate.text,"responsePlan":prediction,"assertiveTone":a.proactive_tone,"maxCharacters":a.max_output_chars});
         for key in [
             "personality",
             "expressions",
@@ -1056,6 +1085,11 @@ impl Engine {
             "priorExpectation",
         ] {
             payload[key] = t.payload[key].clone();
+        }
+        // 门控运行时片段进入 user JSON；绝不修改生成产物 prompts.rs 或它的 parity 断言。
+        if a.emoji.face_only {
+            payload["runtimeInstructions"] = json!(crate::humanize::FACE_ONLY_INSTRUCTIONS);
+            payload["faceOnlyAllowed"] = json!(face_only_allowed);
         }
         let system = prompts::articulation_for(&a.reply_language).map_err(anyhow::Error::msg)?;
         let response = match self.model(&system, payload).await {
@@ -1072,8 +1106,14 @@ impl Engine {
             // 38–43：正文、作废、离线、重复/静默、dry-run，顺序不可换。
             let raw = text(&response, "text");
             let lower = raw.to_ascii_lowercase();
+            let face_only = policy::js_trim(raw).is_empty();
+            let decorated = decorate(&response, &decorations, a.max_output_chars as usize);
             if !response["text"].is_string()
-                || policy::js_trim(raw).is_empty()
+                || (face_only
+                    && !(face_only_allowed
+                        && decorated["faceId"].is_string()
+                        && (response["emoji"].is_null() || response["emoji"] == "")
+                        && text(&decorated, "text").is_empty()))
                 || ["<think>", "</think>", "<analysis>", "</analysis>"]
                     .iter()
                     .any(|tag| lower.contains(tag))
@@ -1081,7 +1121,6 @@ impl Engine {
                 db.assessment_status(chat, &t.id, "generation_failed")?;
                 anyhow::bail!("invalid_articulation");
             }
-            let decorated = decorate(&response, &decorations, a.max_output_chars as usize);
             if self.obsolete(&core, &db, &t)?
                 || self.now() - core.get(chat).unwrap().last_human > a.active_window_seconds
                 || !self.snapshot(&db, self.now())?.active
@@ -1101,7 +1140,7 @@ impl Engine {
                 .map(|m| text(m, "text").to_owned())
                 .collect::<Vec<_>>();
             if (proactive && policy::quiet(self.now(), a.quiet_hours.as_ref()))
-                || policy::repeated(text(&decorated, "text"), &own)
+                || (!face_only && policy::repeated(text(&decorated, "text"), &own))
             {
                 db.assessment_status(chat, &t.id, "cancelled")?;
                 db.r#use(&selected.candidate.id)?;
@@ -1124,6 +1163,12 @@ impl Engine {
             }
             // 44–45：先落库再发送；崩溃/超时留下 pending/uncertain，绝不重放。
             let delivery_id = db.delivery(chat, proactive, self.now())?;
+            if a.emoji.face_only && face_only {
+                db.execute(
+                    "INSERT OR REPLACE INTO humanize_reply_state VALUES(?,1)",
+                    [chat],
+                )?;
+            }
             db.r#use(&selected.candidate.id)?;
             self.finish(&mut core, &db, &t, true)?;
             (delivery_id, decorated)
@@ -1139,6 +1184,12 @@ impl Engine {
         match sent {
             Ok(sent) => {
                 // 47：成功后记表达使用、预期与自身消息。
+                if a.emoji.face_only && !content.is_empty() {
+                    db.execute(
+                        "INSERT OR REPLACE INTO humanize_reply_state VALUES(?,0)",
+                        [chat],
+                    )?;
+                }
                 db.finish_delivery(&delivery_id, "sent", sent.get("message_id"))?;
                 ExpressionMemory::new(&db).used(
                     chat,
@@ -1176,10 +1227,16 @@ impl Engine {
                     self.now(),
                 )?;
                 core.last_error = None;
-                (self.options.log)("message_sent", json!({"chat":chat,"proactive":proactive}));
+                (self.options.log)(
+                    "message_sent",
+                    json!({"chat":chat,"proactive":proactive,"lengthTarget":length_target}),
+                );
             }
             Err(error) => {
                 // 48：确定拒绝和不确定送达都只记账，不设置自动重试。
+                if a.emoji.face_only && content.is_empty() && !error.uncertain {
+                    db.execute("DELETE FROM humanize_reply_state WHERE chat=?", [chat])?;
+                }
                 let status = if error.uncertain {
                     "uncertain"
                 } else {

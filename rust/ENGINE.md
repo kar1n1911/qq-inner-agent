@@ -1,4 +1,4 @@
-# P6a Engine 核心
+# P6a Engine 核心与 P6c 人类化行为
 
 `engine::Engine::new` 接收已校验 `Config`、共享 `Arc<Mutex<Store>>`、
 `OrientationProvider`（真实 `Provider` 已实现）、`EngineTransport`（真实 `OneBot` 已实现）
@@ -8,7 +8,7 @@
 
 `cycle` 中的数字注释对应 SURVEY §2.2 的 1–48 步。复用 policy、sending、orientation、
 activity、memory、expression、store（含 learning）、prompts、provider 和 onebot；
-没有引入依赖，没有改动 main、提示词、数据库 schema 或素材路径。
+P6c 没有引入依赖或修改生成提示词；仅开启表情新功能时创建辅助表。
 
 ## 并发与五项 obsolete 条件
 
@@ -64,13 +64,35 @@ Node 不在 PATH 时只跳过 JS oracle，Rust 不变量测试仍执行。发送
 
 明确差异与边界：
 
-- P6a 明确不做长度分档接线，故没有调用 `pick_length_target`、没有传 `lengthTarget` 或记录其日志键。
-  当前 JS 已有此调用，golden 明确不比较该字段且 mock 正文不依赖它；测试断言 Rust 未接线。
-  提示词保持原样，真实模型因此可能产生不同长度，留给 P6c。也未实现只发表情、多气泡/打字延迟、
-  按群表情频率、三层决策、零模型初筛或素材选择。
+- P6c 已无条件接入已有 `pick_length_target`：沿用 JS 的 expressionRandom，在装饰候选之后抽样，
+  articulation payload 与 `message_sent` 都包含 `lengthTarget`；self 不会得到 tiny。
+  engine golden 比较该字段、日志及档位边界，默认关闭新功能时保持 JS 行为。
+- P6c **未实现第 4 项多气泡/打字延迟**；也未扩展三层决策或零模型初筛。
 - 候选文本复用既有 `policy::clip_chars`，按 Unicode 标量字符截断 300；JS 按 UTF-16 码元截断。
   非 BMP 边界有显式测试，普通中文/ASCII golden 对齐；不生成孤立代理项。
 - Rust 取消丢弃 future，不能停止阻塞传输；引擎模型等待取消错误码为 `aborted`，
   JS 底层 AbortSignal 的错误码可能由 fetch/Node 版本决定。取消后的预算与持久化不变量按上述测试。
 - 随机源分别注入发送、候选选择、表达与活动；JS select 原本用全局 Math.random，oracle 单独固定。
   golden 验证确定输入下的调度/决策，不声称真实模型输出或时区数据库版本完全相同。
+
+
+## P6c 门控新功能
+
+配置 `agent.emoji.learnFrequency`、`agent.emoji.faceOnly` 均缺省 **false**，必须为布尔值。
+false 在强类型序列化中省略，保留既有 defaults/config parity；可直接在 config.json 的 emoji 对象中设为 true。
+不修改 `prompts.rs` 或 `prompts_parity` 中“不得含空文本”的断言。
+
+- **频率学习**：只有 learnFrequency 开启才从入站事件采集真实 face 段（数组或未转义 CQ），
+  去重后在 `humanize_faces` 保存消息证据。查询同群 `messages` 的非自己消息，30 天窗口、7 天半衰期，
+  加权样本量 <5 时为 0.08，否则 `clamp(rate × 0.8, 0, 0.35)`，再取 emoji.probability 上限。
+  不改变私聊固定概率。原装饰 enabled、冷却仍生效；原有单次装饰抽签同时控制候选中的 symbols/faceIds。
+  证据持久化并随 messages 删除清理。旧 messages 没有原始段证据，不从可能伪造的 `[QQface:...]`
+  文本回填，因此新开关从启用后采集的样本冷启动。
+- **只发表情**：只在 faceOnly 开启时向 articulation user JSON 加 `runtimeInstructions` 和
+  `faceOnlyAllowed`；它是运行时片段，不进入生成产物。允许空文本和白名单内单 face、禁止 Unicode 混用。
+  硬门槛是 open/other、原始 motivation ∈[1,3]、非 long，距上次自身消息至少 max(30 秒, emoji 冷却)。
+  求助/难过尚无可靠语义分类器，因此只放行“哈哈”“确实”“同感”等纯附和白名单，未回答的人类消息
+  全部必须在白名单内；未知/混合内容拒绝。此范围比设计的泛化场景识别更保守，不声称能识别所有情绪。
+  `humanize_reply_state` 在发送前置位，成功正文清除，确定失败撤销，不确定或崩溃保留；
+  即使聊天历史清理或引擎重启，同群也不能连续尝试第二次单 face。其它空正文素材保守视作无实质回答。
+  单 face 仍经过原有配额、quiet、dry-run、freshness 与投递账本，真实 OneBot 只发送一个 face 段。
