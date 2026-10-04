@@ -236,7 +236,7 @@ impl Engine {
                     .map_err(|_| anyhow::anyhow!("store_poisoned"))?,
             )?;
         }
-        if media_config.enabled {
+        if media_config.enabled || config.agent.three_layer_decision {
             media_select::enable(
                 &*store
                     .lock()
@@ -617,7 +617,27 @@ impl Engine {
             if now - s.last_think < a.min_think_interval_seconds && s.hint != Hint::SelfChat {
                 continue;
             }
-            let trigger = if s.pending {
+            // 开关关闭整个新分支都不执行，不增加抽样、查询或改变 JS 状态。
+            let trigger = if a.three_layer_decision {
+                let db = self.db()?;
+                let screened = crate::decision::screen(&db, chat, s, a, now)?;
+                (self.options.log)(
+                    "decision_screen",
+                    json!({"chat":chat,"reply":screened.reply,"topic":screened.topic}),
+                );
+                if screened.reply.is_none() {
+                    "message"
+                } else if screened.topic.is_none() {
+                    // 主动尝试也有节奏，落签后推迟，防止每个 tick 重抽。
+                    s.due = now + a.min_think_interval_seconds.max(60.);
+                    if (self.options.random)() >= screened.probability {
+                        continue;
+                    }
+                    "topic"
+                } else {
+                    continue;
+                }
+            } else if s.pending {
                 "message"
             } else if self.media_config.enabled && chat.starts_with("group:") {
                 "media"
@@ -721,7 +741,15 @@ impl Engine {
             if t.trigger == "pause" || sent {
                 s.pause_done = true;
             }
-            db.mark_handled(&t.chat, &t.id, s.pause_done)?;
+            db.mark_handled(
+                &t.chat,
+                if t.trigger == "topic" {
+                    &s.last_id
+                } else {
+                    &t.id
+                },
+                s.pause_done,
+            )?;
         }
         Ok(())
     }
@@ -768,7 +796,11 @@ impl Engine {
             t.now,
             a.thought_ttl_seconds,
             a.thought_limit as i64,
-            Some(text(&t.last, "sender")),
+            if t.trigger == "topic" {
+                None
+            } else {
+                Some(text(&t.last, "sender"))
+            },
         )
     }
     async fn cycle(&self, chat: &str, trigger: &str, start: CycleStart) -> Result<()> {
@@ -779,6 +811,19 @@ impl Engine {
             let core = self.core();
             if core.get(chat).is_none() || !policy::allowed(chat, a) || !self.available(now)? {
                 return Ok(());
+            }
+            // await 观察模型之前复核，防止 tick 准入后新消息/配额变化穿透初筛。
+            if a.three_layer_decision {
+                let state = core.get(chat).unwrap();
+                if state.version != version {
+                    return Ok(());
+                }
+                let screened = crate::decision::screen(&*self.db()?, chat, state, a, self.now())?;
+                if (trigger == "topic" && screened.topic.is_some())
+                    || (trigger == "message" && screened.reply.is_some())
+                {
+                    return Ok(());
+                }
             }
         }
         // 3：观察闸门失败只推迟 5 秒；等待过程中允许 ingest。
@@ -824,11 +869,11 @@ impl Engine {
                 learn_now: false,
                 payload: json!({}),
             };
-            if a.sending.enabled && db.assessment(chat, &t.id)?.is_some() {
+            if trigger != "topic" && a.sending.enabled && db.assessment(chat, &t.id)?.is_some() {
                 self.finish(&mut core, &db, &t, true)?;
                 return Ok(());
             }
-            t.hint = if trigger == "pause" {
+            t.hint = if matches!(trigger, "pause" | "topic") {
                 Hint::Open
             } else {
                 core.get(chat).unwrap().hint
@@ -850,6 +895,9 @@ impl Engine {
                 return Ok(());
             };
             t.last = (*last).clone();
+            if trigger == "topic" {
+                t.id = format!("topic:{version}:{now}");
+            }
             t.counts = db.counts(chat, now)?;
             if num(&t.counts, "total") >= a.max_messages_per_hour
                 || (t.hint != Hint::SelfChat

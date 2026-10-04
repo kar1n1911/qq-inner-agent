@@ -225,6 +225,7 @@ fn setup(case: &Value) -> (Arc<Engine>, Arc<Harness>) {
         entered: Notify::new(),
         release: Semaphore::new(0),
     });
+    let draw_source = h.clone();
     let clock = h.clone();
     let logger = h.clone();
     let draws = Mutex::new(
@@ -236,7 +237,11 @@ fn setup(case: &Value) -> (Arc<Engine>, Arc<Harness>) {
     );
     let options = Options {
         now: Arc::new(move || clock.now()),
-        random: Arc::new(|| 0.),
+        random: Arc::new(move || {
+            draw_source.model.lock().unwrap()["decisionDraw"]
+                .as_f64()
+                .unwrap_or(0.)
+        }),
         expression_random: Arc::new(move || {
             draws
                 .lock()
@@ -1480,4 +1485,189 @@ fn owner_teaching_disabled_or_unauthorized_remains_normal_chat() {
     .unwrap();
     assert!(!c.agent.owner_teaching.enabled);
     assert_eq!(c.agent.owner_teaching.owner_uin, "1950202917");
+}
+
+// P6d 不变量：每一道初筛命中时（包含观察模型）调用数严格为零。
+#[tokio::test]
+async fn decision_screen_zero_calls() {
+    for (label, agent) in [
+        ("quiet", json!({"quietHours":{"start":0,"end":23}})),
+        ("quota", json!({"maxMessagesPerHour":1})),
+        ("cooldown", json!({"minThinkIntervalSeconds":3600})),
+        ("no_new_message", json!({})),
+    ] {
+        let mut agent = agent;
+        agent["threeLayerDecision"] = json!(true);
+        let (e, h) = setup(&base(label, agent, vec![]));
+        if label == "cooldown" {
+            *h.now.lock().unwrap() = 1000.;
+        }
+        if label == "quota" {
+            h.store
+                .lock()
+                .unwrap()
+                .delivery("group:10", false, h.now())
+                .unwrap();
+        }
+        e.ingest(&h.event(&json!({}))).unwrap();
+        if label == "no_new_message" {
+            let mut states = e.chats();
+            states[0].1.pending = false;
+            let (other, other_h) = setup(&base(label, json!({"threeLayerDecision":true}), vec![]));
+            other.inherit_chats(states);
+            other.tick().unwrap();
+            other.wait_idle().await;
+            assert!(!other_h
+                .trace
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|v| v[0] == "model"));
+        } else {
+            e.tick().unwrap();
+            e.wait_idle().await;
+            assert!(
+                !h.trace.lock().unwrap().iter().any(|v| v[0] == "model"),
+                "{label}"
+            );
+        }
+    }
+}
+
+fn topic_setup(extra: Value) -> (Arc<Engine>, Arc<Harness>) {
+    let (e, h) = setup(&base(
+        "topic",
+        merge(
+            &json!({"threeLayerDecision":true,"pauseSeconds":300,"activeWindowSeconds":10000}),
+            &extra,
+        ),
+        vec![],
+    ));
+    *h.now.lock().unwrap() = 5. * 86400. + 43200.;
+    {
+        let db = h.store.lock().unwrap();
+        for i in 0..24 {
+            db.message(&json!({"chat":"group:10","id":format!("old{i}"),"sender":"20","name":"Human","text":"好的","ts":h.now() - (1 + i / 6) as f64 * 86400.,"self":false})).unwrap();
+        }
+        db.message(&json!({"chat":"group:10","id":"last","sender":"20","name":"Human","text":"好的","ts":h.now()-600.,"self":false})).unwrap();
+        db.mark_handled("group:10", "last", true).unwrap();
+        db.add_thought(
+            "group:10",
+            &json!({"text":"聊聊花园","kind":"system2","subject":"someone_else"}),
+            h.now(),
+        )
+        .unwrap();
+    }
+    e.restore().unwrap();
+    (e, h)
+}
+
+#[tokio::test]
+async fn independent_topic_gates_and_probability() {
+    for reason in [
+        "empty_thoughts",
+        "outside_group_schedule",
+        "group_active",
+        "expectation",
+        "proactive_quota",
+        "proactive_cooldown",
+        "unanswered_message",
+    ] {
+        let extra = match reason {
+            "proactive_quota" => json!({"maxProactivePerHour":0}),
+            "proactive_cooldown" => json!({"proactiveCooldownSeconds":900}),
+            _ => json!({}),
+        };
+        let (e, h) = topic_setup(extra);
+        {
+            let db = h.store.lock().unwrap();
+            match reason {
+                "empty_thoughts" => {
+                    db.execute("DELETE FROM thoughts", []).unwrap();
+                }
+                "outside_group_schedule" => {
+                    db.execute("DELETE FROM messages WHERE id != 'last'", [])
+                        .unwrap();
+                }
+                "group_active" => {
+                    db.execute("UPDATE messages SET ts=? WHERE id='last'", [h.now() - 1.])
+                        .unwrap();
+                }
+                "expectation" => {
+                    db.expect("group:10", h.now(), 600., &json!({})).unwrap();
+                }
+                "proactive_cooldown" => {
+                    db.delivery("group:10", true, h.now() - 1.).unwrap();
+                }
+                "unanswered_message" => {
+                    db.execute("DELETE FROM handled", []).unwrap();
+                }
+                _ => {}
+            }
+            let state = e.chats()[0].1.clone();
+            let result =
+                qq_inner_core::decision::screen(&db, "group:10", &state, &e.config.agent, h.now())
+                    .unwrap();
+            assert_eq!(result.topic, Some(reason));
+        }
+        e.tick().unwrap();
+        e.wait_idle().await;
+        assert!(
+            !h.trace.lock().unwrap().iter().any(|v| v[0] == "model"),
+            "{reason}"
+        );
+    }
+    let (e, h) = topic_setup(json!({}));
+    {
+        let db = h.store.lock().unwrap();
+        let mut state = e.chats()[0].1.clone();
+        let result =
+            qq_inner_core::decision::screen(&db, "group:10", &state, &e.config.agent, h.now())
+                .unwrap();
+        assert_eq!(result.reply, Some("no_new_message"));
+        assert_eq!(result.topic, None);
+        assert!((0.01..0.3).contains(&result.probability));
+        state.pending = true; // ②的资格不能由 pending 取反得到。
+        assert_eq!(
+            qq_inner_core::decision::screen(&db, "group:10", &state, &e.config.agent, h.now())
+                .unwrap()
+                .topic,
+            None
+        );
+        let mut g =
+            qq_inner_core::media_select::group_activity(&db, "group:10", h.now(), 300.).unwrap();
+        let p = qq_inner_core::decision::topic_probability(&g, 1000., 300.);
+        g.since_human *= 2.;
+        assert!(qq_inner_core::decision::topic_probability(&g, 2000., 300.) >= p);
+        // 用均匀抽样网格检查触发比例，避免随机测试抖动；启发式只断言区间。
+        let accepted = (0..1000).filter(|i| (*i as f64 / 1000.) < p).count();
+        assert!((10..300).contains(&accepted));
+    }
+    e.tick().unwrap();
+    e.wait_idle().await;
+    assert!(h
+        .trace
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|v| v[0] == "model" && v[3] == "topic"));
+    assert_eq!(e.last_error(), None);
+}
+
+#[tokio::test]
+async fn topic_probability_rejection_and_reply_priority() {
+    let (e, h) = topic_setup(json!({}));
+    h.model.lock().unwrap()["decisionDraw"] = json!(0.99);
+    e.tick().unwrap();
+    e.wait_idle().await;
+    assert!(!h.trace.lock().unwrap().iter().any(|v| v[0] == "model"));
+    assert!(e.chats()[0].1.due > h.now());
+    // 新消息优先走①，②的空池/作息条件不阻止被点名的正常回复。
+    e.ingest(&h.event(&json!({"id":"new"}))).unwrap();
+    h.model.lock().unwrap()["decisionDraw"] = json!(0.);
+    e.tick().unwrap();
+    e.wait_idle().await;
+    let trace = h.trace.lock().unwrap();
+    assert!(trace.iter().any(|v| v[0] == "model" && v[3] == "message"));
+    assert!(!trace.iter().any(|v| v[0] == "model" && v[3] == "topic"));
 }
