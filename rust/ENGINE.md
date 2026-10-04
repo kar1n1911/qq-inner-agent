@@ -75,7 +75,6 @@ Node 不在 PATH 时只跳过 JS oracle，Rust 不变量测试仍执行。发送
 - 随机源分别注入发送、候选选择、表达与活动；JS select 原本用全局 Math.random，oracle 单独固定。
   golden 验证确定输入下的调度/决策，不声称真实模型输出或时区数据库版本完全相同。
 
-
 ## P6c 门控新功能
 
 配置 `agent.emoji.learnFrequency`、`agent.emoji.faceOnly` 均缺省 **false**，必须为布尔值。
@@ -96,3 +95,17 @@ false 在强类型序列化中省略，保留既有 defaults/config parity；可
   `humanize_reply_state` 在发送前置位，成功正文清除，确定失败撤销，不确定或崩溃保留；
   即使聊天历史清理或引擎重启，同群也不能连续尝试第二次单 face。其它空正文素材保守视作无实质回答。
   单 face 仍经过原有配额、quiet、dry-run、freshness 与投递账本，真实 OneBot 只发送一个 face 段。
+
+
+### P6c 检查点复核与验收
+
+以 `f39766a`（WIP checkpoint）为基线复核：config 只增加两个可选布尔字段及校验；expression 只在
+开关开启时替换装饰概率；engine 只增加长度 parity 接线、运行时 user 片段和单 face 准入/投递状态接线；
+onebot 仅省略单 face 消息中的空 text 段。未重写原来的调度、候选选择、配额或传输逻辑。
+
+已执行 `cargo build --release`、`cargo clippy --all-targets -- -D warnings`、`cargo test`。
+Node v26.9.0 在 PATH，真实 JS engine golden 和所有既有 parity 测试实际运行通过；
+额外覆盖显式关闭两个开关、长度各档边界与随机调用顺序、统计作用域/衰减/冷启动/上限、
+单 face 传输格式、点名/求助/难过/高动机拒绝、历史清理与重载后的连续限制、冷却/配额/作废/不确定送达。
+首次全量运行中既有 provider 本地 HTTP 测试偶发 `ProviderUnavailable`，单测及随后完整重跑均通过；
+没有为此放宽断言或修改 provider。

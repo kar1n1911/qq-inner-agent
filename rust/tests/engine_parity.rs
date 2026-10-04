@@ -510,6 +510,11 @@ fn scenarios() -> Vec<Value> {
     );
     budget["budget"] = json!(1);
     cases.push(budget);
+    cases.push(base(
+        "humanize_explicitly_disabled",
+        json!({"emoji":{"learnFrequency":false,"faceOnly":false}}),
+        vec![direct(), run()],
+    ));
     // parity：每档边界及 self 禁 tiny；序列验证装饰先抽样、长度后抽样。
     for hint in ["self", "open", "other"] {
         for draw in [0., 0.349, 0.35, 0.699, 0.7, 0.799, 0.8, 0.979, 0.98, 0.999] {
