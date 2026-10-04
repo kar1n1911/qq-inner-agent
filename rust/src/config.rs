@@ -215,6 +215,23 @@ pub const LEGACY_PERSONAS: [&str;2]=[
 
 pub fn validate(c: &Value) -> std::result::Result<(), ConfigError> {
     let a = &c["agent"];
+    if let Some(t) = a.get("ownerTeaching") {
+        check(t.is_object(), "agent.ownerTeaching must be object")?;
+        if let Some(v) = t.get("enabled") {
+            check(
+                v.is_boolean(),
+                "agent.ownerTeaching.enabled must be boolean",
+            )?;
+        }
+        if let Some(v) = t.get("ownerUin") {
+            let id = v.as_str().unwrap_or("");
+            check(
+                id.starts_with(|c: char| ('1'..='9').contains(&c))
+                    && id.bytes().all(|b| b.is_ascii_digit()),
+                "agent.ownerTeaching.ownerUin must be a QQ ID string",
+            )?;
+        }
+    }
     let p = &a["personality"];
     let e = &a["expression"];
     let emoji = &a["emoji"];
@@ -772,9 +789,27 @@ pub struct QuietHours {
     pub timezone: Option<String>,
 }
 
+/// Rust 专用教学开关；不改 JS 默认配置快照。
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct OwnerTeaching {
+    pub enabled: bool,
+    pub owner_uin: String,
+}
+impl Default for OwnerTeaching {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            owner_uin: "1950202917".into(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Agent {
+    #[serde(default)]
+    pub owner_teaching: OwnerTeaching,
     /// 配置键 `agent.name`。
     pub name: RuntimeText,
     /// 配置键 `agent.persona`。
