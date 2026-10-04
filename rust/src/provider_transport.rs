@@ -74,11 +74,14 @@ impl Provider {
 
     pub async fn complete(&self, system: &str, user: &str) -> Result<String, ProviderError> {
         let c = &self.config;
+        // max_tokens 必须序列化为整数：OpenAI 兼容端点(如 DeepSeek)拒绝浮点 `1600.0`
+        // (expected u32)，而 JS 的 JSON.stringify 对整数值不输出小数点。这里对齐 JS。
+        let max_tokens = c.max_tokens.round() as u32;
         let mut body = if self.kind() == ProviderKind::Anthropic {
-            json!({"model": c.model.text, "max_tokens": c.max_tokens, "system": system,
+            json!({"model": c.model.text, "max_tokens": max_tokens, "system": system,
                 "messages": [{"role":"user", "content":user}]})
         } else {
-            json!({"model":c.model.text, (c.token_parameter.clone()):c.max_tokens,
+            json!({"model":c.model.text, (c.token_parameter.clone()):max_tokens,
                 "messages":[{"role":"system", "content":system},{"role":"user", "content":user}]})
         };
         if c.thinking.as_deref() == Some("disabled") {

@@ -148,7 +148,7 @@ async fn bodies_headers_and_json() {
             } else {
                 "x-api-key: mock-key"
             }));
-            assert_eq!(body["max_tokens"], 123.);
+            assert_eq!(body["max_tokens"], 123);
             assert_eq!(body["system"], "system");
             assert_eq!(
                 body["messages"],
@@ -158,7 +158,7 @@ async fn bodies_headers_and_json() {
             assert!(headers.starts_with("post /chat/completions "));
             assert!(headers.contains("authorization: bearer mock-key"));
             assert!(!headers.contains("anthropic-version"));
-            assert_eq!(body["max_completion_tokens"], 123.);
+            assert_eq!(body["max_completion_tokens"], 123);
             assert_eq!(
                 body["messages"],
                 json!([{"role":"system","content":"system"},{"role":"user","content":"{\"input\":1}"}])
