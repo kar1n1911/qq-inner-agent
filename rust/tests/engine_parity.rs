@@ -589,7 +589,21 @@ fn equivalent(actual: &Value, expected: &Value, path: &str) {
 }
 #[tokio::test]
 async fn scripted_conversations_match_real_js_decision_by_decision() {
-    let cases = scenarios();
+    let mut cases = scenarios();
+    // 不变量：省略开关与显式关闭都必须逐条匹配真实 JS，覆盖全部原有场景。
+    let disabled: Vec<_> = cases
+        .iter()
+        .cloned()
+        .map(|mut case| {
+            case["label"] = json!(format!(
+                "{}-layers-disabled",
+                case["label"].as_str().unwrap()
+            ));
+            case["config"]["agent"]["threeLayerDecision"] = json!(false);
+            case
+        })
+        .collect();
+    cases.extend(disabled);
     let mut actual = Vec::new();
     for c in &cases {
         let mut result = script(c).await;
