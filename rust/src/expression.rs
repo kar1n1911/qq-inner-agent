@@ -107,7 +107,10 @@ impl<'a> ExpressionMemory<'a> {
                 .transpose()?
                 .unwrap_or_default();
             let sources = array(&v["sources"]);
-            if old.is_some()
+            // 教学没有人类时间戳，允许主人再次改写，且来源保持为唯一教学标记。
+            let teaching = crate::owner_teaching::sources(sources);
+            if !teaching
+                && old.is_some()
                 && newest(sources, f64::NEG_INFINITY) < newest(&previous, f64::NEG_INFINITY)
             {
                 continue;
@@ -115,11 +118,11 @@ impl<'a> ExpressionMemory<'a> {
             let fresh = sources
                 .iter()
                 .any(|s| !previous.iter().any(|p| same_source(p, s)));
-            if old.is_some() && !fresh {
+            if old.is_some() && !fresh && !teaching {
                 continue;
             }
             let revised = old.as_ref().is_some_and(|r| r["meaning"] != v["meaning"]);
-            let merged = merge_sources(if revised { &[] } else { &previous }, sources);
+            let merged = merge_sources(if revised || teaching { &[] } else { &previous }, sources);
             self.store.execute("INSERT INTO expressions VALUES(?,?,?,?,?,?,?,?,?,?,0) ON CONFLICT(chat,subject,kind,term) DO UPDATE SET meaning=excluded.meaning,situation=excluded.situation,example=excluded.example,confidence=excluded.confidence,sources=excluded.sources,updated=excluded.updated",params![chat,text(v,"subject"),text(v,"kind"),text(v,"term"),text(v,"meaning"),text(v,"situation"),text(v,"example"),num(v,"confidence"),json!(merged).to_string(),now])?;
         }
         self.prune(now, settings)
@@ -141,7 +144,7 @@ impl<'a> ExpressionMemory<'a> {
         for subject in memory_subjects(chat, sender)? {
             for mut r in self.store.rows("SELECT * FROM expressions WHERE chat=? AND subject=? AND updated>? AND confidence>=? AND (last_used=0 OR last_used<=?)",params![chat,subject,now-settings.retention_days*86400.,settings.min_confidence,now-settings.reuse_seconds])? {
                 decode(&mut r,&["sources"])?;
-                if array(&r["sources"]).len()<2||(r["subject"]=="group"&&array(&r["sources"]).iter().map(|s|s["sender"].to_string()).collect::<HashSet<_>>().len()<2){continue;}
+                if (!crate::owner_teaching::sources(array(&r["sources"])) && array(&r["sources"]).len()<2)||(r["subject"]=="group"&&array(&r["sources"]).iter().map(|s|s["sender"].to_string()).collect::<HashSet<_>>().len()<2){continue;}
                 r["id"]=json!(json!([r["subject"],r["kind"],r["term"]]).to_string());r["layer"]=r["kind"].clone();r["text"]=json!(format!("{}：{}；适用：{}",text(&r,"term"),text(&r,"meaning"),text(&r,"situation")));r["importance"]=json!(0.5);rows.push(r);
             }
         }

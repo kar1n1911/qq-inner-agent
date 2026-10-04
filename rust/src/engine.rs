@@ -140,6 +140,7 @@ struct Core {
     // Vec 保持 JS Map 的插入顺序；不能用 HashMap 随机顺序决定并发名额。
     chats: Vec<(String, ChatState)>,
     tasks: Vec<JoinHandle<()>>,
+    teaching_replies: Vec<(String, String)>,
     last_error: Option<String>,
     last_cycle: f64,
 }
@@ -353,10 +354,44 @@ impl Engine {
         let Some(m) = policy::normalize(event, &self_id, a, now) else {
             return Ok(());
         };
+        let value = serde_json::to_value(&m)?;
+        // 指令先去重再执行；命中后不 capture、不触发普通回复或常规学习。
+        let raw = if let Some(s) = event["message"].as_str() {
+            s.to_owned()
+        } else {
+            event["message"]
+                .as_array()
+                .map(|parts| {
+                    parts
+                        .iter()
+                        .filter(|p| p["type"] == "text")
+                        .filter_map(|p| p["data"]["text"].as_str())
+                        .collect::<String>()
+                })
+                .unwrap_or_default()
+        };
+        if a.owner_teaching.enabled
+            && m.sender == a.owner_teaching.owner_uin
+            && m.chat == format!("private:{}", m.sender)
+            && ["/黑话", "/记住", "/忘记"]
+                .iter()
+                .any(|c| raw.trim().starts_with(c))
+        {
+            let db = self.db()?;
+            if !db.message(&value)? {
+                return Ok(());
+            }
+            if let Some(reply) =
+                crate::owner_teaching::handle(&db, a, &m.chat, &m.sender, &raw, now)
+            {
+                db.mark_handled(&m.chat, &m.id, true)?;
+                core.teaching_replies.push((m.chat, reply));
+                return Ok(());
+            }
+        }
         let Some(s) = core.state(&m.chat, a.max_active_chats) else {
             return Ok(());
         };
-        let value = serde_json::to_value(&m)?;
         if !self.db()?.message(&value)? {
             return Ok(());
         }
@@ -540,14 +575,36 @@ impl Engine {
         core.chats
             .retain(|(_, s)| s.busy || now - s.last_human <= a.active_window_seconds);
         let transport = self.transport.state();
-        if !readiness(&self.config).is_empty()
-            || !transport.connected
-            || !transport.online
-            || *self.aborted.borrow()
-        {
+        if !transport.connected || !transport.online || *self.aborted.borrow() {
             return Ok(());
         }
         core.tasks.retain(|t| !t.is_finished());
+        for (chat, reply) in std::mem::take(&mut core.teaching_replies) {
+            if a.dry_run {
+                continue;
+            }
+            let delivery = self.db()?.delivery(&chat, false, now)?;
+            let engine = self.clone();
+            core.tasks.push(tokio::spawn(async move {
+                let result = engine.transport.send(&chat, &reply, None).await;
+                let finish = engine.db().and_then(|db| match result {
+                    Ok(sent) => db.finish_delivery(&delivery, "sent", sent.get("message_id")),
+                    Err(e) => db.finish_delivery(
+                        &delivery,
+                        if e.uncertain { "uncertain" } else { "failed" },
+                        None,
+                    ),
+                });
+                if let Err(e) = finish {
+                    engine.core().last_error = Some(e.to_string());
+                }
+            }));
+        }
+
+        // 确认无需模型配置；普通回复仍保留原来的 readiness 闸门。
+        if !readiness(&self.config).is_empty() {
+            return Ok(());
+        }
         let mut running = core.chats.iter().filter(|(_, s)| s.busy).count();
         let mut ready = Vec::new();
         for (chat, s) in &mut core.chats {

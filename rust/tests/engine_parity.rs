@@ -1399,3 +1399,85 @@ async fn uncertain_face_delivery_blocks_next_face_but_definite_failure_does_not(
         e.stop().await;
     }
 }
+
+#[tokio::test]
+async fn owner_teaching_commands_are_consumed_and_sources_are_special() {
+    let case = base(
+        "teaching",
+        json!({"ownerTeaching":{"enabled":true,"ownerUin":"20"},"maxInputChars":100}),
+        vec![],
+    );
+    let (engine, h) = setup(&case);
+    let commands = [
+        "/黑话 A=B".to_string(),
+        "/黑话 A = 新意思".into(),
+        "/记住 喜欢Rust".into(),
+        "/黑话 缺等号".into(),
+        "/记住".into(),
+        format!("/记住 {}", "长".repeat(501)),
+    ];
+    for (n, command) in commands.iter().enumerate() {
+        let event = json!({"post_type":"message","message_type":"private","self_id":99,"user_id":20,"message_id":format!("real-id-{n}"),"time":h.now(),"message":command});
+        engine.ingest(&event).unwrap();
+        engine.ingest(&event).unwrap(); // 去重不能执行或确认两次。
+        engine.tick().unwrap();
+        engine.wait_idle().await;
+    }
+    assert!(engine.chats().is_empty());
+    let rows = h.rows("SELECT * FROM expressions");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["meaning"], "新意思");
+    assert_eq!(rows[0]["kind"], "jargon");
+    let memory = h.rows("SELECT * FROM memory_layers");
+    assert_eq!(memory.len(), 1);
+    assert_eq!(memory[0]["layer"], "long_term");
+    assert_eq!(memory[0]["subject"], "person:20");
+    assert_eq!(memory[0]["text"], "喜欢Rust");
+    for row in rows.iter().chain(memory.iter()) {
+        let sources: Value = serde_json::from_str(row["sources"].as_str().unwrap()).unwrap();
+        assert_eq!(sources, json!(["owner-teaching"]));
+        assert!(!row["sources"].as_str().unwrap().contains("real-id"));
+    }
+    let trace = h.trace.lock().unwrap().clone();
+    assert!(!trace.iter().any(|r| r[0] == "model"));
+    let replies: Vec<_> = trace.iter().filter(|r| r[0] == "send").collect();
+    assert_eq!(replies.len(), commands.len());
+    assert!(replies[..3].iter().all(|r| r[2] == "记住了"));
+    assert!(replies[3..]
+        .iter()
+        .all(|r| r[2].as_str().unwrap().starts_with("没看懂：")));
+    for (id, word) in [("forget1", "A"), ("forget2", "Rust")] {
+        engine.ingest(&json!({"post_type":"message","message_type":"private","self_id":99,"user_id":20,"message_id":id,"time":h.now(),"message":format!("/忘记 {word}")})).unwrap();
+        engine.tick().unwrap();
+        engine.wait_idle().await;
+    }
+    assert!(h.rows("SELECT * FROM expressions").is_empty());
+    assert!(h.rows("SELECT * FROM memory_layers").is_empty());
+}
+
+#[test]
+fn owner_teaching_disabled_or_unauthorized_remains_normal_chat() {
+    for (settings, kind, sender) in [
+        (json!({}), "private", 20),
+        (json!({"enabled":true}), "private", 20),
+        (json!({"enabled":true,"ownerUin":"20"}), "group", 20),
+        (json!({"enabled":true,"ownerUin":"21"}), "group", 20),
+    ] {
+        let (engine, h) = setup(&base("boundary", json!({"ownerTeaching":settings}), vec![]));
+        engine.ingest(&json!({"post_type":"message","message_type":kind,"self_id":99,"user_id":sender,"group_id":10,"message_id":"boundary","time":h.now(),"message":"/黑话 A=B"})).unwrap();
+        let chat = if kind == "group" {
+            "group:10"
+        } else {
+            "private:20"
+        };
+        assert!(engine.state(chat).unwrap().pending);
+        assert!(h.rows("SELECT * FROM expressions").is_empty());
+    }
+    let c = Config::from_value(&merge(
+        &defaults(),
+        &json!({"apiKey":"","onebotToken":"","dataDir":"unused"}),
+    ))
+    .unwrap();
+    assert!(!c.agent.owner_teaching.enabled);
+    assert_eq!(c.agent.owner_teaching.owner_uin, "1950202917");
+}
