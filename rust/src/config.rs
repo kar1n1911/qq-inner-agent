@@ -808,6 +808,9 @@ impl Default for OwnerTeaching {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Agent {
+    /// P6d：默认关闭，关闭时保持 JS 的触发顺序与模型输入。
+    #[serde(default)]
+    pub three_layer_decision: bool,
     #[serde(default)]
     pub owner_teaching: OwnerTeaching,
     /// 配置键 `agent.name`。
