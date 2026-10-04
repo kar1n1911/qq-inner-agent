@@ -170,7 +170,12 @@ impl OneBot {
         {
             return Err(OneBotError::new("invalid_face", false));
         }
-        let mut message = vec![json!({"type":"text","data":{"text":text}})];
+        // P6c：空正文且有 face 时只发 face 段；默认引擎仍拒绝空正文。
+        let mut message = if text.is_empty() && face_id.is_some() {
+            vec![]
+        } else {
+            vec![json!({"type":"text","data":{"text":text}})]
+        };
         if let Some(id) = face_id {
             message.push(json!({"type":"face","data":{"id":id}}));
         }

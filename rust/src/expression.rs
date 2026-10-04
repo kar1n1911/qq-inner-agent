@@ -206,9 +206,15 @@ pub fn decoration_choices(
     mut random: impl FnMut() -> f64,
 ) -> Result<Value> {
     let last = store.first("SELECT ts FROM decoration_usage WHERE chat=?", [chat])?;
+    // P6c 门控新功能：原概率保留为上限；关闭时不查询历史、不多消耗随机数。
+    let probability = if settings.learn_frequency && chat.starts_with("group:") {
+        crate::humanize::face_probability(store, chat, now)?.min(settings.probability)
+    } else {
+        settings.probability
+    };
     if !settings.enabled
         || last.is_some_and(|r| now - num(&r, "ts") < settings.cooldown_seconds)
-        || random() >= settings.probability
+        || random() >= probability
     {
         return Ok(json!({"symbols":[],"faceIds":[]}));
     }

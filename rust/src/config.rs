@@ -218,6 +218,14 @@ pub fn validate(c: &Value) -> std::result::Result<(), ConfigError> {
     let p = &a["personality"];
     let e = &a["expression"];
     let emoji = &a["emoji"];
+    for key in ["learnFrequency", "faceOnly"] {
+        if let Some(value) = emoji.get(key) {
+            check(
+                value.is_boolean(),
+                format!("agent.emoji.{key} must be boolean"),
+            )?;
+        }
+    }
     check(
         [json!("zh-CN"), json!("en")].contains(&c["ui"]["language"]),
         "Invalid interface language",
@@ -616,6 +624,12 @@ pub struct Expression {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Emoji {
+    /// P6c 门控新功能：缺省关闭，省略 false 保持配置序列化 parity。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub learn_frequency: bool,
+    /// 仅允许轻松附和的单 face 回复；不是长度 parity 开关。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub face_only: bool,
     /// 配置键 `agent.emoji.enabled`。
     pub enabled: bool,
     /// 配置键 `agent.emoji.probability`。

@@ -21,6 +21,7 @@ struct Harness {
     now: Mutex<f64>,
     model: Mutex<Value>,
     trace: Mutex<Vec<Value>>,
+    payloads: Mutex<Vec<Value>>,
     store: Arc<Mutex<Store>>,
     engine: Mutex<Weak<Engine>>,
     transport: Mutex<State>,
@@ -123,6 +124,9 @@ impl OrientationProvider for Harness {
                 .split_whitespace()
                 .next()
                 .unwrap();
+            if stage == "ARTICULATE" {
+                self.payloads.lock().unwrap().push(payload.clone());
+            }
             self.push(json!([
                 "model",
                 stage,
@@ -131,7 +135,8 @@ impl OrientationProvider for Harness {
                 payload["history"]
                     .as_array()
                     .map(|a| a.iter().map(|m| m["id"].clone()).collect::<Vec<_>>())
-                    .unwrap_or_default()
+                    .unwrap_or_default(),
+                payload["lengthTarget"]
             ]));
             anyhow::ensure!(
                 self.store
@@ -187,8 +192,10 @@ impl OrientationProvider for Harness {
                     json!({"shouldSend":m["veto"]!=true,"outcomes":{"reply":0.6,"silence":0.4,"negative":0},"responseMode":if m["veto"]==true {"wait"} else {"answer"},"plan":"接住当前问题"})
                 }
                 "ARTICULATE" => {
-                    // 明确测试 P6a 排除项，而不是偷偷移植 lengthTarget 接线。
-                    assert!(payload.get("lengthTarget").is_none());
+                    assert!(matches!(
+                        payload["lengthTarget"].as_str(),
+                        Some("tiny" | "short" | "medium" | "long")
+                    ));
                     json!({"text":m.get("reply").unwrap_or(&json!("可以先看看盆土是否已经干透。"))})
                 }
                 "ORIENT" => json!({"style":"谨慎接话","summary":"园艺讨论","topics":["园艺"]}),
@@ -203,6 +210,7 @@ fn setup(case: &Value) -> (Arc<Engine>, Arc<Harness>) {
         now: Mutex::new(43200.),
         model: Mutex::new(json!({})),
         trace: Mutex::new(vec![]),
+        payloads: Mutex::new(vec![]),
         store: store.clone(),
         engine: Mutex::new(Weak::new()),
         transport: Mutex::new(State {
@@ -219,10 +227,24 @@ fn setup(case: &Value) -> (Arc<Engine>, Arc<Harness>) {
     });
     let clock = h.clone();
     let logger = h.clone();
+    let draws = Mutex::new(
+        case["expressionDraws"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter(),
+    );
     let options = Options {
         now: Arc::new(move || clock.now()),
         random: Arc::new(|| 0.),
-        expression_random: Arc::new(|| 0.5),
+        expression_random: Arc::new(move || {
+            draws
+                .lock()
+                .unwrap()
+                .next()
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.5)
+        }),
         activity_random: Arc::new(|| 0.),
         selection_random: Arc::new(|| 0.9),
         log: Arc::new(move |event, data| logger.push(json!(["log", event, data]))),
@@ -488,6 +510,28 @@ fn scenarios() -> Vec<Value> {
     );
     budget["budget"] = json!(1);
     cases.push(budget);
+    cases.push(base(
+        "humanize_explicitly_disabled",
+        json!({"emoji":{"learnFrequency":false,"faceOnly":false}}),
+        vec![direct(), run()],
+    ));
+    // parity：每档边界及 self 禁 tiny；序列验证装饰先抽样、长度后抽样。
+    for hint in ["self", "open", "other"] {
+        for draw in [0., 0.349, 0.35, 0.699, 0.7, 0.799, 0.8, 0.979, 0.98, 0.999] {
+            let content = match hint {
+                "self" => "[CQ:at,qq=99]你好",
+                "other" => "[CQ:at,qq=20]你好",
+                _ => "你好",
+            };
+            let mut case = base(
+                &format!("length_{hint}_{draw}"),
+                json!({"personality":{"variants":[]},"emoji":{"enabled":true,"probability":1}}),
+                vec![ingest("m1", content), run()],
+            );
+            case["expressionDraws"] = json!([0.1, draw]);
+            cases.push(case);
+        }
+    }
     cases
 }
 async fn script(case: &Value) -> Value {
@@ -1066,4 +1110,292 @@ async fn control_decision_event_reports_below_threshold_withhold() {
             "chat":"group:10","action":"withhold","score":0.0,"tags":[],"ts":43200.0
         }])]
     );
+}
+
+fn face_case(enabled: bool) -> Value {
+    base(
+        "face_only",
+        json!({"threshold":1,"interruptThreshold":1,"sending":{"enabled":false},"emoji":{"enabled":true,"faceOnly":enabled,"probability":1,"faceIds":["14"],"symbols":["🙂"],"cooldownSeconds":0}}),
+        vec![],
+    )
+}
+async fn face_turn(
+    e: &Arc<Engine>,
+    h: &Arc<Harness>,
+    id: &str,
+    content: &str,
+    group: i64,
+    score: f64,
+    response: Value,
+) {
+    *h.model.lock().unwrap() =
+        json!({"score":score,"invalidStage":"ARTICULATE","invalid":response});
+    e.ingest(&h.event(&json!({"id":id,"text":content,"group":group})))
+        .unwrap();
+    e.tick().unwrap();
+    e.wait_idle().await;
+}
+#[tokio::test]
+async fn face_only_runtime_gate_and_hard_rejections() {
+    for (enabled, content, score, response, permitted) in [
+        (false, "哈哈", 3., json!({"text":"","faceId":"14"}), false),
+        (true, "哈哈", 3., json!({"text":"","faceId":"14"}), true),
+        (
+            true,
+            "[CQ:at,qq=20]哈哈",
+            2.,
+            json!({"text":" ","faceId":"14"}),
+            true,
+        ),
+        (
+            true,
+            "[CQ:at,qq=99]哈哈",
+            3.,
+            json!({"text":"","faceId":"14"}),
+            false,
+        ),
+        (true, "帮帮我", 3., json!({"text":"","faceId":"14"}), false),
+        (
+            true,
+            "有点难过",
+            3.,
+            json!({"text":"","faceId":"14"}),
+            false,
+        ),
+        (
+            true,
+            "哈哈但我真的很难过",
+            3.,
+            json!({"text":"","faceId":"14"}),
+            false,
+        ),
+        (true, "哈哈", 4., json!({"text":"","faceId":"14"}), false),
+        (true, "哈哈", 3., json!({"text":"","faceId":"999"}), false),
+        (true, "哈哈", 3., json!({"text":"","faceId":["14"]}), false),
+        (
+            true,
+            "哈哈",
+            3.,
+            json!({"text":"","emoji":"🙂","faceId":"14"}),
+            false,
+        ),
+        (true, "哈哈", 3., json!({"text":"","emoji":"🙂"}), false),
+    ] {
+        let (e, h) = setup(&face_case(enabled));
+        face_turn(&e, &h, "m1", content, 10, score, response).await;
+        assert_eq!(
+            *h.sends.lock().unwrap(),
+            usize::from(permitted),
+            "{enabled} {content} {score}"
+        );
+        let payload = h
+            .payloads
+            .lock()
+            .unwrap()
+            .last()
+            .expect("must reach articulation")
+            .clone();
+        assert_eq!(payload.get("runtimeInstructions").is_some(), enabled);
+        if permitted {
+            assert!(h
+                .trace
+                .lock()
+                .unwrap()
+                .contains(&json!(["send", "group:10", "", "14"])));
+            assert_eq!(h.rows("SELECT * FROM deliveries").len(), 1);
+        }
+        e.stop().await;
+    }
+}
+#[tokio::test]
+async fn face_only_streak_survives_reload_and_resets_only_with_text() {
+    let (old, h) = setup(&face_case(true));
+    face_turn(
+        &old,
+        &h,
+        "a",
+        "哈哈",
+        10,
+        3.,
+        json!({"text":"","faceId":"14"}),
+    )
+    .await;
+    old.stop().await;
+    // 历史被保留期清理也不能重置连续单 face 限制。
+    h.store
+        .lock()
+        .unwrap()
+        .execute("DELETE FROM messages WHERE self=1", [])
+        .unwrap();
+    *h.now.lock().unwrap() += 61.;
+    let clock = h.clone();
+    let e = Engine::new(
+        old.config.clone(),
+        h.store.clone(),
+        h.clone(),
+        h.clone(),
+        Options {
+            now: Arc::new(move || clock.now()),
+            expression_random: Arc::new(|| 0.5),
+            ..Options::default()
+        },
+    )
+    .unwrap();
+    *h.engine.lock().unwrap() = Arc::downgrade(&e);
+    face_turn(
+        &e,
+        &h,
+        "b",
+        "确实",
+        10,
+        3.,
+        json!({"text":"","faceId":"14"}),
+    )
+    .await;
+    assert_eq!(*h.sends.lock().unwrap(), 1);
+    face_turn(
+        &e,
+        &h,
+        "c",
+        "哈哈",
+        11,
+        3.,
+        json!({"text":"","faceId":"14"}),
+    )
+    .await;
+    assert_eq!(*h.sends.lock().unwrap(), 2, "不同群不共享连续限制");
+    *h.now.lock().unwrap() += 61.;
+    face_turn(
+        &e,
+        &h,
+        "d",
+        "同感",
+        10,
+        3.,
+        json!({"text":"这段确实有意思"}),
+    )
+    .await;
+    assert_eq!(*h.sends.lock().unwrap(), 3);
+    *h.now.lock().unwrap() += 61.;
+    face_turn(
+        &e,
+        &h,
+        "e",
+        "哈哈",
+        10,
+        3.,
+        json!({"text":"","faceId":"14"}),
+    )
+    .await;
+    assert_eq!(*h.sends.lock().unwrap(), 4, "正文之后可再次单 face");
+    e.stop().await;
+}
+#[tokio::test]
+async fn face_learning_captures_human_segments_and_default_does_not_create_tables() {
+    for enabled in [false, true] {
+        let mut case = face_case(false);
+        case["config"]["agent"]["emoji"]["learnFrequency"] = json!(enabled);
+        let (e, h) = setup(&case);
+        for (id, content) in [
+            ("a", json!([{"type":"face","data":{"id":"14"}}])),
+            ("b", json!("[CQ:face,id=14]")),
+            ("c", json!("hi")),
+        ] {
+            e.ingest(&h.event(&json!({"id":id,"text":content})))
+                .unwrap();
+        }
+        if enabled {
+            assert_eq!(
+                h.rows("SELECT sum(has_face) n FROM humanize_faces")[0]["n"],
+                2
+            );
+        } else {
+            assert!(h
+                .rows("SELECT name FROM sqlite_master WHERE name='humanize_faces'")
+                .is_empty());
+        }
+        e.stop().await;
+    }
+}
+
+#[tokio::test]
+async fn face_only_keeps_quota_cooldown_and_stale_output_guards() {
+    for patch in [
+        json!({"dryRun":true}),
+        json!({"maxMessagesPerHour":1}),
+        json!({"quietHours":{"start":11,"end":13,"timezone":"UTC"}}),
+        json!({}),
+    ] {
+        let mut case = face_case(true);
+        case["config"]["agent"] = merge(&case["config"]["agent"], &patch);
+        let (e, h) = setup(&case);
+        if patch["maxMessagesPerHour"] == 1 {
+            let db = h.store.lock().unwrap();
+            let id = db.delivery("group:10", false, h.now()).unwrap();
+            db.finish_delivery(&id, "sent", None).unwrap();
+        }
+        if patch == json!({}) {
+            *h.model.lock().unwrap() = json!({"score":3,"effectStage":"ARTICULATE","effect":"message","invalidStage":"ARTICULATE","invalid":{"text":"","faceId":"14"}});
+            e.ingest(&h.event(&json!({"text":"哈哈"}))).unwrap();
+            e.tick().unwrap();
+            e.wait_idle().await;
+        } else {
+            face_turn(
+                &e,
+                &h,
+                "m1",
+                "哈哈",
+                10,
+                3.,
+                json!({"text":"","faceId":"14"}),
+            )
+            .await;
+        }
+        assert_eq!(*h.sends.lock().unwrap(), 0, "{patch}");
+        assert!(h.rows("SELECT * FROM humanize_reply_state").is_empty());
+        e.stop().await;
+    }
+    // 上条有正文时也保留至少 30 秒间隔。
+    let (e, h) = setup(&face_case(true));
+    face_turn(&e, &h, "a", "哈哈", 10, 3., json!({"text":"确实挺有意思"})).await;
+    *h.now.lock().unwrap() += 2.;
+    face_turn(
+        &e,
+        &h,
+        "b",
+        "同感",
+        10,
+        3.,
+        json!({"text":"","faceId":"14"}),
+    )
+    .await;
+    assert_eq!(*h.sends.lock().unwrap(), 1);
+    e.stop().await;
+}
+#[tokio::test]
+async fn uncertain_face_delivery_blocks_next_face_but_definite_failure_does_not() {
+    for status in ["uncertain", "failed"] {
+        let (e, h) = setup(&face_case(true));
+        *h.model.lock().unwrap() = json!({"score":3,"delivery":status,"invalidStage":"ARTICULATE","invalid":{"text":"","faceId":"14"}});
+        e.ingest(&h.event(&json!({"text":"哈哈"}))).unwrap();
+        e.tick().unwrap();
+        e.wait_idle().await;
+        assert_eq!(*h.sends.lock().unwrap(), 1);
+        *h.now.lock().unwrap() += 61.;
+        face_turn(
+            &e,
+            &h,
+            "b",
+            "同感",
+            10,
+            3.,
+            json!({"text":"","faceId":"14"}),
+        )
+        .await;
+        assert_eq!(
+            *h.sends.lock().unwrap(),
+            if status == "uncertain" { 1 } else { 2 }
+        );
+        e.stop().await;
+    }
 }
