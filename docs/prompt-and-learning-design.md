@@ -43,9 +43,9 @@
 | --- | --- | --- | --- | --- |
 | 提示词分层(身份背景 / 任务契约 / 行为准则) | ✅ | ✅ 已实现（P6f 任务 1） | — | 二 |
 | 学习分诊 `learn` / `partial` / `skip` | ✅ | ✅ 已实现（P6g） | — | 四 |
-| affect 指标(心情 / 好感 / 认同) | ✅ | ⬜ 待实现 | — | 六 |
-| 二维心情 + 四象限 disposition | ✅ | ⬜ 待实现 | affect | 七 |
-| 记忆召回下钻(`recall`) | ✅ | ⬜ 待实现 | — | 八 |
+| affect 指标(心情 / 好感 / 认同) | ✅ | ✅ 已实现（P6h） | — | 六 |
+| 二维心情 + 四象限 disposition | ✅ | ✅ 已实现（P6h） | affect | 七 |
+| 记忆召回下钻(`recall`) | ✅ | ✅ 已实现（P6h） | — | 八 |
 | 三层决策架构 + 零模型初筛 | ✅ | ✅ 已实现（P6d） | — | 九 |
 | `groupActivity` + 该群作息 | ✅ | ✅ 已实现（P6b） | — | 十 |
 | 注意力漂移(`drift_level` / `anchor_policy` / `reaction_style`) | ✅ | ✅ 已实现（P6b） | groupActivity | 10.4 |
