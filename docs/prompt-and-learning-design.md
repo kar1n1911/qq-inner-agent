@@ -1239,3 +1239,18 @@ P(use) = base × g(敏感度) × h(对私聊人的好感度)
   - `person:<QQ号>` 级信息与**私聊内容永不外溢**(§15.4 的红线不变);
   - 转发仍要过**责任线(§14)+ 自我审核(§16)**,并**带来源、不编造**;
 - 相关度匹配、节流、预算同 §21.3/21.4。
+
+### 21.7.1 API 确定:聊天记录转发(合并转发)
+
+QQ 原生支持"聊天记录"型转发。经 SnowLuma 的 OneBot 桥,它暴露为 **`forward` 消息段**(不是独立 action):
+
+- 在 `send_group_msg` / `send_private_msg` 的 `message` 数组里发
+  `{"type":"forward","data":{"nodes":[...]}}`;
+- `nodes` 每条是**已有消息的引用**:`{"user_id"|"uin":<原发送者>, "id"|"message_id":<原消息 id>}`;
+- 即转发的是**原消息的引用**,QQ 客户端会渲染成带**原署名 + 时间**的"聊天记录"卡片,
+  **不是 agent 复制文字** —— 天然保留出处、不伪造;
+- 约束(SnowLuma 实测):`node` 段只在 forward 的 nodes 内合法;每条 node 必须有 user_id/uin 与合法 id/message_id;
+  file 段不支持转发。
+
+**Rust 侧缺口**:`onebot.rs` 目前只发 `text`/`face`/`image`,没有 forward 段;实现 §21.7 时需新增
+`send_forward(chat, nodes)`,只接受已存在消息的 id 引用,不构造新内容。
