@@ -4,7 +4,7 @@ import { defaults, merge } from '../src/config.mjs';
 import { Store } from '../src/store.mjs';
 import { Engine } from '../src/engine.mjs';
 import { pickLengthTarget } from '../src/policy.mjs';
-import { articulationFor, formation } from '../src/prompts.mjs';
+import { articulationFor, formation, composePrompt } from '../src/prompts.mjs';
 
 const prediction = { shouldSend: true, outcomes: { reply: 0.6, silence: 0.3, negative: 0.1 }, responseMode: 'answer', plan: '简洁回答。' };
 const BUCKETS = ['tiny', 'short', 'medium', 'long'];
@@ -58,7 +58,7 @@ test('the articulation prompt carries the sticker and face guidance', () => {
 });
 
 test('formation lets candidates carry a mild opinion', () => {
-  assert.match(formation, /不同看法/);
+  assert.match(composePrompt(formation), /不同看法/);
 });
 
 function fixture({ direct, lengthDraw, logs }) {

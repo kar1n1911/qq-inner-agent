@@ -930,7 +930,12 @@ impl Engine {
             t
         };
         // 19–20：形成候选；先校验再检查过期，保持 JS 错误/副作用顺序。
-        let formed = self.model(prompts::FORMATION, t.payload.clone()).await?;
+        let formed = self
+            .model(
+                &prompts::compose_prompt(prompts::FORMATION, &[]),
+                t.payload.clone(),
+            )
+            .await?;
         ensure!(
             formed["candidates"].is_array()
                 && Allocation::parse(text(&formed, "allocation")).is_some(),
@@ -1036,7 +1041,9 @@ impl Engine {
         payload.as_object_mut().unwrap().remove("retainedIdeas");
         payload["candidates"] = json!(candidates);
         payload["recentAgentMessages"] = t.counts["total"].clone();
-        let result = self.model(prompts::EVALUATION, payload).await?;
+        let result = self
+            .model(&prompts::compose_prompt(prompts::EVALUATION, &[]), payload)
+            .await?;
         let (selected, proactive, timing) = {
             let mut core = self.core();
             let db = self.db()?;
@@ -1103,7 +1110,11 @@ impl Engine {
             payload.as_object_mut().unwrap().remove("retainedIdeas");
             payload["selectedIdea"] = json!(selected.candidate.text);
             payload["timing"] = json!(timing);
-            let prediction = forecast_result(&self.model(prompts::FORECAST, payload).await?)?;
+            let prediction = forecast_result(
+                &self
+                    .model(&prompts::compose_prompt(prompts::FORECAST, &[]), payload)
+                    .await?,
+            )?;
             let mut core = self.core();
             let db = self.db()?;
             if !self.fresh(&core, &db, &t)? {

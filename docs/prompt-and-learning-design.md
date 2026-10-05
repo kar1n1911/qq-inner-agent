@@ -41,7 +41,7 @@
 
 | 设计项 | 设计 | 实现(Rust) | 前置 | 所在节 |
 | --- | --- | --- | --- | --- |
-| 提示词分层(身份背景 / 任务契约 / 行为准则) | ✅ | ⬜ 待实现 | — | 二 |
+| 提示词分层(身份背景 / 任务契约 / 行为准则) | ✅ | ✅ 已实现（P6f 任务 1） | — | 二 |
 | 学习分诊 `learn` / `partial` / `skip` | ✅ | ⬜ 待实现 | — | 四 |
 | affect 指标(心情 / 好感 / 认同) | ✅ | ⬜ 待实现 | — | 六 |
 | 二维心情 + 四象限 disposition | ✅ | ⬜ 待实现 | affect | 七 |
@@ -126,6 +126,23 @@
 
 实现上,`②`/`③` 仍然随请求发送(模型 API 只有 system/user 两段),但**在设计、生成与测试上完全分开**:
 per-task 的常量各自只含契约,不再复述人设;人设只在 `①` 出现一次。
+
+### 2.1 实现与验证（P6f 任务 1）
+
+- `src/prompts.mjs` 的 `identity` 统一说明身份字段及优先级；具体 persona、
+  `personalityContext` 选出的 personality/variant、chatStyle 与带主体的 traits 仍由运行时
+  通过 user payload 提供，不复制进任务常量，不把别人的 traits 当作机器人身份。
+- `formation` / `evaluation` / `articulation` / `forecast` 只保存任务契约，
+  `outputContract` 统一说明 JSON 输出与校验失败即拒绝；原有解析器与错误码保持不变。
+- `rules` 保存命名行为片段，`taskRules` 决定每个场景的组合；
+  `composePrompt(contract, { disabledRules, ruleNames })` 在发送前组装 system，
+  `articulationFor(language, options)` 独立选择或关闭语言规则。默认保留全部适用规则。
+  `boundary` 负责防注入，`responsibility` 保留任务 2 已完成的责任线原文，
+  其余片段分别管理归属、表情、反 AI 腔、表达示例与聊天衔接等。
+- 生成器分别生成 Rust 的身份、契约、规则及组装函数；`prompts_parity` 对照每层、
+  默认组装、逐条关闭规则和全部关闭规则后的文本，并核对三种回复语言。
+  固定的 `test/fixtures/prompt-contracts.json` 摘自重构前的 JSON 示例，防止两端同时漂移；
+  原有 engine / memory / sending parity 与 revision golden 继续验证解析行为。
 
 ## 三、聊天学习与本地保存
 

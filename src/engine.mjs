@@ -1,6 +1,6 @@
 import { readiness } from './config.mjs';
 import { allowed, normalize, quiet, select, repeated, pickLengthTarget } from './policy.mjs';
-import { formation, evaluation, articulationFor, forecast } from './prompts.mjs';
+import { composePrompt, formation, evaluation, articulationFor, forecast } from './prompts.mjs';
 import { forecastResult, sendingProbability } from './sending.mjs';
 import { parseMemoryUpdates } from './memory.mjs';
 import { parseExpressions, personalityContext, decorationChoices, decorate } from './expression.mjs';
@@ -131,7 +131,7 @@ export class Engine {
       retainedIdeas: this.store.reservoir(chat, now, a.thoughtTtlSeconds, a.thoughtLimit, last.sender),
       priorExpectation: this.store.expectation(chat, now),
     };
-    const formed = await this.provider.json(formation, payload, signal);
+    const formed = await this.provider.json(composePrompt(formation), payload, signal);
     if (!Array.isArray(formed.candidates) || !['self', 'other', 'open'].includes(formed.allocation)) throw Object.assign(Error('Invalid formation'), { code: 'invalid_formation' });
     if (obsolete() || !this.available(this.now())) return;
     if (learnNow && formed.learning !== undefined) {
@@ -156,7 +156,7 @@ export class Engine {
     if (obsolete() || !this.available(this.now())) return; // obsolete context or schedule
     const candidates = this.store.reservoir(chat, now, a.thoughtTtlSeconds, a.thoughtLimit, last.sender);
     if (!candidates.length) { this.finish(state, chat, id, version, trigger); return; }
-    const result = await this.provider.json(evaluation, { ...payload, retainedIdeas: undefined, candidates,
+    const result = await this.provider.json(composePrompt(evaluation), { ...payload, retainedIdeas: undefined, candidates,
       recentAgentMessages: counts.total }, signal);
     if (!Array.isArray(result.ratings)) throw Object.assign(Error('Invalid evaluation'), { code: 'invalid_evaluation' });
     const seen = new Set();
@@ -185,7 +185,7 @@ export class Engine {
     if (a.sending.enabled) {
       const timing = { proactive, age: Math.max(0, this.now() - state.lastHuman),
         ...this.store.sendingTiming(chat, this.now(), a.sending.recoverySeconds), score: selected.adjusted };
-      prediction = forecastResult(await this.provider.json(forecast, { ...payload, retainedIdeas: undefined, selectedIdea: selected.text, timing }, signal));
+      prediction = forecastResult(await this.provider.json(composePrompt(forecast), { ...payload, retainedIdeas: undefined, selectedIdea: selected.text, timing }, signal));
       if (obsolete() || !this.available(this.now())) return;
       const gate = sendingProbability(a.sending, timing, prediction), draw = this.random();
       const admitted = !gate.veto && draw < gate.probability;
