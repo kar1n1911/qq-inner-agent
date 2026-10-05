@@ -7,8 +7,6 @@ use qq_inner_core::sending::{
     Timing, Veto,
 };
 use serde_json::{json, Value};
-use std::fs;
-use std::process::Command;
 
 fn settings() -> SendingSettings {
     SendingSettings {
@@ -180,20 +178,9 @@ fn a_plan_of_exactly_four_hundred_units_is_accepted() {
     assert!(forecast_result(&value).is_ok());
 }
 
-fn node_available() -> bool {
-    Command::new("node")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
-/// 直接把参数矩阵交给真实的 JS 实现，逐位比较概率与因子。
+/// 参数矩阵的期望值固化自 JS,逐位比较概率与因子,不再依赖 node。
 #[test]
-fn probability_matches_node_across_a_parameter_matrix() {
-    if !node_available() {
-        eprintln!("SKIP: node unavailable");
-        return;
-    }
+fn probability_matches_the_frozen_parameter_matrix() {
     let settings = settings();
     let mut cases: Vec<Value> = Vec::new();
     let mut expected_inputs: Vec<(Timing, Forecast)> = Vec::new();
@@ -220,39 +207,9 @@ fn probability_matches_node_across_a_parameter_matrix() {
 
     // 传二进制位而不是十进制：serde_json 解析某些十进制浮点会差 1 ULP
     //（例如 "0.0012000000000000001"），那会让"逐位一致"的断言出现假失败。
-    let script = r#"
-import { sendingProbability } from './src/sending.mjs';
-import { readFileSync } from 'node:fs';
-const cases = JSON.parse(readFileSync(process.argv[1], 'utf8'));
-const bits = x => { const b = new DataView(new ArrayBuffer(8)); b.setFloat64(0, x); return b.getBigUint64(0).toString(); };
-process.stdout.write(JSON.stringify(cases.map(c => {
-  const r = sendingProbability(c.settings, c.timing, c.forecast);
-  return { p: bits(r.probability), f: Object.fromEntries(Object.entries(r.factors).map(([k, v]) => [k, bits(v)])) };
-})));
-"#;
-    // 通过临时文件而不是 stdin 传递：矩阵有近两千个用例，管道会在 Node 启动前写满。
-    let dir = std::env::temp_dir().join(format!("qq-inner-sending-{}", std::process::id()));
-    fs::create_dir_all(&dir).expect("create case directory");
-    let case_file = dir.join("cases.json");
-    fs::write(&case_file, serde_json::to_string(&cases).unwrap()).expect("write cases");
-    let out = Command::new("node")
-        .args(["--input-type=module", "-e", script])
-        .arg(&case_file)
-        // 仓库根（rust/ 的上一级），这样 ./src/sending.mjs 才解析得到。
-        .current_dir(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .unwrap(),
-        )
-        .output()
-        .expect("run node");
-    let _ = fs::remove_dir_all(&dir);
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let js: Vec<Value> = serde_json::from_slice(&out.stdout).expect("node output");
+    // 期望值固化自 JS 的参数矩阵(1920 用例,二进制位表示),不再依赖 node。
+    let js: Vec<Value> =
+        serde_json::from_str(include_str!("golden/sending.json")).expect("frozen golden");
 
     assert_eq!(js.len(), expected_inputs.len());
     for (index, ((t, f), expected)) in expected_inputs.iter().zip(js.iter()).enumerate() {
