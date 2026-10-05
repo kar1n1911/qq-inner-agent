@@ -25,26 +25,22 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-## ⚠️ 让交叉验证测试真正运行
+## 原生金标准测试（无需 Node）
 
-多个测试会把 Rust 的实现与**真实的 JS 实现**比对（`config_parity`、`policy_parity`、
-`prompts_parity`、`provider_parity`、`activity_parity`、`sending_parity`）。
-它们都会调用 `node`，**`node` 不在 PATH 时会静默跳过** —— 那会变成"假绿灯"。
-
-本仓库自带 node，请把它加进 PATH 再跑测试：
+`tests/*_parity.rs` 使用 `tests/golden/*.json` 中捕获的 JS 固化金标准，
+`revision_golden.rs` 保留六组 SHA-256 常量。所有比较均无条件执行；金标准缺失或输入
+改变会直接失败。原 memory benchmark 也默认执行正确性断言，没有忽略项。
 
 ```sh
-export PATH="$PWD/.runtime:$PATH"   # 从仓库根目录执行
-cd rust && cargo test
+cd rust
+cargo build --release
+cargo clippy --all-targets -- -D warnings
+cargo test
 ```
 
-在部署主机上同样如此，可以这样一次跑完：
-
-```sh
-cd ~/github_repo/qq-inner-agent
-export PATH="$PWD/.runtime:$PATH"
-(cd rust && cargo build --release && cargo clippy --all-targets -- -D warnings && cargo test)
-```
+零跳过验收必须额外在不含 Node 的 PATH 下运行，先确认 `command -v node` 失败，再跑
+完整 `cargo test`；同时检查测试源码无 Node 调用。已验证命令、数量及浮点规则见
+[金标准说明](tests/golden/README.md)。历史 oracle 已移至 `docs/p11-oracles/`，测试不再引用。
 
 ## 提示词由脚本生成
 

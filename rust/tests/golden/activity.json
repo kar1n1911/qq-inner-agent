@@ -1,0 +1,3852 @@
+[
+  {
+    "expected": [
+      "3fd93dd536997740",
+      "3fe2b8f1a25a063b",
+      "3f947ae147ae1480",
+      "3feb333333333333",
+      "3feb333333333333",
+      "3fba02ac9043a738",
+      "3fd93dd536997740",
+      "3fd93dd536997740",
+      "3fdfffffaab6717b",
+      "3fdffffffffffff6",
+      "3fb9999999999998",
+      "3feccccccccccccd",
+      "3feccccccccccccd",
+      "3fddd52f76c08a3d",
+      "3fdfffffaab6717b",
+      "3fdfffffaab6717b",
+      "3fccdbc3892d78e8",
+      "3fdf4089e4fb1847",
+      "0000000000000000",
+      "3fe999999999999a",
+      "3fe999999999999a",
+      "3fa2c51dcb7dcc40",
+      "3fccdbc3892d78e8",
+      "3fccdbc3892d78e8",
+      "3fe158b8ea6ab975",
+      "3f95de8a49db61e0",
+      "3fd9a1b93dc09bd9",
+      "3fe158b8ea6ab975",
+      "3feb333333333333",
+      "3fd9a1b93dc09bd9",
+      "3fe158b8ea6ab975",
+      "3fe158b8ea6ab975",
+      "3fdfffffffffeed3",
+      "3fbd79b281c1a8a0",
+      "3fdfffffc62702db",
+      "3fdfffffffffeed3",
+      "3feccccccccccccd",
+      "3fdfffffc62702db",
+      "3fdfffffffffeed3",
+      "3fdfffffffffeed3",
+      "3fd9e31596a95510",
+      "3f42d3bad50f5400",
+      "3fcd91f63a6390ae",
+      "3fd9e31596a95510",
+      "3fe999999999999a",
+      "3fcd91f63a6390ae",
+      "3fd9e31596a95510",
+      "3fd9e31596a95510",
+      "3fe3c94f57f3b100",
+      "3feb333333333333",
+      "3feb333333333333",
+      "3feb333333333333",
+      "3fcfe4a3feb6e81c",
+      "3feb333333333333",
+      "3fe3c94f57f3b100",
+      "3fe3c94f57f3b100",
+      "3fe0000000000000",
+      "3feccccccccccccd",
+      "3feccccccccccccd",
+      "3feccccccccccccd",
+      "3fdffda771b1cac4",
+      "3feccccccccccccd",
+      "3fe0000000000000",
+      "3fe0000000000000",
+      "3fe2738705bcebd8",
+      "3fe999999999999a",
+      "3fe999999999999a",
+      "3fe999999999999a",
+      "3fbdf4ab61ea02e0",
+      "3fe999999999999a",
+      "3fe2738705bcebd8",
+      "3fe2738705bcebd8",
+      "3feb333333333333",
+      "3feb333333333333",
+      "3feb333333333333",
+      "3feb333333333333",
+      "3feb333333333333",
+      "3feb333333333333",
+      "3feb333333333333",
+      "3feb333333333333",
+      "3feccccccccccccd",
+      "3feccccccccccccd",
+      "3feccccccccccccd",
+      "3feccccccccccccd",
+      "3feccccccccccccd",
+      "3feccccccccccccd",
+      "3feccccccccccccd",
+      "3feccccccccccccd",
+      "3fe999999999999a",
+      "3fe999999999999a",
+      "3fe999999999999a",
+      "3fe999999999999a",
+      "3fe999999999999a",
+      "3fe999999999999a",
+      "3fe999999999999a",
+      "3fe999999999999a",
+      "3feb333333333333",
+      "3feb333333333333",
+      "3feb333333333333",
+      "3feb333333333333",
+      "3feb333333333333",
+      "3feb333333333333",
+      "3feb333333333333",
+      "3feb333333333333",
+      "3feccccccccccccd",
+      "3feccccccccccccd",
+      "3feccccccccccccd",
+      "3feccccccccccccd",
+      "3feccccccccccccd",
+      "3feccccccccccccd",
+      "3feccccccccccccd",
+      "3feccccccccccccd",
+      "3fe999999999999a",
+      "3fe999999999999a",
+      "3fe999999999999a",
+      "3fe999999999999a",
+      "3fe999999999999a",
+      "3fe999999999999a",
+      "3fe999999999999a",
+      "3fe999999999999a",
+      "3fe4cccccccccccd",
+      "3fe3c1877d3d22a1",
+      "3fe245a00cca33ab",
+      "3fe04bcafd6c48e4",
+      "3fdbaedafaebad87",
+      "3fd6070e484eb874",
+      "3fd00b20433daa46",
+      "3fc4a6f1368b0a3e",
+      "3fb63e587400cb38",
+      "3fa322e12583bcf0",
+      "3f947ae147ae1480",
+      "3fa322e12583bd00",
+      "3fb63e587400cb38",
+      "3fc4a6f1368b0a3e",
+      "3fd00b20433daa44",
+      "3fd6070e484eb874",
+      "3fdbaedafaebad88",
+      "3fe04bcafd6c48e4",
+      "3fe245a00cca33ab",
+      "3fe3c1877d3d22a1",
+      "3feb333333333333",
+      "3fe0000000000000",
+      "3fe0000000000000",
+      "3fdfffffffffffa5",
+      "3fdffffffffd7b7f",
+      "3fdffffff975722e",
+      "3fdffff9bf6a2685",
+      "3fdffdcd2fe5fe62",
+      "3fdfb732325153f3",
+      "3fdc891112734c70",
+      "3fd0790a694054c4",
+      "3fb9999999999998",
+      "3fd0790a694054c8",
+      "3fdc891112734c70",
+      "3fdfb732325153f3",
+      "3fdffdcd2fe5fe62",
+      "3fdffff9bf6a2685",
+      "3fdffffff975722e",
+      "3fdffffffffd7b7f",
+      "3fdfffffffffffa5",
+      "3fe0000000000000",
+      "3feccccccccccccd",
+      "3fe6666666666666",
+      "3fe25b4c6c49edb8",
+      "3fdd502b94c0c210",
+      "3fd6a6db4dff2aa1",
+      "3fd0c6d507b2a1c5",
+      "3fc775eeea1a3584",
+      "3fbe32c5fee1b7c8",
+      "3fb10f93b0c74ea0",
+      "3f9e6cd9b9de43c0",
+      "3f7e7b75ee3b5280",
+      "0000000000000000",
+      "3f7e7b75ee3b5280",
+      "3f9e6cd9b9de43c0",
+      "3fb10f93b0c74ea0",
+      "3fbe32c5fee1b798",
+      "3fc775eeea1a3584",
+      "3fd0c6d507b2a1d2",
+      "3fd6a6db4dff2aa1",
+      "3fdd502b94c0c210",
+      "3fe25b4c6c49edb8",
+      "3fe999999999999a"
+    ],
+    "input": [
+      {
+        "now": 1767225600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1772000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1774747800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1781524800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1785000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1792891800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1798761600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1767225600.5,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1767225600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1772000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1774747800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1781524800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1785000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1792891800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1798761600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1767225600.5,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1767225600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1772000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1774747800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1781524800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1785000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1792891800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1798761600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1767225600.5,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1767225600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "22:00",
+          "enabled": true,
+          "inactiveStart": "06:00",
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      {
+        "now": 1772000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "22:00",
+          "enabled": true,
+          "inactiveStart": "06:00",
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      {
+        "now": 1774747800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "22:00",
+          "enabled": true,
+          "inactiveStart": "06:00",
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      {
+        "now": 1781524800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "22:00",
+          "enabled": true,
+          "inactiveStart": "06:00",
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      {
+        "now": 1785000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "22:00",
+          "enabled": true,
+          "inactiveStart": "06:00",
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      {
+        "now": 1792891800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "22:00",
+          "enabled": true,
+          "inactiveStart": "06:00",
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      {
+        "now": 1798761600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "22:00",
+          "enabled": true,
+          "inactiveStart": "06:00",
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      {
+        "now": 1767225600.5,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "22:00",
+          "enabled": true,
+          "inactiveStart": "06:00",
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      {
+        "now": 1767225600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "22:00",
+          "enabled": true,
+          "inactiveStart": "06:00",
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      {
+        "now": 1772000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "22:00",
+          "enabled": true,
+          "inactiveStart": "06:00",
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      {
+        "now": 1774747800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "22:00",
+          "enabled": true,
+          "inactiveStart": "06:00",
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      {
+        "now": 1781524800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "22:00",
+          "enabled": true,
+          "inactiveStart": "06:00",
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      {
+        "now": 1785000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "22:00",
+          "enabled": true,
+          "inactiveStart": "06:00",
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      {
+        "now": 1792891800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "22:00",
+          "enabled": true,
+          "inactiveStart": "06:00",
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      {
+        "now": 1798761600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "22:00",
+          "enabled": true,
+          "inactiveStart": "06:00",
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      {
+        "now": 1767225600.5,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "22:00",
+          "enabled": true,
+          "inactiveStart": "06:00",
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      {
+        "now": 1767225600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "22:00",
+          "enabled": true,
+          "inactiveStart": "06:00",
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      {
+        "now": 1772000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "22:00",
+          "enabled": true,
+          "inactiveStart": "06:00",
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      {
+        "now": 1774747800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "22:00",
+          "enabled": true,
+          "inactiveStart": "06:00",
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      {
+        "now": 1781524800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "22:00",
+          "enabled": true,
+          "inactiveStart": "06:00",
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      {
+        "now": 1785000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "22:00",
+          "enabled": true,
+          "inactiveStart": "06:00",
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      {
+        "now": 1792891800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "22:00",
+          "enabled": true,
+          "inactiveStart": "06:00",
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      {
+        "now": 1798761600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "22:00",
+          "enabled": true,
+          "inactiveStart": "06:00",
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      {
+        "now": 1767225600.5,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "22:00",
+          "enabled": true,
+          "inactiveStart": "06:00",
+          "timezone": "Asia/Shanghai"
+        }
+      },
+      {
+        "now": 1767225600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:30",
+          "enabled": true,
+          "inactiveStart": "22:15",
+          "timezone": "+08:00"
+        }
+      },
+      {
+        "now": 1772000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:30",
+          "enabled": true,
+          "inactiveStart": "22:15",
+          "timezone": "+08:00"
+        }
+      },
+      {
+        "now": 1774747800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:30",
+          "enabled": true,
+          "inactiveStart": "22:15",
+          "timezone": "+08:00"
+        }
+      },
+      {
+        "now": 1781524800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:30",
+          "enabled": true,
+          "inactiveStart": "22:15",
+          "timezone": "+08:00"
+        }
+      },
+      {
+        "now": 1785000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:30",
+          "enabled": true,
+          "inactiveStart": "22:15",
+          "timezone": "+08:00"
+        }
+      },
+      {
+        "now": 1792891800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:30",
+          "enabled": true,
+          "inactiveStart": "22:15",
+          "timezone": "+08:00"
+        }
+      },
+      {
+        "now": 1798761600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:30",
+          "enabled": true,
+          "inactiveStart": "22:15",
+          "timezone": "+08:00"
+        }
+      },
+      {
+        "now": 1767225600.5,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:30",
+          "enabled": true,
+          "inactiveStart": "22:15",
+          "timezone": "+08:00"
+        }
+      },
+      {
+        "now": 1767225600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:30",
+          "enabled": true,
+          "inactiveStart": "22:15",
+          "timezone": "+08:00"
+        }
+      },
+      {
+        "now": 1772000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:30",
+          "enabled": true,
+          "inactiveStart": "22:15",
+          "timezone": "+08:00"
+        }
+      },
+      {
+        "now": 1774747800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:30",
+          "enabled": true,
+          "inactiveStart": "22:15",
+          "timezone": "+08:00"
+        }
+      },
+      {
+        "now": 1781524800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:30",
+          "enabled": true,
+          "inactiveStart": "22:15",
+          "timezone": "+08:00"
+        }
+      },
+      {
+        "now": 1785000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:30",
+          "enabled": true,
+          "inactiveStart": "22:15",
+          "timezone": "+08:00"
+        }
+      },
+      {
+        "now": 1792891800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:30",
+          "enabled": true,
+          "inactiveStart": "22:15",
+          "timezone": "+08:00"
+        }
+      },
+      {
+        "now": 1798761600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:30",
+          "enabled": true,
+          "inactiveStart": "22:15",
+          "timezone": "+08:00"
+        }
+      },
+      {
+        "now": 1767225600.5,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:30",
+          "enabled": true,
+          "inactiveStart": "22:15",
+          "timezone": "+08:00"
+        }
+      },
+      {
+        "now": 1767225600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:30",
+          "enabled": true,
+          "inactiveStart": "22:15",
+          "timezone": "+08:00"
+        }
+      },
+      {
+        "now": 1772000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:30",
+          "enabled": true,
+          "inactiveStart": "22:15",
+          "timezone": "+08:00"
+        }
+      },
+      {
+        "now": 1774747800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:30",
+          "enabled": true,
+          "inactiveStart": "22:15",
+          "timezone": "+08:00"
+        }
+      },
+      {
+        "now": 1781524800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:30",
+          "enabled": true,
+          "inactiveStart": "22:15",
+          "timezone": "+08:00"
+        }
+      },
+      {
+        "now": 1785000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:30",
+          "enabled": true,
+          "inactiveStart": "22:15",
+          "timezone": "+08:00"
+        }
+      },
+      {
+        "now": 1792891800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:30",
+          "enabled": true,
+          "inactiveStart": "22:15",
+          "timezone": "+08:00"
+        }
+      },
+      {
+        "now": 1798761600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:30",
+          "enabled": true,
+          "inactiveStart": "22:15",
+          "timezone": "+08:00"
+        }
+      },
+      {
+        "now": 1767225600.5,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:30",
+          "enabled": true,
+          "inactiveStart": "22:15",
+          "timezone": "+08:00"
+        }
+      },
+      {
+        "now": 1767225600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "00:00",
+          "enabled": true,
+          "inactiveStart": "23:59",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1772000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "00:00",
+          "enabled": true,
+          "inactiveStart": "23:59",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1774747800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "00:00",
+          "enabled": true,
+          "inactiveStart": "23:59",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781524800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "00:00",
+          "enabled": true,
+          "inactiveStart": "23:59",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1785000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "00:00",
+          "enabled": true,
+          "inactiveStart": "23:59",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1792891800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "00:00",
+          "enabled": true,
+          "inactiveStart": "23:59",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1798761600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "00:00",
+          "enabled": true,
+          "inactiveStart": "23:59",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1767225600.5,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "00:00",
+          "enabled": true,
+          "inactiveStart": "23:59",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1767225600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "00:00",
+          "enabled": true,
+          "inactiveStart": "23:59",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1772000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "00:00",
+          "enabled": true,
+          "inactiveStart": "23:59",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1774747800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "00:00",
+          "enabled": true,
+          "inactiveStart": "23:59",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781524800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "00:00",
+          "enabled": true,
+          "inactiveStart": "23:59",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1785000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "00:00",
+          "enabled": true,
+          "inactiveStart": "23:59",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1792891800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "00:00",
+          "enabled": true,
+          "inactiveStart": "23:59",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1798761600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "00:00",
+          "enabled": true,
+          "inactiveStart": "23:59",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1767225600.5,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "00:00",
+          "enabled": true,
+          "inactiveStart": "23:59",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1767225600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "00:00",
+          "enabled": true,
+          "inactiveStart": "23:59",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1772000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "00:00",
+          "enabled": true,
+          "inactiveStart": "23:59",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1774747800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "00:00",
+          "enabled": true,
+          "inactiveStart": "23:59",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781524800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "00:00",
+          "enabled": true,
+          "inactiveStart": "23:59",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1785000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "00:00",
+          "enabled": true,
+          "inactiveStart": "23:59",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1792891800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "00:00",
+          "enabled": true,
+          "inactiveStart": "23:59",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1798761600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "00:00",
+          "enabled": true,
+          "inactiveStart": "23:59",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1767225600.5,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "00:00",
+          "enabled": true,
+          "inactiveStart": "23:59",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1767225600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": false,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1772000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": false,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1774747800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": false,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1781524800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": false,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1785000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": false,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1792891800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": false,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1798761600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": false,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1767225600.5,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": false,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1767225600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": false,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1772000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": false,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1774747800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": false,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1781524800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": false,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1785000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": false,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1792891800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": false,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1798761600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": false,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1767225600.5,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": false,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1767225600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": false,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1772000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": false,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1774747800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": false,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1781524800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": false,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1785000000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": false,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1792891800.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": false,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1798761600.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": false,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1767225600.5,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": false,
+          "inactiveStart": "23:00",
+          "timezone": "Europe/Stockholm"
+        }
+      },
+      {
+        "now": 1781478000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781479620.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781481240.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781482860.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781484480.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781486100.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781487720.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781489340.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781490960.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781492580.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781494200.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781495820.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781497440.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781499060.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781500680.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781502300.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781503920.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781505540.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781507160.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781508780.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781510400.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.02,
+          "dayProbability": 0.85,
+          "edgeProbability": 0.65,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.22
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781478000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781479620.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781481240.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781482860.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781484480.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781486100.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781487720.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781489340.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781490960.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781492580.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781494200.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781495820.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781497440.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781499060.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781500680.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781502300.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781503920.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781505540.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781507160.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781508780.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781510400.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.1,
+          "dayProbability": 0.9,
+          "edgeProbability": 0.5,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 0.05
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781478000.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781479620.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781481240.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781482860.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781484480.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781486100.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781487720.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781489340.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781490960.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781492580.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781494200.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781495820.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781497440.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781499060.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781500680.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781502300.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781503920.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781505540.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781507160.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781508780.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      },
+      {
+        "now": 1781510400.0,
+        "rhythm": {
+          "activeMaxSeconds": 1200.0,
+          "activeMinSeconds": 300.0,
+          "centerProbability": 0.0,
+          "dayProbability": 0.8,
+          "edgeProbability": 0.7,
+          "enabled": true,
+          "restMaxSeconds": 2400.0,
+          "restMinSeconds": 600.0,
+          "sigma": 1.0
+        },
+        "schedule": {
+          "activeStart": "08:00",
+          "enabled": true,
+          "inactiveStart": "23:00",
+          "timezone": "UTC"
+        }
+      }
+    ],
+    "case": "activity_probability_matches_javascript_within_a_tiny_tolerance-0"
+  }
+]

@@ -1,7 +1,9 @@
 //! `prompts.rs` 与 `src/prompts.mjs` 的逐字一致性测试。
 //!
 //! 提示词是**行为的一部分**:改一个字就可能改变模型输出。因此 Rust 侧的常量由脚本从 JS
-//! 生成,并由这里的测试保证它不会悄悄漂移。Node 不可用时跳过。
+//! 生成,并由这里的测试保证它不会悄悄漂移。期望值来自已捕获的 JSON 固化金标准，缺失即失败。
+#[path = "golden/mod.rs"]
+mod golden;
 use qq_inner_core::prompts::{
     articulation_for, articulation_for_with_rules, compose_prompt, ReplyLanguage, ARTICULATION,
     BOUNDARY, EVALUATION, FORECAST, FORMATION, IDENTITY, ORIENTATION, OUTPUT_CONTRACT, RULES,
@@ -9,10 +11,11 @@ use qq_inner_core::prompts::{
 use serde_json::Value;
 
 #[test]
-fn every_prompt_constant_matches_the_frozen_javascript_source() {
-    // 期望值固化自 2026-10-05 的 JS 源(src/prompts.mjs + orientation.mjs),不再依赖 node。
-    let js: Value =
-        serde_json::from_str(include_str!("golden/prompts.json")).expect("frozen golden");
+fn every_prompt_constant_matches_the_javascript_source() {
+    let js = golden::expected(
+        include_str!("golden/prompts.json"),
+        &serde_json::json!(["auto", "zh-CN", "en"]),
+    );
 
     let text = |key: &str| js[key].as_str().expect("string field");
     assert_eq!(

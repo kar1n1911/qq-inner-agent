@@ -1,7 +1,9 @@
 //! `sending.rs` 与 `src/sending.mjs` 的一致性测试。
 //!
-//! 硬编码的期望值是用**真实的 JS 实现**跑出来后记录在这里的；另外还有一个直接调用
-//! Node 的交叉验证测试（Node 不可用时跳过），用来覆盖参数矩阵而不必逐个抄写。
+//! 期望值是用**真实的 JS 实现**跑出来后记录在这里的；
+//! JSON 固化金标准覆盖完整参数矩阵，运行测试无需 Node。
+#[path = "golden/mod.rs"]
+mod golden;
 use qq_inner_core::sending::{
     forecast_result, sending_probability, Forecast, Outcomes, ResponseMode, SendingSettings,
     Timing, Veto,
@@ -178,9 +180,9 @@ fn a_plan_of_exactly_four_hundred_units_is_accepted() {
     assert!(forecast_result(&value).is_ok());
 }
 
-/// 参数矩阵的期望值固化自 JS,逐位比较概率与因子,不再依赖 node。
+/// 对捕获的完整参数矩阵逐位比较概率与因子。
 #[test]
-fn probability_matches_the_frozen_parameter_matrix() {
+fn probability_matches_golden_across_a_parameter_matrix() {
     let settings = settings();
     let mut cases: Vec<Value> = Vec::new();
     let mut expected_inputs: Vec<(Timing, Forecast)> = Vec::new();
@@ -205,11 +207,12 @@ fn probability_matches_the_frozen_parameter_matrix() {
         }
     }
 
-    // 传二进制位而不是十进制：serde_json 解析某些十进制浮点会差 1 ULP
-    //（例如 "0.0012000000000000001"），那会让"逐位一致"的断言出现假失败。
-    // 期望值固化自 JS 的参数矩阵(1920 用例,二进制位表示),不再依赖 node。
-    let js: Vec<Value> =
-        serde_json::from_str(include_str!("golden/sending.json")).expect("frozen golden");
+    // 固化金标准以 IEEE-754 位保存，纯四则运算仍逐位比较，避免十进制解析引入 ULP。
+    let js: Vec<Value> = serde_json::from_value(golden::expected(
+        include_str!("golden/sending.json"),
+        &json!(cases),
+    ))
+    .unwrap();
 
     assert_eq!(js.len(), expected_inputs.len());
     for (index, ((t, f), expected)) in expected_inputs.iter().zip(js.iter()).enumerate() {

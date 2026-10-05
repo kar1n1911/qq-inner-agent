@@ -4,21 +4,11 @@
 //! 同一个 `exp` 输入的结果可以差若干 ULP（实测约 8 ULP，量级 1e-17）。纯 `+ - * /` 的
 //! 计算可以逐位对齐（见 `sending_parity.rs`），超越函数不行。因此这里用 1e-12 的绝对容差 ——
 //! 比任何行为上有意义的差异都小好几个数量级。
+#[path = "golden/mod.rs"]
+mod golden;
 use qq_inner_core::activity::activity_probability;
 use qq_inner_core::config::{Rhythm, Schedule};
 use serde_json::{json, Value};
-use std::fs;
-use std::process::Command;
-use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
-
-static SEQ: AtomicUsize = AtomicUsize::new(0);
-
-fn node_available() -> bool {
-    Command::new("node")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
 
 fn schedule(enabled: bool, active_start: &str, inactive_start: &str, timezone: &str) -> Schedule {
     Schedule {
@@ -91,10 +81,6 @@ fn cases() -> Vec<(f64, Schedule, Rhythm)> {
 
 #[test]
 fn activity_probability_matches_javascript_within_a_tiny_tolerance() {
-    if !node_available() {
-        eprintln!("SKIP: node unavailable");
-        return;
-    }
     let cases = cases();
     let payload: Vec<Value> = cases
         .iter()
@@ -103,39 +89,12 @@ fn activity_probability_matches_javascript_within_a_tiny_tolerance() {
         )
         .collect();
 
-    let script = r#"
-import { activityProbability } from './src/activity.mjs';
-import { readFileSync } from 'node:fs';
-const cases = JSON.parse(readFileSync(process.argv[1], 'utf8'));
-// 用 IEEE-754 位传回，避免 serde_json 十进制解析额外引入 1 ULP。
-const bits = n => { const b = Buffer.alloc(8); b.writeDoubleBE(n); return b.toString('hex'); };
-process.stdout.write(JSON.stringify(cases.map(c => bits(activityProbability(c.now, c.schedule, c.rhythm)))));
-"#;
-    let dir = std::env::temp_dir().join(format!(
-        "qq-inner-activity-{}-{}",
-        std::process::id(),
-        SEQ.fetch_add(1, AtomicOrdering::Relaxed)
-    ));
-    fs::create_dir_all(&dir).expect("create temp dir");
-    let payload_file = dir.join("cases.json");
-    fs::write(&payload_file, serde_json::to_string(&payload).unwrap()).unwrap();
-    let out = Command::new("node")
-        .args(["--input-type=module", "-e", script])
-        .arg(&payload_file)
-        .current_dir(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .unwrap(),
-        )
-        .output()
-        .expect("run node");
-    let _ = fs::remove_dir_all(&dir);
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let js: Vec<Value> = serde_json::from_slice(&out.stdout).expect("node output");
+    // 固化金标准保留原 oracle 的 IEEE-754 十六进制位；exp 仍按原 1e-12 容差比较。
+    let js: Vec<Value> = serde_json::from_value(golden::expected(
+        include_str!("golden/activity.json"),
+        &json!(payload),
+    ))
+    .unwrap();
     assert_eq!(js.len(), cases.len());
 
     for (index, (now, schedule, rhythm)) in cases.iter().enumerate() {

@@ -1,0 +1,5693 @@
+[
+  {
+    "expected": [
+      {
+        "chat": "group:10",
+        "hint": "self",
+        "id": "123",
+        "name": "群名片",
+        "self": false,
+        "sender": "20",
+        "text": [
+          91,
+          64,
+          57,
+          57,
+          93,
+          32,
+          20320,
+          22909
+        ],
+        "ts": 1000
+      },
+      {
+        "chat": "group:10",
+        "hint": "self",
+        "id": "123",
+        "name": "群名片",
+        "self": false,
+        "sender": "20",
+        "text": [
+          91,
+          64,
+          57,
+          57,
+          93,
+          32,
+          20320,
+          22909
+        ],
+        "ts": 1000
+      },
+      {
+        "chat": "group:10",
+        "hint": "other",
+        "id": "123",
+        "name": "群名片",
+        "self": false,
+        "sender": "20",
+        "text": [
+          91,
+          64,
+          51,
+          48,
+          93,
+          32,
+          20320,
+          22909
+        ],
+        "ts": 1000
+      },
+      {
+        "chat": "group:10",
+        "hint": "other",
+        "id": "123",
+        "name": "群名片",
+        "self": false,
+        "sender": "20",
+        "text": [
+          91,
+          64,
+          51,
+          48,
+          93,
+          32,
+          20320,
+          22909
+        ],
+        "ts": 1000
+      },
+      {
+        "chat": "group:10",
+        "hint": "open",
+        "id": "123",
+        "name": "群名片",
+        "self": false,
+        "sender": "20",
+        "text": [
+          91,
+          64,
+          97,
+          108,
+          108,
+          93,
+          32,
+          20320,
+          22909
+        ],
+        "ts": 1000
+      },
+      {
+        "chat": "group:10",
+        "hint": "open",
+        "id": "123",
+        "name": "群名片",
+        "self": false,
+        "sender": "20",
+        "text": [
+          91,
+          64,
+          97,
+          108,
+          108,
+          93,
+          32,
+          20320,
+          22909
+        ],
+        "ts": 1000
+      },
+      {
+        "chat": "group:10",
+        "hint": "open",
+        "id": "123",
+        "name": "群名片",
+        "self": false,
+        "sender": "20",
+        "text": [
+          91,
+          81,
+          81,
+          102,
+          97,
+          99,
+          101,
+          58,
+          49,
+          50,
+          51,
+          93,
+          32,
+          32,
+          91,
+          114,
+          101,
+          112,
+          108,
+          121,
+          93,
+          32,
+          32,
+          91,
+          105,
+          109,
+          97,
+          103,
+          101,
+          93,
+          32,
+          32,
+          91,
+          102,
+          97,
+          99,
+          101,
+          93,
+          32,
+          32,
+          91,
+          97,
+          116,
+          116,
+          97,
+          99,
+          104,
+          109,
+          101,
+          110,
+          116,
+          93
+        ],
+        "ts": 1000
+      },
+      {
+        "chat": "group:10",
+        "hint": "open",
+        "id": "123",
+        "name": "群名片",
+        "self": false,
+        "sender": "20",
+        "text": [
+          91,
+          81,
+          81,
+          102,
+          97,
+          99,
+          101,
+          58,
+          49,
+          50,
+          51,
+          93,
+          91,
+          97,
+          116,
+          116,
+          97,
+          99,
+          104,
+          109,
+          101,
+          110,
+          116,
+          93,
+          91,
+          97,
+          116,
+          116,
+          97,
+          99,
+          104,
+          109,
+          101,
+          110,
+          116,
+          93,
+          91,
+          97,
+          116,
+          116,
+          97,
+          99,
+          104,
+          109,
+          101,
+          110,
+          116,
+          93
+        ],
+        "ts": 1000
+      },
+      {
+        "chat": "group:10",
+        "hint": "self",
+        "id": "123",
+        "name": "群名片",
+        "self": false,
+        "sender": "20",
+        "text": [
+          91,
+          64,
+          51,
+          48,
+          93,
+          32,
+          32,
+          91,
+          64,
+          57,
+          57,
+          93
+        ],
+        "ts": 1000
+      },
+      {
+        "chat": "group:10",
+        "hint": "open",
+        "id": "123",
+        "name": "群名片",
+        "self": false,
+        "sender": "20",
+        "text": [
+          38,
+          35,
+          57,
+          49,
+          59,
+          38,
+          97,
+          109,
+          112,
+          59
+        ],
+        "ts": 1000
+      },
+      {
+        "chat": "group:10",
+        "hint": "open",
+        "id": "123",
+        "name": "群名片",
+        "self": false,
+        "sender": "20",
+        "text": [
+          44,
+          91,
+          93,
+          38,
+          124,
+          38,
+          35,
+          52,
+          52,
+          59,
+          38,
+          35,
+          57,
+          49,
+          59,
+          38,
+          35,
+          57,
+          51,
+          59,
+          38,
+          97,
+          109,
+          112,
+          59,
+          124,
+          91,
+          67,
+          81,
+          58,
+          97,
+          116,
+          44,
+          113,
+          113,
+          61,
+          57,
+          57,
+          93
+        ],
+        "ts": 1000
+      },
+      null,
+      null,
+      null,
+      null,
+      {
+        "chat": "group:10",
+        "hint": "open",
+        "id": "123",
+        "name": "群名片",
+        "self": false,
+        "sender": "20",
+        "text": [
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002
+        ],
+        "ts": 1000
+      },
+      {
+        "chat": "group:10",
+        "hint": "open",
+        "id": "123",
+        "name": "群名片",
+        "self": false,
+        "sender": "20",
+        "text": [
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002
+        ],
+        "ts": 1000
+      },
+      {
+        "chat": "group:10",
+        "hint": "open",
+        "id": "123",
+        "name": "群名片",
+        "self": false,
+        "sender": "20",
+        "text": [
+          20320,
+          22909,
+          55357,
+          56832
+        ],
+        "ts": 1000
+      },
+      {
+        "chat": "group:10",
+        "hint": "self",
+        "id": "123",
+        "name": "群名片",
+        "self": false,
+        "sender": "20",
+        "text": [
+          98,
+          79,
+          84,
+          58,
+          20320,
+          22909
+        ],
+        "ts": 1000
+      },
+      {
+        "chat": "group:10",
+        "hint": "self",
+        "id": "123",
+        "name": "群名片",
+        "self": false,
+        "sender": "20",
+        "text": [
+          66,
+          79,
+          84,
+          65306,
+          20320,
+          22909
+        ],
+        "ts": 1000
+      },
+      {
+        "chat": "group:10",
+        "hint": "self",
+        "id": "123",
+        "name": "群名片",
+        "self": false,
+        "sender": "20",
+        "text": [
+          64,
+          98,
+          111,
+          116,
+          32,
+          20320,
+          22909
+        ],
+        "ts": 1000
+      },
+      {
+        "chat": "group:10",
+        "hint": "open",
+        "id": "123",
+        "name": "群名片",
+        "self": false,
+        "sender": "20",
+        "text": [
+          20320,
+          22909,
+          32,
+          66,
+          111,
+          116,
+          58,
+          20320,
+          22909
+        ],
+        "ts": 1000
+      },
+      {
+        "chat": "group:10",
+        "hint": "open",
+        "id": "123",
+        "name": "群名片",
+        "self": false,
+        "sender": "20",
+        "text": [
+          64,
+          66,
+          111,
+          116,
+          20320,
+          22909
+        ],
+        "ts": 1000
+      },
+      null,
+      null,
+      {
+        "chat": "private:20",
+        "hint": "self",
+        "id": "123",
+        "name": "群名片",
+        "self": false,
+        "sender": "20",
+        "text": [
+          20320,
+          22909
+        ],
+        "ts": 1000
+      },
+      null,
+      null,
+      null,
+      null,
+      null,
+      {
+        "chat": "group:10",
+        "hint": "open",
+        "id": "0",
+        "name": "群名片",
+        "self": false,
+        "sender": "20",
+        "text": [
+          20320,
+          22909
+        ],
+        "ts": 1000
+      },
+      null,
+      null,
+      null,
+      {
+        "chat": "group:10",
+        "hint": "open",
+        "id": "123",
+        "name": "群名片",
+        "self": false,
+        "sender": "20",
+        "text": [
+          20320,
+          22909
+        ],
+        "ts": 900
+      },
+      null,
+      {
+        "chat": "group:10",
+        "hint": "open",
+        "id": "123",
+        "name": "群名片",
+        "self": false,
+        "sender": "20",
+        "text": [
+          20320,
+          22909
+        ],
+        "ts": 1000
+      },
+      null,
+      null,
+      {
+        "chat": "group:10",
+        "hint": "open",
+        "id": "123",
+        "name": "群名片",
+        "self": false,
+        "sender": "20",
+        "text": [
+          20320,
+          22909
+        ],
+        "ts": 1000
+      },
+      {
+        "chat": "group:10",
+        "hint": "open",
+        "id": "123",
+        "name": "群名片",
+        "self": false,
+        "sender": "20",
+        "text": [
+          20320,
+          22909
+        ],
+        "ts": 950
+      },
+      null
+    ],
+    "input": {
+      "cases": [
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": [
+              {
+                "data": {
+                  "qq": "99"
+                },
+                "type": "at"
+              },
+              {
+                "data": {
+                  "text": "你好"
+                },
+                "type": "text"
+              }
+            ],
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "array at self",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "[CQ:at,qq=99,name=x]你好",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "CQ at self",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": [
+              {
+                "data": {
+                  "qq": "30"
+                },
+                "type": "at"
+              },
+              {
+                "data": {
+                  "text": "你好"
+                },
+                "type": "text"
+              }
+            ],
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "array at other",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "[CQ:at,qq=30,name=x]你好",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "CQ at other",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": [
+              {
+                "data": {
+                  "qq": "all"
+                },
+                "type": "at"
+              },
+              {
+                "data": {
+                  "text": "你好"
+                },
+                "type": "text"
+              }
+            ],
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "array at open",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "[CQ:at,qq=all,name=x]你好",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "CQ at open",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": [
+              {
+                "data": {
+                  "id": "123"
+                },
+                "type": "face"
+              },
+              {
+                "data": {
+                  "id": 1
+                },
+                "type": "reply"
+              },
+              {
+                "data": {
+                  "url": "secret"
+                },
+                "type": "image"
+              },
+              {
+                "data": {
+                  "id": "123456"
+                },
+                "type": "face"
+              },
+              {
+                "data": {}
+              }
+            ],
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "array markers",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "[CQ:face,id=123][CQ:reply,id=1][CQ:image,url=secret][CQ:face,id=123456]",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "CQ markers",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "[CQ:at,qq=30][CQ:at,qq=99]",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "self wins",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": [
+              {
+                "data": {
+                  "text": " &#91;&amp; "
+                },
+                "type": "text"
+              }
+            ],
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "array plain",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "&#44;&#91;&#93;&amp;|&amp;#44;&amp;#91;&amp;#93;&amp;amp;|&#91;CQ:at,qq=99&#93;",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "entities",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "empty string",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": " \n\t﻿",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "whitespace",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": [],
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "empty array",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": null,
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "missing message",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "long BMP string",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": [
+              {
+                "data": {
+                  "text": "甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲"
+                },
+                "type": "text"
+              }
+            ],
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "long BMP array",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "你好😀",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "emoji within bound",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "bOT:你好",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "alias colon",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "BOT：你好",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "alias full colon",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "@bot 你好",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "alias mention",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "你好 Bot:你好",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "alias not prefix",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "@Bot你好",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "alias missing space",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 11,
+            "message": "你好",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "not allowed group",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "你好",
+            "message_id": 123,
+            "message_type": "private",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 30
+          },
+          "label": "not allowed private",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "你好",
+            "message_id": 123,
+            "message_type": "private",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "private",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "你好",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 21
+          },
+          "label": "ignored",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "你好",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 99
+          },
+          "label": "self",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "你好",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 98,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "wrong self_id",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "你好",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 0
+          },
+          "label": "no sender",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "你好",
+            "message_id": null,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "no message id",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "你好",
+            "message_id": 0,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "zero message id",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "你好",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "notice",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "not message",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "你好",
+            "message_id": 123,
+            "message_type": "other",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "invalid kind",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "你好",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 899,
+            "user_id": 20
+          },
+          "label": "too old",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "你好",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 900,
+            "user_id": 20
+          },
+          "label": "old boundary",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "你好",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1061,
+            "user_id": 20
+          },
+          "label": "too future",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "你好",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1060,
+            "user_id": 20
+          },
+          "label": "future boundary",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "你好",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": "NaN",
+            "user_id": 20
+          },
+          "label": "nan time",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "你好",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": "Infinity",
+            "user_id": 20
+          },
+          "label": "infinite time",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "你好",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 0,
+            "user_id": 20
+          },
+          "label": "zero time fallback",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "你好",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": "950",
+            "user_id": 20
+          },
+          "label": "string time",
+          "now": 1000,
+          "selfId": "99"
+        },
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "你好",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "empty self id",
+          "now": 1000,
+          "selfId": ""
+        }
+      ],
+      "kind": "normalize"
+    },
+    "case": "normalize_matrix_matches_real_js-0"
+  },
+  {
+    "expected": [
+      {
+        "chat": "group:10",
+        "hint": "open",
+        "id": "123",
+        "name": "群名片",
+        "self": false,
+        "sender": "20",
+        "text": [
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          55357
+        ],
+        "ts": 1000
+      }
+    ],
+    "input": {
+      "cases": [
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": "甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲😀尾",
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "surrogate split",
+          "now": 1000,
+          "selfId": "99"
+        }
+      ],
+      "kind": "normalize"
+    },
+    "case": "normalize_char_truncation_explicitly_differs_from_js_utf16-0"
+  },
+  {
+    "expected": [
+      {
+        "chat": "group:10",
+        "hint": "open",
+        "id": "123",
+        "name": "群名片",
+        "self": false,
+        "sender": "20",
+        "text": [
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          30002,
+          55357
+        ],
+        "ts": 1000
+      }
+    ],
+    "input": {
+      "cases": [
+        {
+          "agent": {
+            "activeWindowSeconds": 100,
+            "aliases": [
+              "Bot"
+            ],
+            "allowedGroups": [
+              "10"
+            ],
+            "allowedUsers": [
+              "20"
+            ],
+            "ignoredUsers": [
+              "21"
+            ],
+            "maxInputChars": 100
+          },
+          "event": {
+            "group_id": 10,
+            "message": [
+              {
+                "data": {
+                  "text": "甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲甲😀尾"
+                },
+                "type": "text"
+              }
+            ],
+            "message_id": 123,
+            "message_type": "group",
+            "post_type": "message",
+            "self_id": 99,
+            "sender": {
+              "card": "群名片",
+              "nickname": "昵称"
+            },
+            "time": 1000,
+            "user_id": 20
+          },
+          "label": "surrogate split",
+          "now": 1000,
+          "selfId": "99"
+        }
+      ],
+      "kind": "normalize"
+    },
+    "case": "normalize_char_truncation_explicitly_differs_from_js_utf16-1"
+  },
+  {
+    "expected": [
+      {
+        "draws": 2,
+        "row": {
+          "active": 1,
+          "draw": 0,
+          "id": 1,
+          "probability": 0.5,
+          "signature": "[{\"enabled\":false,\"activeStart\":\"08:00\",\"inactiveStart\":\"23:00\",\"timezone\":\"UTC\"},{\"enabled\":true,\"dayProbability\":0.5,\"edgeProbability\":0.65,\"centerProbability\":0.02,\"sigma\":0.22,\"activeMinSeconds\":30,\"activeMaxSeconds\":40,\"restMinSeconds\":50,\"restMaxSeconds\":60}]",
+          "started": 1000,
+          "until": 1030
+        },
+        "snapshot": {
+          "active": true,
+          "currentProbability": 0.5,
+          "draw": 0,
+          "enabled": true,
+          "probability": 0.5,
+          "started": 1000,
+          "until": 1030
+        }
+      },
+      {
+        "draws": 0,
+        "row": {
+          "active": 1,
+          "draw": 0,
+          "id": 1,
+          "probability": 0.5,
+          "signature": "[{\"enabled\":false,\"activeStart\":\"08:00\",\"inactiveStart\":\"23:00\",\"timezone\":\"UTC\"},{\"enabled\":true,\"dayProbability\":0.5,\"edgeProbability\":0.65,\"centerProbability\":0.02,\"sigma\":0.22,\"activeMinSeconds\":30,\"activeMaxSeconds\":40,\"restMinSeconds\":50,\"restMaxSeconds\":60}]",
+          "started": 1000,
+          "until": 1030
+        },
+        "snapshot": {
+          "active": true,
+          "currentProbability": 0.5,
+          "draw": 0,
+          "enabled": true,
+          "probability": 0.5,
+          "started": 1000,
+          "until": 1030
+        }
+      },
+      {
+        "draws": 2,
+        "row": {
+          "active": 1,
+          "draw": 0,
+          "id": 1,
+          "probability": 0.5,
+          "signature": "[{\"enabled\":false,\"activeStart\":\"08:00\",\"inactiveStart\":\"23:00\",\"timezone\":\"UTC\"},{\"enabled\":true,\"dayProbability\":0.5,\"edgeProbability\":0.65,\"centerProbability\":0.02,\"sigma\":0.22,\"activeMinSeconds\":30,\"activeMaxSeconds\":40,\"restMinSeconds\":50,\"restMaxSeconds\":60}]",
+          "started": 1030,
+          "until": 1070
+        },
+        "snapshot": {
+          "active": true,
+          "currentProbability": 0.5,
+          "draw": 0,
+          "enabled": true,
+          "probability": 0.5,
+          "started": 1030,
+          "until": 1070
+        }
+      },
+      {
+        "draws": 2,
+        "row": {
+          "active": 0,
+          "draw": 0.9,
+          "id": 1,
+          "probability": 0.5,
+          "signature": "[{\"enabled\":false,\"activeStart\":\"08:00\",\"inactiveStart\":\"23:00\",\"timezone\":\"UTC\"},{\"enabled\":true,\"dayProbability\":0.5,\"edgeProbability\":0.65,\"centerProbability\":0.02,\"sigma\":0.22,\"activeMinSeconds\":30,\"activeMaxSeconds\":40,\"restMinSeconds\":50,\"restMaxSeconds\":60}]",
+          "started": 1029,
+          "until": 1089
+        },
+        "snapshot": {
+          "active": false,
+          "currentProbability": 0.5,
+          "draw": 0.9,
+          "enabled": true,
+          "probability": 0.5,
+          "started": 1029,
+          "until": 1089
+        }
+      },
+      {
+        "draws": 2,
+        "row": {
+          "active": 1,
+          "draw": 0,
+          "id": 1,
+          "probability": 0.75,
+          "signature": "[{\"enabled\":false,\"activeStart\":\"08:00\",\"inactiveStart\":\"23:00\",\"timezone\":\"UTC\"},{\"enabled\":true,\"dayProbability\":0.75,\"edgeProbability\":0.65,\"centerProbability\":0.02,\"sigma\":0.22,\"activeMinSeconds\":30,\"activeMaxSeconds\":40,\"restMinSeconds\":50,\"restMaxSeconds\":60}]",
+          "started": 1030,
+          "until": 1070
+        },
+        "snapshot": {
+          "active": true,
+          "currentProbability": 0.75,
+          "draw": 0,
+          "enabled": true,
+          "probability": 0.75,
+          "started": 1030,
+          "until": 1070
+        }
+      },
+      {
+        "draws": 2,
+        "row": {
+          "active": 0,
+          "draw": 0.999999,
+          "id": 1,
+          "probability": 0.5189255811373792,
+          "signature": "[{\"enabled\":true,\"activeStart\":\"08:00\",\"inactiveStart\":\"23:00\",\"timezone\":\"UTC\"},{\"enabled\":true,\"dayProbability\":0.75,\"edgeProbability\":0.65,\"centerProbability\":0.02,\"sigma\":0.22,\"activeMinSeconds\":30,\"activeMaxSeconds\":40,\"restMinSeconds\":50,\"restMaxSeconds\":60}]",
+          "started": 1031,
+          "until": 1081
+        },
+        "snapshot": {
+          "active": false,
+          "currentProbability": 0.5189255811373792,
+          "draw": 0.999999,
+          "enabled": true,
+          "probability": 0.5189255811373792,
+          "started": 1031,
+          "until": 1081
+        }
+      },
+      {
+        "draws": 0,
+        "row": {
+          "active": 0,
+          "draw": 0.999999,
+          "id": 1,
+          "probability": 0.5189255811373792,
+          "signature": "[{\"enabled\":true,\"activeStart\":\"08:00\",\"inactiveStart\":\"23:00\",\"timezone\":\"UTC\"},{\"enabled\":true,\"dayProbability\":0.75,\"edgeProbability\":0.65,\"centerProbability\":0.02,\"sigma\":0.22,\"activeMinSeconds\":30,\"activeMaxSeconds\":40,\"restMinSeconds\":50,\"restMaxSeconds\":60}]",
+          "started": 1031,
+          "until": 1081
+        },
+        "snapshot": {
+          "active": true,
+          "enabled": false,
+          "started": null,
+          "until": null
+        }
+      },
+      {
+        "draws": 0,
+        "row": {
+          "active": 0,
+          "draw": 0.999999,
+          "id": 1,
+          "probability": 0.5189255811373792,
+          "signature": "[{\"enabled\":true,\"activeStart\":\"08:00\",\"inactiveStart\":\"23:00\",\"timezone\":\"UTC\"},{\"enabled\":true,\"dayProbability\":0.75,\"edgeProbability\":0.65,\"centerProbability\":0.02,\"sigma\":0.22,\"activeMinSeconds\":30,\"activeMaxSeconds\":40,\"restMinSeconds\":50,\"restMaxSeconds\":60}]",
+          "started": 1031,
+          "until": 1081
+        },
+        "snapshot": {
+          "active": false,
+          "enabled": false,
+          "started": null,
+          "until": null
+        }
+      }
+    ],
+    "input": {
+      "kind": "activity",
+      "steps": [
+        {
+          "agent": {
+            "rhythm": {
+              "activeMaxSeconds": 40,
+              "activeMinSeconds": 30,
+              "dayProbability": 0.5,
+              "enabled": true,
+              "restMaxSeconds": 60,
+              "restMinSeconds": 50
+            },
+            "schedule": {
+              "enabled": false,
+              "timezone": "UTC"
+            }
+          },
+          "draws": [
+            0.0,
+            0.0
+          ],
+          "now": 1000
+        },
+        {
+          "agent": {
+            "rhythm": {
+              "activeMaxSeconds": 40,
+              "activeMinSeconds": 30,
+              "dayProbability": 0.5,
+              "enabled": true,
+              "restMaxSeconds": 60,
+              "restMinSeconds": 50
+            },
+            "schedule": {
+              "enabled": false,
+              "timezone": "UTC"
+            }
+          },
+          "draws": [],
+          "now": 1010
+        },
+        {
+          "agent": {
+            "rhythm": {
+              "activeMaxSeconds": 40,
+              "activeMinSeconds": 30,
+              "dayProbability": 0.5,
+              "enabled": true,
+              "restMaxSeconds": 60,
+              "restMinSeconds": 50
+            },
+            "schedule": {
+              "enabled": false,
+              "timezone": "UTC"
+            }
+          },
+          "draws": [
+            0.0,
+            0.999999
+          ],
+          "now": 1030
+        },
+        {
+          "agent": {
+            "rhythm": {
+              "activeMaxSeconds": 40,
+              "activeMinSeconds": 30,
+              "dayProbability": 0.5,
+              "enabled": true,
+              "restMaxSeconds": 60,
+              "restMinSeconds": 50
+            },
+            "schedule": {
+              "enabled": false,
+              "timezone": "UTC"
+            }
+          },
+          "draws": [
+            0.9,
+            0.999999
+          ],
+          "now": 1029
+        },
+        {
+          "agent": {
+            "rhythm": {
+              "activeMaxSeconds": 40,
+              "activeMinSeconds": 30,
+              "dayProbability": 0.75,
+              "enabled": true,
+              "restMaxSeconds": 60,
+              "restMinSeconds": 50
+            },
+            "schedule": {
+              "enabled": false,
+              "timezone": "UTC"
+            }
+          },
+          "draws": [
+            0.0,
+            0.999999
+          ],
+          "now": 1030
+        },
+        {
+          "agent": {
+            "rhythm": {
+              "activeMaxSeconds": 40,
+              "activeMinSeconds": 30,
+              "dayProbability": 0.75,
+              "enabled": true,
+              "restMaxSeconds": 60,
+              "restMinSeconds": 50
+            },
+            "schedule": {
+              "enabled": true,
+              "timezone": "UTC"
+            }
+          },
+          "draws": [
+            0.999999,
+            0.0
+          ],
+          "now": 1031
+        },
+        {
+          "agent": {
+            "rhythm": {
+              "activeMaxSeconds": 40,
+              "activeMinSeconds": 30,
+              "dayProbability": 0.75,
+              "enabled": false,
+              "restMaxSeconds": 60,
+              "restMinSeconds": 50
+            },
+            "schedule": {
+              "enabled": true,
+              "timezone": "UTC"
+            }
+          },
+          "draws": [],
+          "now": 43200
+        },
+        {
+          "agent": {
+            "rhythm": {
+              "activeMaxSeconds": 40,
+              "activeMinSeconds": 30,
+              "dayProbability": 0.75,
+              "enabled": false,
+              "restMaxSeconds": 60,
+              "restMinSeconds": 50
+            },
+            "schedule": {
+              "enabled": true,
+              "timezone": "UTC"
+            }
+          },
+          "draws": [],
+          "now": 0
+        }
+      ]
+    },
+    "case": "activity_persistence_redraw_and_disabled_fallback_match_js-0"
+  },
+  {
+    "expected": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ],
+    "input": {
+      "cases": [
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 999.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 0,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 999.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 1,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 999.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 2,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 999.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 3,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 1029.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 0,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 1029.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 1,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 1029.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 2,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 1029.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 3,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 1030.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 0,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 1030.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 1,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 1030.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 2,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 1030.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 3,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 1031.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 0,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 1031.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 1,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 1031.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 2,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 1031.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 3,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 999.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 0,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 999.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 1,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 999.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 2,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 999.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 3,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 1029.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 0,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 1029.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 1,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 1029.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 2,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 1029.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 3,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 1030.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 0,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 1030.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 1,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 1030.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 2,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 1030.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 3,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 1031.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 0,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 1031.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 1,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 1031.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 2,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": true,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 1031.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 3,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 999.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 0,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 999.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 1,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 999.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 2,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 999.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 3,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 1029.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 0,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 1029.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 1,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 1029.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 2,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 1029.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 3,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 1030.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 0,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 1030.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 1,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 1030.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 2,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 1030.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 3,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 1031.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 0,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 1031.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 1,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 1031.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 2,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "both"
+          },
+          "now": 1031.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 3,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 999.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 0,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 999.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 1,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 999.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 2,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 999.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 3,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 1029.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 0,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 1029.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 1,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 1029.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 2,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 1029.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 3,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 1030.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 0,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 1030.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 1,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 1030.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 2,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 1030.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 3,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 1031.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 0,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 1031.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 1,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 1031.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 2,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        },
+        {
+          "config": {
+            "enabled": false,
+            "historyLimit": 30.0,
+            "minMessages": 2.0,
+            "minSeconds": 30.0,
+            "thresholdMode": "either"
+          },
+          "now": 1031.0,
+          "row": {
+            "analysis": {},
+            "chat": "group:10",
+            "collected": 0,
+            "epoch": 0,
+            "error": null,
+            "joined_at": 0.0,
+            "message_count": 3,
+            "retry_at": 0.0,
+            "sources": {},
+            "started": 1000.0,
+            "status": "observing"
+          }
+        }
+      ],
+      "kind": "threshold"
+    },
+    "case": "observation_threshold_boundaries_match_js_including_disabled_config-0"
+  },
+  {
+    "expected": [
+      {
+        "calls": 0,
+        "gate": null,
+        "profile": null,
+        "reads": 0,
+        "row": {
+          "analysis": {},
+          "chat": "group:10",
+          "collected": 0,
+          "epoch": 0,
+          "error": null,
+          "joined_at": 0,
+          "message_count": 1,
+          "retry_at": 0,
+          "sources": {},
+          "started": 1000,
+          "status": "observing"
+        }
+      },
+      {
+        "calls": 0,
+        "gate": false,
+        "profile": null,
+        "reads": 3,
+        "row": {
+          "analysis": {},
+          "chat": "group:10",
+          "collected": 1,
+          "epoch": 0,
+          "error": null,
+          "joined_at": 0,
+          "message_count": 1,
+          "retry_at": 0,
+          "sources": {
+            "availability": {
+              "history": "unavailable",
+              "info": "available",
+              "notices": "unavailable"
+            },
+            "info": {
+              "description": "",
+              "memberCount": null,
+              "name": "园艺群"
+            }
+          },
+          "started": 1000,
+          "status": "observing"
+        }
+      },
+      {
+        "calls": 0,
+        "gate": null,
+        "profile": null,
+        "reads": 3,
+        "row": {
+          "analysis": {},
+          "chat": "group:10",
+          "collected": 1,
+          "epoch": 0,
+          "error": null,
+          "joined_at": 0,
+          "message_count": 2,
+          "retry_at": 0,
+          "sources": {
+            "availability": {
+              "history": "unavailable",
+              "info": "available",
+              "notices": "unavailable"
+            },
+            "info": {
+              "description": "",
+              "memberCount": null,
+              "name": "园艺群"
+            }
+          },
+          "started": 1000,
+          "status": "observing"
+        }
+      },
+      {
+        "calls": 0,
+        "gate": false,
+        "profile": null,
+        "reads": 3,
+        "row": {
+          "analysis": {},
+          "chat": "group:10",
+          "collected": 1,
+          "epoch": 0,
+          "error": null,
+          "joined_at": 0,
+          "message_count": 2,
+          "retry_at": 0,
+          "sources": {
+            "availability": {
+              "history": "unavailable",
+              "info": "available",
+              "notices": "unavailable"
+            },
+            "info": {
+              "description": "",
+              "memberCount": null,
+              "name": "园艺群"
+            }
+          },
+          "started": 1000,
+          "status": "observing"
+        }
+      },
+      {
+        "calls": 1,
+        "gate": true,
+        "profile": {
+          "analyzedAt": 1030,
+          "analyzedMessages": 2,
+          "sources": {
+            "history": "unavailable",
+            "info": "available",
+            "notices": "unavailable"
+          },
+          "style": "谨慎接话",
+          "summary": "园艺讨论",
+          "topics": [
+            "园艺"
+          ]
+        },
+        "reads": 3,
+        "row": {
+          "analysis": {
+            "analyzedAt": 1030,
+            "analyzedMessages": 2,
+            "style": "谨慎接话",
+            "summary": "园艺讨论",
+            "topics": [
+              "园艺"
+            ]
+          },
+          "chat": "group:10",
+          "collected": 1,
+          "epoch": 0,
+          "error": null,
+          "joined_at": 0,
+          "message_count": 2,
+          "retry_at": 0,
+          "sources": {
+            "availability": {
+              "history": "unavailable",
+              "info": "available",
+              "notices": "unavailable"
+            },
+            "info": {
+              "description": "",
+              "memberCount": null,
+              "name": "园艺群"
+            }
+          },
+          "started": 1000,
+          "status": "ready"
+        }
+      },
+      {
+        "calls": 1,
+        "gate": true,
+        "profile": {
+          "analyzedAt": 1030,
+          "analyzedMessages": 2,
+          "sources": {
+            "history": "unavailable",
+            "info": "available",
+            "notices": "unavailable"
+          },
+          "style": "谨慎接话",
+          "summary": "园艺讨论",
+          "topics": [
+            "园艺"
+          ]
+        },
+        "reads": 3,
+        "row": {
+          "analysis": {
+            "analyzedAt": 1030,
+            "analyzedMessages": 2,
+            "style": "谨慎接话",
+            "summary": "园艺讨论",
+            "topics": [
+              "园艺"
+            ]
+          },
+          "chat": "group:10",
+          "collected": 1,
+          "epoch": 0,
+          "error": null,
+          "joined_at": 0,
+          "message_count": 2,
+          "retry_at": 0,
+          "sources": {
+            "availability": {
+              "history": "unavailable",
+              "info": "available",
+              "notices": "unavailable"
+            },
+            "info": {
+              "description": "",
+              "memberCount": null,
+              "name": "园艺群"
+            }
+          },
+          "started": 1000,
+          "status": "ready"
+        }
+      },
+      {
+        "calls": 1,
+        "gate": null,
+        "profile": {
+          "analyzedAt": 1030,
+          "analyzedMessages": 2,
+          "sources": {
+            "history": "unavailable",
+            "info": "available",
+            "notices": "unavailable"
+          },
+          "style": "谨慎接话",
+          "summary": "园艺讨论",
+          "topics": [
+            "园艺"
+          ]
+        },
+        "reads": 3,
+        "row": {
+          "analysis": {
+            "analyzedAt": 1030,
+            "analyzedMessages": 2,
+            "style": "谨慎接话",
+            "summary": "园艺讨论",
+            "topics": [
+              "园艺"
+            ]
+          },
+          "chat": "group:10",
+          "collected": 1,
+          "epoch": 0,
+          "error": null,
+          "joined_at": 0,
+          "message_count": 2,
+          "retry_at": 0,
+          "sources": {
+            "availability": {
+              "history": "unavailable",
+              "info": "available",
+              "notices": "unavailable"
+            },
+            "info": {
+              "description": "",
+              "memberCount": null,
+              "name": "园艺群"
+            }
+          },
+          "started": 1000,
+          "status": "ready"
+        }
+      },
+      {
+        "calls": 1,
+        "gate": null,
+        "profile": null,
+        "reads": 3,
+        "row": {
+          "analysis": {},
+          "chat": "group:10",
+          "collected": 0,
+          "epoch": 1,
+          "error": null,
+          "joined_at": 1040,
+          "message_count": 0,
+          "retry_at": 0,
+          "sources": {},
+          "started": 1040,
+          "status": "observing"
+        }
+      },
+      {
+        "calls": 1,
+        "gate": null,
+        "profile": null,
+        "reads": 3,
+        "row": {
+          "analysis": {},
+          "chat": "group:10",
+          "collected": 0,
+          "epoch": 1,
+          "error": null,
+          "joined_at": 1040,
+          "message_count": 1,
+          "retry_at": 0,
+          "sources": {},
+          "started": 1040,
+          "status": "observing"
+        }
+      },
+      {
+        "calls": 1,
+        "gate": null,
+        "profile": null,
+        "reads": 3,
+        "row": {
+          "analysis": {},
+          "chat": "group:10",
+          "collected": 0,
+          "epoch": 1,
+          "error": null,
+          "joined_at": 1040,
+          "message_count": 1,
+          "retry_at": 0,
+          "sources": {},
+          "started": 1040,
+          "status": "observing"
+        }
+      },
+      {
+        "calls": 1,
+        "gate": null,
+        "profile": null,
+        "reads": 3,
+        "row": {
+          "analysis": {},
+          "chat": "group:10",
+          "collected": 0,
+          "epoch": 1,
+          "error": null,
+          "joined_at": 1040,
+          "message_count": 1,
+          "retry_at": 0,
+          "sources": {},
+          "started": 1040,
+          "status": "observing"
+        }
+      },
+      {
+        "calls": 1,
+        "gate": null,
+        "profile": null,
+        "reads": 3,
+        "row": {
+          "analysis": {},
+          "chat": "group:10",
+          "collected": 0,
+          "epoch": 2,
+          "error": null,
+          "joined_at": 1050,
+          "message_count": 0,
+          "retry_at": 0,
+          "sources": {},
+          "started": 1050,
+          "status": "observing"
+        }
+      }
+    ],
+    "input": {
+      "agent": {
+        "allowedGroups": [
+          "10"
+        ],
+        "observation": {
+          "enabled": true,
+          "minMessages": 2,
+          "minSeconds": 30
+        }
+      },
+      "kind": "orientation",
+      "steps": [
+        {
+          "now": 1000,
+          "op": "observe"
+        },
+        {
+          "now": 1000,
+          "op": "speak"
+        },
+        {
+          "now": 1000,
+          "op": "observe"
+        },
+        {
+          "now": 1029,
+          "op": "speak"
+        },
+        {
+          "now": 1030,
+          "op": "speak"
+        },
+        {
+          "now": 1031,
+          "op": "speak"
+        },
+        {
+          "now": 1031,
+          "op": "observe"
+        },
+        {
+          "now": 1040,
+          "op": "joined",
+          "timestamp": 1040
+        },
+        {
+          "now": 1041,
+          "op": "observe"
+        },
+        {
+          "now": 1042,
+          "op": "joined",
+          "timestamp": 1040
+        },
+        {
+          "now": 1043,
+          "op": "joined",
+          "timestamp": 1039
+        },
+        {
+          "now": 1050,
+          "op": "joined",
+          "timestamp": 1050
+        }
+      ]
+    },
+    "case": "orientation_ready_once_rejoin_and_duplicate_notices_match_js-0"
+  },
+  {
+    "expected": [
+      {
+        "calls": 0,
+        "gate": null,
+        "profile": null,
+        "reads": 0,
+        "row": {
+          "analysis": {},
+          "chat": "group:10",
+          "collected": 0,
+          "epoch": 0,
+          "error": null,
+          "joined_at": 0,
+          "message_count": 1,
+          "retry_at": 0,
+          "sources": {},
+          "started": 1000,
+          "status": "observing"
+        }
+      },
+      {
+        "calls": 0,
+        "gate": null,
+        "profile": null,
+        "reads": 0,
+        "row": {
+          "analysis": {},
+          "chat": "group:10",
+          "collected": 0,
+          "epoch": 0,
+          "error": null,
+          "joined_at": 0,
+          "message_count": 2,
+          "retry_at": 0,
+          "sources": {},
+          "started": 1000,
+          "status": "observing"
+        }
+      },
+      {
+        "calls": 1,
+        "gate": false,
+        "profile": null,
+        "reads": 3,
+        "row": {
+          "analysis": {},
+          "chat": "group:10",
+          "collected": 1,
+          "epoch": 0,
+          "error": "orientation_analysis_failed",
+          "joined_at": 0,
+          "message_count": 2,
+          "retry_at": 1090,
+          "sources": {
+            "availability": {
+              "history": "unavailable",
+              "info": "available",
+              "notices": "unavailable"
+            },
+            "info": {
+              "description": "",
+              "memberCount": null,
+              "name": "园艺群"
+            }
+          },
+          "started": 1000,
+          "status": "observing"
+        }
+      },
+      {
+        "calls": 1,
+        "gate": false,
+        "profile": null,
+        "reads": 3,
+        "row": {
+          "analysis": {},
+          "chat": "group:10",
+          "collected": 1,
+          "epoch": 0,
+          "error": "orientation_analysis_failed",
+          "joined_at": 0,
+          "message_count": 2,
+          "retry_at": 1090,
+          "sources": {
+            "availability": {
+              "history": "unavailable",
+              "info": "available",
+              "notices": "unavailable"
+            },
+            "info": {
+              "description": "",
+              "memberCount": null,
+              "name": "园艺群"
+            }
+          },
+          "started": 1000,
+          "status": "observing"
+        }
+      },
+      {
+        "calls": 2,
+        "gate": false,
+        "profile": null,
+        "reads": 3,
+        "row": {
+          "analysis": {},
+          "chat": "group:10",
+          "collected": 1,
+          "epoch": 0,
+          "error": "orientation_analysis_failed",
+          "joined_at": 0,
+          "message_count": 2,
+          "retry_at": 1150,
+          "sources": {
+            "availability": {
+              "history": "unavailable",
+              "info": "available",
+              "notices": "unavailable"
+            },
+            "info": {
+              "description": "",
+              "memberCount": null,
+              "name": "园艺群"
+            }
+          },
+          "started": 1000,
+          "status": "observing"
+        }
+      },
+      {
+        "calls": 2,
+        "gate": false,
+        "profile": null,
+        "reads": 3,
+        "row": {
+          "analysis": {},
+          "chat": "group:10",
+          "collected": 1,
+          "epoch": 0,
+          "error": "orientation_analysis_failed",
+          "joined_at": 0,
+          "message_count": 2,
+          "retry_at": 1150,
+          "sources": {
+            "availability": {
+              "history": "unavailable",
+              "info": "available",
+              "notices": "unavailable"
+            },
+            "info": {
+              "description": "",
+              "memberCount": null,
+              "name": "园艺群"
+            }
+          },
+          "started": 1000,
+          "status": "observing"
+        }
+      },
+      {
+        "calls": 3,
+        "gate": true,
+        "profile": {
+          "analyzedAt": 1150,
+          "analyzedMessages": 2,
+          "sources": {
+            "history": "unavailable",
+            "info": "available",
+            "notices": "unavailable"
+          },
+          "style": "谨慎接话",
+          "summary": "园艺讨论",
+          "topics": [
+            "园艺"
+          ]
+        },
+        "reads": 3,
+        "row": {
+          "analysis": {
+            "analyzedAt": 1150,
+            "analyzedMessages": 2,
+            "style": "谨慎接话",
+            "summary": "园艺讨论",
+            "topics": [
+              "园艺"
+            ]
+          },
+          "chat": "group:10",
+          "collected": 1,
+          "epoch": 0,
+          "error": null,
+          "joined_at": 0,
+          "message_count": 2,
+          "retry_at": 0,
+          "sources": {
+            "availability": {
+              "history": "unavailable",
+              "info": "available",
+              "notices": "unavailable"
+            },
+            "info": {
+              "description": "",
+              "memberCount": null,
+              "name": "园艺群"
+            }
+          },
+          "started": 1000,
+          "status": "ready"
+        }
+      },
+      {
+        "calls": 3,
+        "gate": true,
+        "profile": {
+          "analyzedAt": 1150,
+          "analyzedMessages": 2,
+          "sources": {
+            "history": "unavailable",
+            "info": "available",
+            "notices": "unavailable"
+          },
+          "style": "谨慎接话",
+          "summary": "园艺讨论",
+          "topics": [
+            "园艺"
+          ]
+        },
+        "reads": 3,
+        "row": {
+          "analysis": {
+            "analyzedAt": 1150,
+            "analyzedMessages": 2,
+            "style": "谨慎接话",
+            "summary": "园艺讨论",
+            "topics": [
+              "园艺"
+            ]
+          },
+          "chat": "group:10",
+          "collected": 1,
+          "epoch": 0,
+          "error": null,
+          "joined_at": 0,
+          "message_count": 2,
+          "retry_at": 0,
+          "sources": {
+            "availability": {
+              "history": "unavailable",
+              "info": "available",
+              "notices": "unavailable"
+            },
+            "info": {
+              "description": "",
+              "memberCount": null,
+              "name": "园艺群"
+            }
+          },
+          "started": 1000,
+          "status": "ready"
+        }
+      }
+    ],
+    "input": {
+      "agent": {
+        "allowedGroups": [
+          "10"
+        ],
+        "observation": {
+          "enabled": true,
+          "minMessages": 2,
+          "minSeconds": 30
+        }
+      },
+      "kind": "orientation",
+      "steps": [
+        {
+          "now": 1000,
+          "op": "observe"
+        },
+        {
+          "now": 1000,
+          "op": "observe"
+        },
+        {
+          "mode": "failure",
+          "now": 1030,
+          "op": "speak"
+        },
+        {
+          "now": 1089,
+          "op": "speak"
+        },
+        {
+          "now": 1090,
+          "op": "speak"
+        },
+        {
+          "mode": "ok",
+          "now": 1149,
+          "op": "speak"
+        },
+        {
+          "now": 1150,
+          "op": "speak"
+        },
+        {
+          "now": 1151,
+          "op": "speak"
+        }
+      ]
+    },
+    "case": "orientation_failures_keep_gate_closed_and_retry_at_exact_boundary-0"
+  },
+  {
+    "expected": [
+      {
+        "calls": 0,
+        "gate": null,
+        "profile": null,
+        "reads": 0,
+        "row": {
+          "analysis": {},
+          "chat": "group:10",
+          "collected": 0,
+          "epoch": 0,
+          "error": null,
+          "joined_at": 0,
+          "message_count": 1,
+          "retry_at": 0,
+          "sources": {},
+          "started": 1000,
+          "status": "observing"
+        }
+      },
+      {
+        "calls": 0,
+        "gate": null,
+        "profile": null,
+        "reads": 0,
+        "row": {
+          "analysis": {},
+          "chat": "group:10",
+          "collected": 0,
+          "epoch": 0,
+          "error": null,
+          "joined_at": 0,
+          "message_count": 2,
+          "retry_at": 0,
+          "sources": {},
+          "started": 1000,
+          "status": "observing"
+        }
+      },
+      {
+        "calls": 1,
+        "gate": false,
+        "profile": null,
+        "reads": 3,
+        "row": {
+          "analysis": {},
+          "chat": "group:10",
+          "collected": 1,
+          "epoch": 0,
+          "error": "orientation_analysis_failed",
+          "joined_at": 0,
+          "message_count": 2,
+          "retry_at": 1090,
+          "sources": {
+            "availability": {
+              "history": "unavailable",
+              "info": "available",
+              "notices": "unavailable"
+            },
+            "info": {
+              "description": "",
+              "memberCount": null,
+              "name": "园艺群"
+            }
+          },
+          "started": 1000,
+          "status": "observing"
+        }
+      },
+      {
+        "calls": 1,
+        "gate": false,
+        "profile": null,
+        "reads": 3,
+        "row": {
+          "analysis": {},
+          "chat": "group:10",
+          "collected": 1,
+          "epoch": 0,
+          "error": "orientation_analysis_failed",
+          "joined_at": 0,
+          "message_count": 2,
+          "retry_at": 1090,
+          "sources": {
+            "availability": {
+              "history": "unavailable",
+              "info": "available",
+              "notices": "unavailable"
+            },
+            "info": {
+              "description": "",
+              "memberCount": null,
+              "name": "园艺群"
+            }
+          },
+          "started": 1000,
+          "status": "observing"
+        }
+      },
+      {
+        "calls": 2,
+        "gate": false,
+        "profile": null,
+        "reads": 3,
+        "row": {
+          "analysis": {},
+          "chat": "group:10",
+          "collected": 1,
+          "epoch": 0,
+          "error": "orientation_analysis_failed",
+          "joined_at": 0,
+          "message_count": 2,
+          "retry_at": 1150,
+          "sources": {
+            "availability": {
+              "history": "unavailable",
+              "info": "available",
+              "notices": "unavailable"
+            },
+            "info": {
+              "description": "",
+              "memberCount": null,
+              "name": "园艺群"
+            }
+          },
+          "started": 1000,
+          "status": "observing"
+        }
+      },
+      {
+        "calls": 2,
+        "gate": false,
+        "profile": null,
+        "reads": 3,
+        "row": {
+          "analysis": {},
+          "chat": "group:10",
+          "collected": 1,
+          "epoch": 0,
+          "error": "orientation_analysis_failed",
+          "joined_at": 0,
+          "message_count": 2,
+          "retry_at": 1150,
+          "sources": {
+            "availability": {
+              "history": "unavailable",
+              "info": "available",
+              "notices": "unavailable"
+            },
+            "info": {
+              "description": "",
+              "memberCount": null,
+              "name": "园艺群"
+            }
+          },
+          "started": 1000,
+          "status": "observing"
+        }
+      },
+      {
+        "calls": 3,
+        "gate": true,
+        "profile": {
+          "analyzedAt": 1150,
+          "analyzedMessages": 2,
+          "sources": {
+            "history": "unavailable",
+            "info": "available",
+            "notices": "unavailable"
+          },
+          "style": "谨慎接话",
+          "summary": "园艺讨论",
+          "topics": [
+            "园艺"
+          ]
+        },
+        "reads": 3,
+        "row": {
+          "analysis": {
+            "analyzedAt": 1150,
+            "analyzedMessages": 2,
+            "style": "谨慎接话",
+            "summary": "园艺讨论",
+            "topics": [
+              "园艺"
+            ]
+          },
+          "chat": "group:10",
+          "collected": 1,
+          "epoch": 0,
+          "error": null,
+          "joined_at": 0,
+          "message_count": 2,
+          "retry_at": 0,
+          "sources": {
+            "availability": {
+              "history": "unavailable",
+              "info": "available",
+              "notices": "unavailable"
+            },
+            "info": {
+              "description": "",
+              "memberCount": null,
+              "name": "园艺群"
+            }
+          },
+          "started": 1000,
+          "status": "ready"
+        }
+      },
+      {
+        "calls": 3,
+        "gate": true,
+        "profile": {
+          "analyzedAt": 1150,
+          "analyzedMessages": 2,
+          "sources": {
+            "history": "unavailable",
+            "info": "available",
+            "notices": "unavailable"
+          },
+          "style": "谨慎接话",
+          "summary": "园艺讨论",
+          "topics": [
+            "园艺"
+          ]
+        },
+        "reads": 3,
+        "row": {
+          "analysis": {
+            "analyzedAt": 1150,
+            "analyzedMessages": 2,
+            "style": "谨慎接话",
+            "summary": "园艺讨论",
+            "topics": [
+              "园艺"
+            ]
+          },
+          "chat": "group:10",
+          "collected": 1,
+          "epoch": 0,
+          "error": null,
+          "joined_at": 0,
+          "message_count": 2,
+          "retry_at": 0,
+          "sources": {
+            "availability": {
+              "history": "unavailable",
+              "info": "available",
+              "notices": "unavailable"
+            },
+            "info": {
+              "description": "",
+              "memberCount": null,
+              "name": "园艺群"
+            }
+          },
+          "started": 1000,
+          "status": "ready"
+        }
+      }
+    ],
+    "input": {
+      "agent": {
+        "allowedGroups": [
+          "10"
+        ],
+        "observation": {
+          "enabled": true,
+          "minMessages": 2,
+          "minSeconds": 30
+        }
+      },
+      "kind": "orientation",
+      "steps": [
+        {
+          "now": 1000,
+          "op": "observe"
+        },
+        {
+          "now": 1000,
+          "op": "observe"
+        },
+        {
+          "mode": "invalid",
+          "now": 1030,
+          "op": "speak"
+        },
+        {
+          "now": 1089,
+          "op": "speak"
+        },
+        {
+          "now": 1090,
+          "op": "speak"
+        },
+        {
+          "mode": "ok",
+          "now": 1149,
+          "op": "speak"
+        },
+        {
+          "now": 1150,
+          "op": "speak"
+        },
+        {
+          "now": 1151,
+          "op": "speak"
+        }
+      ]
+    },
+    "case": "orientation_failures_keep_gate_closed_and_retry_at_exact_boundary-1"
+  },
+  {
+    "expected": [
+      {
+        "calls": 0,
+        "gate": null,
+        "profile": null,
+        "reads": 0,
+        "row": null
+      },
+      {
+        "calls": 0,
+        "gate": true,
+        "profile": null,
+        "reads": 0,
+        "row": null
+      }
+    ],
+    "input": {
+      "agent": {
+        "allowedGroups": [
+          "10"
+        ],
+        "observation": {
+          "enabled": true,
+          "minMessages": 2,
+          "minSeconds": 30
+        }
+      },
+      "kind": "orientation",
+      "steps": [
+        {
+          "chat": "private:20",
+          "now": 1000,
+          "op": "observe"
+        },
+        {
+          "chat": "private:20",
+          "now": 1000,
+          "op": "speak"
+        }
+      ]
+    },
+    "case": "orientation_disabled_and_private_bypass_without_io_match_js-0"
+  },
+  {
+    "expected": [
+      {
+        "calls": 0,
+        "gate": null,
+        "profile": null,
+        "reads": 0,
+        "row": null
+      },
+      {
+        "calls": 0,
+        "gate": true,
+        "profile": null,
+        "reads": 0,
+        "row": null
+      }
+    ],
+    "input": {
+      "agent": {
+        "allowedGroups": [
+          "10"
+        ],
+        "observation": {
+          "enabled": false,
+          "minMessages": 2,
+          "minSeconds": 30
+        }
+      },
+      "kind": "orientation",
+      "steps": [
+        {
+          "chat": "group:10",
+          "now": 1000,
+          "op": "observe"
+        },
+        {
+          "chat": "group:10",
+          "now": 1000,
+          "op": "speak"
+        }
+      ]
+    },
+    "case": "orientation_disabled_and_private_bypass_without_io_match_js-1"
+  }
+]

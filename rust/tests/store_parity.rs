@@ -1,46 +1,18 @@
+#[path = "golden/mod.rs"]
+mod golden;
 use qq_inner_core::store::Store;
 use serde_json::{json, Value};
-use std::{fs, path::PathBuf, process::Command};
+use std::{fs, path::PathBuf};
+#[path = "golden/sqlite.rs"]
+mod sqlite;
 struct Fixture(PathBuf);
 impl Drop for Fixture {
     fn drop(&mut self) {
         fs::remove_dir_all(&self.0).unwrap();
     }
 }
-fn node(f: &Fixture, mode: &str) -> Value {
-    let output = Command::new("node").current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap())
-        .args(["--input-type=module", "-e", r#"
-import {Store} from './src/store.mjs';
-import {ActivityRhythm} from './src/activity.mjs';
-import {GroupOrientation} from './src/orientation.mjs';
-import {defaults} from './src/config.mjs';
-const s=new Store(process.argv[1]);
-new ActivityRhythm(s,defaults.agent);
-new GroupOrientation(s,{agent:{...defaults.agent,observation:{enabled:false}}},null,null,()=>100,null);
-if(process.argv[2]==='write') {
- s.message({chat:'g',id:'js',sender:'1',name:'测试',text:'hello🙂',ts:100.25});
- s.decision('g','send',3,['中文',{nested:null}],100.25);
- s.assess('g','js',100.25,'ready',{ok:true,list:[1,null]});
- s.expect('g',100.25,60,{reply:true});
- s.db.prepare('INSERT INTO chat_learning VALUES(?,?,?,?,?,?)').run('g','style','[{"id":"js"}]',100.25,'js',0);
-}
-const objects=s.db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").all();
-const tables={};
-for(const {type,name} of objects) if(type==='table') {
- const indexes=s.db.prepare(`PRAGMA index_list("${name}")`).all().map(i=>{
-  delete i.seq;i.columns=s.db.prepare(`PRAGMA index_info("${i.name}")`).all();return i;
- }).sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0);
- tables[name]={columns:s.db.prepare(`PRAGMA table_info("${name}")`).all(),indexes};
-}
-console.log(JSON.stringify({schema:{objects,tables},messages:s.history('g',24),decisions:s.db.prepare('SELECT * FROM decisions ORDER BY ts').all().map(r=>({...r,tags:JSON.parse(r.tags)})),assessment:s.assessment('g','rust'),expectation:s.expectation('g',101)}));
-s.close();
-"#]).arg(f.0.join("agent.sqlite")).arg(mode).output().unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    serde_json::from_slice(&output.stdout).unwrap()
+fn expected(mode: &str) -> Value {
+    golden::expected(include_str!("golden/store.json"), &json!({"mode":mode}))
 }
 fn normalize(mut schema: Value) -> Value {
     for row in schema["objects"].as_array_mut().unwrap() {
@@ -55,14 +27,6 @@ fn normalize(mut schema: Value) -> Value {
 }
 #[test]
 fn shared_js_database_schema_and_json_roundtrip() {
-    if !Command::new("node")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-    {
-        eprintln!("SKIP: node unavailable");
-        return;
-    }
     let f = Fixture(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("target")
@@ -73,7 +37,23 @@ fn shared_js_database_schema_and_json_roundtrip() {
             )),
     );
     fs::create_dir_all(&f.0).unwrap();
-    let js = node(&f, "write");
+    let js = expected("write");
+    // 用捕获的 JS DDL 和原始行重建旧库，避免用 Rust Store 自己生成兼容性样本。
+    let legacy = rusqlite::Connection::open(f.0.join("agent.sqlite")).unwrap();
+    for kind in ["table", "index"] {
+        for object in js["schema"]["objects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|o| o["type"] == kind)
+        {
+            legacy
+                .execute_batch(object["sql"].as_str().unwrap())
+                .unwrap();
+        }
+    }
+    sqlite::insert(&legacy, &js["rawTables"]);
+    drop(legacy);
     let s = Store::open(f.0.join("agent.sqlite")).unwrap();
     assert_eq!(
         normalize(s.schema().unwrap()),
@@ -121,7 +101,23 @@ fn shared_js_database_schema_and_json_roundtrip() {
         .unwrap();
     s.expect("g", 101., 60., &json!({"rust":true})).unwrap();
     s.observe(&json!({"chat":"g","hint":"self"}), 101.).unwrap();
-    let read = node(&f, "read");
+    let expected = expected("read");
+    let reopened = Store::open(f.0.join("agent.sqlite")).unwrap();
+    // 从真实持久化库重新读取，再与捕获结果比较，不能只断言金标准本身。
+    let mut decisions = reopened
+        .rows("SELECT * FROM decisions ORDER BY ts", [])
+        .unwrap();
+    for row in &mut decisions {
+        row["tags"] = serde_json::from_str(row["tags"].as_str().unwrap()).unwrap();
+    }
+    let mut assessment = reopened.assessment("g", "rust").unwrap().unwrap();
+    assessment["details"] = json!(assessment["details"].to_string());
+    let read = json!({"schema":reopened.schema().unwrap(),"messages":reopened.history("g",None).unwrap(),"decisions":decisions,"assessment":assessment,"expectation":reopened.expectation("g",101.).unwrap()});
+    sqlite::assert_rows(&reopened, &expected["rawTables"]);
+    assert_eq!(
+        normalize(read["schema"].clone()),
+        normalize(expected["schema"].clone())
+    );
     assert_eq!(read["messages"][1]["text"], "回应");
     assert_eq!(
         read["decisions"][1]["tags"],
@@ -134,7 +130,7 @@ fn shared_js_database_schema_and_json_roundtrip() {
     assert_eq!(read["expectation"]["forecast"], json!({"rust":true}));
     assert_eq!(
         read["expectation"]["observation"],
-        json!({"event":"human_message","addressed":true,"at":101})
+        json!({"event":"human_message","addressed":true,"at":101.0})
     );
     let mode: String = db
         .prepare_cached("PRAGMA journal_mode")

@@ -2,7 +2,7 @@
 //!
 //! 时区是这里最值得较真的地方：JS 用 ICU 的 `Intl.DateTimeFormat`，Rust 用 `chrono-tz`，
 //! 两者数据库版本不同。因此测试不只比对 `quiet()` 的布尔结果，还直接逐点比对
-//! "本地分钟数"，避免布尔值把偏差掩盖掉。Node 不可用时跳过。
+//! "本地分钟数"，避免布尔值把偏差掩盖掉。期望值来自已捕获的 JSON 固化金标准，缺失即失败。
 use qq_inner_core::config::{load_with_env, Config};
 use qq_inner_core::policy::{
     active_at, allowed, local_minutes_of_day, pick_length_target, quiet, repeated, Allocation,
@@ -11,19 +11,11 @@ use qq_inner_core::policy::{
 use qq_inner_core::text::{similarity, terms};
 use serde_json::{json, Value};
 use std::fs;
-use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 
 /// cargo test 会并发跑测试；临时目录名必须唯一，否则两个测试会互相覆盖 payload。
 /// （codex 的 config_parity 用 pid + 随机数解决了同样的问题。）
 static SEQ: AtomicUsize = AtomicUsize::new(0);
-
-fn node_available() -> bool {
-    Command::new("node")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
 
 /// 走真实的加载路径（对应 JS 的 `loadConfig`）：只写一份 config.json 覆盖项，
 /// 其余字段由 defaults 补全，credentials 与 dataDir 由加载流程生成。
@@ -45,50 +37,17 @@ fn config_with(extra: Value) -> Config {
     loaded.config
 }
 
-/// 同一批用例同时交给 JS 与 Rust。
-fn run_node(payload: &Value) -> Value {
-    let script = r#"
-import { quiet, activeAt } from './src/policy.mjs';
-import { terms, similarity } from './src/store.mjs';
-import { readFileSync } from 'node:fs';
-const p = JSON.parse(readFileSync(process.argv[1], 'utf8'));
-const localMinutes = (ts, zone) => {
-  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: zone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(ts * 1000));
-  return Number(parts.find(x => x.type === 'hour').value) * 60 + Number(parts.find(x => x.type === 'minute').value);
-};
-process.stdout.write(JSON.stringify({
-  local: p.local.map(c => localMinutes(c.ts, c.zone)),
-  quiet: p.quiet.map(c => quiet(c.ts, c.hours)),
-  active: p.active.map(c => activeAt(c.ts, c.schedule)),
-  terms: p.terms.map(t => [...terms(t)].sort()),
-  similarity: p.similarity.map(([a, b]) => similarity(a, b)),
-}));
-"#;
-    let dir = std::env::temp_dir().join(format!(
-        "qq-inner-policy-{}-{}",
-        std::process::id(),
-        SEQ.fetch_add(1, AtomicOrdering::Relaxed)
-    ));
-    fs::create_dir_all(&dir).expect("create temp dir");
-    let payload_file = dir.join("payload.json");
-    fs::write(&payload_file, serde_json::to_string(payload).unwrap()).unwrap();
-    let out = Command::new("node")
-        .args(["--input-type=module", "-e", script])
-        .arg(&payload_file)
-        .current_dir(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .unwrap(),
-        )
-        .output()
-        .expect("run node");
-    let _ = fs::remove_dir_all(&dir);
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    serde_json::from_slice(&out.stdout).expect("node output")
+// 输入也与快照逐值匹配，防止参数矩阵改变后误用旧期望值。
+fn expected(payload: &Value) -> Value {
+    // 四个不同 payload 全部捕获，包括 active_at；序列化键由 serde_json 的有序对象生成。
+    let cases: std::collections::BTreeMap<String, Value> =
+        serde_json::from_str(include_str!("golden/policy.json")).unwrap();
+    assert_eq!(cases.len(), 4, "必须保留四组不同的 policy 金标准");
+    let key = serde_json::to_string(payload).unwrap();
+    cases
+        .get(&key)
+        .unwrap_or_else(|| panic!("缺少 policy 固化金标准: {key}"))
+        .clone()
 }
 
 /// 覆盖南北半球、半小时偏移、超长 DST 跳变与整点偏移的时区。
@@ -115,10 +74,6 @@ const INSTANTS: [i64; 7] = [
 
 #[test]
 fn local_minutes_match_icu_point_by_point() {
-    if !node_available() {
-        eprintln!("SKIP: node unavailable");
-        return;
-    }
     let mut local = Vec::new();
     for zone in ZONES {
         for ts in INSTANTS {
@@ -127,7 +82,7 @@ fn local_minutes_match_icu_point_by_point() {
     }
     let payload =
         json!({ "local": local, "quiet": [], "active": [], "terms": [], "similarity": [] });
-    let js = run_node(&payload);
+    let js = expected(&payload);
 
     let mut index = 0;
     for zone in ZONES {
@@ -143,10 +98,6 @@ fn local_minutes_match_icu_point_by_point() {
 
 #[test]
 fn quiet_matches_javascript_across_zones_and_windows() {
-    if !node_available() {
-        eprintln!("SKIP: node unavailable");
-        return;
-    }
     // 每个时区 × 每个时刻 × 若干窗口（含同起止、跨夜、整天）。
     let windows: [(f64, f64); 6] = [
         (23.0, 8.0),
@@ -169,7 +120,7 @@ fn quiet_matches_javascript_across_zones_and_windows() {
     }
     let payload =
         json!({ "local": [], "quiet": cases, "active": [], "terms": [], "similarity": [] });
-    let js = run_node(&payload);
+    let js = expected(&payload);
 
     for (index, case) in cases.iter().enumerate() {
         let hours = qq_inner_core::config::QuietHours {
@@ -222,10 +173,6 @@ fn quiet_returns_false_without_configuration() {
 
 #[test]
 fn active_at_matches_javascript_across_zones() {
-    if !node_available() {
-        eprintln!("SKIP: node unavailable");
-        return;
-    }
     let schedules = [
         json!({ "enabled": true, "activeStart": "08:00", "inactiveStart": "23:00", "timezone": "Europe/Stockholm" }),
         json!({ "enabled": true, "activeStart": "22:00", "inactiveStart": "06:00", "timezone": "Asia/Shanghai" }),
@@ -241,7 +188,7 @@ fn active_at_matches_javascript_across_zones() {
     }
     let payload =
         json!({ "local": [], "quiet": [], "active": cases, "terms": [], "similarity": [] });
-    let js = run_node(&payload);
+    let js = expected(&payload);
 
     for (index, case) in cases.iter().enumerate() {
         let schedule: qq_inner_core::config::Schedule =
@@ -254,10 +201,6 @@ fn active_at_matches_javascript_across_zones() {
 
 #[test]
 fn terms_and_similarity_match_javascript_on_a_tricky_corpus() {
-    if !node_available() {
-        eprintln!("SKIP: node unavailable");
-        return;
-    }
     let corpus = [
         "你好世界",
         "hello world",
@@ -292,7 +235,7 @@ fn terms_and_similarity_match_javascript_on_a_tricky_corpus() {
         "terms": corpus,
         "similarity": pairs,
     });
-    let js = run_node(&payload);
+    let js = expected(&payload);
 
     for (index, text) in corpus.iter().enumerate() {
         let mut got: Vec<String> = terms(text).into_iter().collect();
