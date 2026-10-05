@@ -125,6 +125,12 @@ impl OrientationProvider for Harness {
                 .next()
                 .unwrap();
             if stage == "ARTICULATE" {
+                if payload.get("recallEvidence").is_some() {
+                    assert!(system.contains("细节未经核实必须表达不确定"));
+                }
+                if self.model.lock().unwrap().get("affect").is_some() {
+                    assert!(system.contains("直接、少修饰"));
+                }
                 self.payloads.lock().unwrap().push(payload.clone());
             }
             self.push(json!([
@@ -182,6 +188,11 @@ impl OrientationProvider for Harness {
                     let mut formed = json!({"allocation":m.get("allocation").unwrap_or(&json!("open")),"candidates":if m["empty"]==true {json!([])} else {json!([{"kind":"system2","text":"建议从土壤湿度判断浇水"}])}});
                     if let Some(learning) = m.get("learning") {
                         formed["learning"] = learning.clone();
+                    }
+                    for key in ["affect", "recall"] {
+                        if let Some(value) = m.get(key) {
+                            formed[key] = value.clone();
+                        }
                     }
                     formed
                 }

@@ -12,7 +12,7 @@ use crate::{
     orientation::{GroupOrientation, OrientationProvider, OrientationTransport},
     policy::{self, Allocation, Candidate, CandidateKind, Hint},
     prompts,
-    sending::{forecast_result, sending_probability, SendingSettings, Timing},
+    sending::{forecast_result, sending_probability_with_affect, SendingSettings, Timing},
     store::{LayeredUpdate, ScopedOptions, Store},
 };
 use anyhow::{ensure, Result};
@@ -229,6 +229,13 @@ impl Engine {
         collection: crate::media::Config,
     ) -> Result<Arc<Self>> {
         media_config.validate()?;
+        if config.agent.affect.enabled {
+            crate::affect::enable(
+                &*store
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("store_poisoned"))?,
+            )?;
+        }
         if config.agent.emoji.learn_frequency || config.agent.emoji.face_only {
             crate::humanize::enable(
                 &*store
@@ -899,10 +906,12 @@ impl Engine {
                 t.id = format!("topic:{version}:{now}");
             }
             t.counts = db.counts(chat, now)?;
-            if num(&t.counts, "total") >= a.max_messages_per_hour
-                || (t.hint != Hint::SelfChat
-                    && (num(&t.counts, "proactive") >= a.max_proactive_per_hour
-                        || now - num(&t.counts, "last") < a.proactive_cooldown_seconds))
+            let angry_burst = crate::affect::behavior(&db, &a.affect, chat, &t.last, now)?.burst;
+            if !angry_burst
+                && (num(&t.counts, "total") >= a.max_messages_per_hour
+                    || (t.hint != Hint::SelfChat
+                        && (num(&t.counts, "proactive") >= a.max_proactive_per_hour
+                            || now - num(&t.counts, "last") < a.proactive_cooldown_seconds)))
             {
                 self.finish(&mut core, &db, &t, false)?;
                 return Ok(());
@@ -930,17 +939,64 @@ impl Engine {
             t
         };
         // 19–20：形成候选；先校验再检查过期，保持 JS 错误/副作用顺序。
-        let formed = self
-            .model(
-                &prompts::compose_prompt(prompts::FORMATION, &[]),
-                t.payload.clone(),
-            )
-            .await?;
+        if a.affect.enabled {
+            t.payload["affectInstructions"] = json!(crate::affect::CONTRACT);
+        }
+        let mut formation_system = prompts::compose_prompt(prompts::FORMATION, &[]);
+        if a.memory_recall {
+            formation_system.push('\n');
+            formation_system.push_str(crate::recall::CONTRACT);
+            formation_system.push('\n');
+            formation_system.push_str(crate::recall::RULE);
+        }
+        let mut formed = self.model(&formation_system, t.payload.clone()).await?;
+        // 每 cycle 一个预算，复查结果中的 recall 不再执行，防止无限回查。
+        if a.memory_recall {
+            let request: crate::recall::Request = if formed["recall"].is_null() {
+                Default::default()
+            } else {
+                serde_json::from_value(formed["recall"].clone())?
+            };
+            let evidence = {
+                let core = self.core();
+                let db = self.db()?;
+                if !self.fresh(&core, &db, &t)? {
+                    return Ok(());
+                }
+                let evidence =
+                    crate::recall::Budget::default().retrieve(&db, chat, &request, 20, 4000)?;
+                self.record_decision(
+                    &db,
+                    chat,
+                    "memory_recall",
+                    0.,
+                    &json!({"needed":request.needed,"hits":evidence.len()}),
+                    self.now(),
+                )?;
+                evidence
+            };
+            if request.needed {
+                t.payload["recallEvidence"] = json!(evidence);
+                t.payload["recallExhausted"] = json!(true);
+                formed = self.model(&formation_system, t.payload.clone()).await?;
+            }
+        }
         ensure!(
             formed["candidates"].is_array()
                 && Allocation::parse(text(&formed, "allocation")).is_some(),
             "invalid_formation"
         );
+        let behavior = {
+            let core = self.core();
+            let db = self.db()?;
+            if !self.fresh(&core, &db, &t)? {
+                return Ok(());
+            }
+            if a.affect.enabled {
+                crate::affect::apply(&db, chat, &t.last, &formed["affect"], now)?;
+            }
+            crate::affect::behavior(&db, &a.affect, chat, &t.last, now)?
+        };
         // Review outside the store/core locks and transaction. Both sides of the await
         // check turn freshness; a reset/new message cannot commit an obsolete review.
         let reviewed_learning = if t.learn_now && formed.get("learning").is_some() {
@@ -1172,9 +1228,15 @@ impl Engine {
                 burst_scale: a.sending.burst_scale,
                 max_negative_probability: a.sending.max_negative_probability,
             };
-            let gate = sending_probability(&settings, &timing, &prediction);
+            let gate = sending_probability_with_affect(
+                &settings,
+                &timing,
+                &prediction,
+                a.affect.enabled,
+                &behavior,
+            );
             let draw = (self.options.random)();
-            let admitted = gate.veto.is_none() && draw < gate.probability;
+            let admitted = behavior.burst || (gate.veto.is_none() && draw < gate.probability);
             let mut details = serde_json::to_value(gate)?;
             details["draw"] = json!(draw);
             details["timing"] = json!(timing);
@@ -1222,6 +1284,7 @@ impl Engine {
             },
             || (self.options.expression_random)(),
         );
+        let length_target = behavior.disposition.map_or(length_target, |d| d.length());
         let face_only_allowed = a.emoji.face_only
             && length_target != "long"
             && crate::humanize::face_only_allowed(
@@ -1246,12 +1309,24 @@ impl Engine {
         ] {
             payload[key] = t.payload[key].clone();
         }
+        if a.memory_recall && t.payload.get("recallEvidence").is_some() {
+            payload["recallEvidence"] = t.payload["recallEvidence"].clone();
+        }
         // 门控运行时片段进入 user JSON；绝不修改生成产物 prompts.rs 或它的 parity 断言。
         if a.emoji.face_only {
             payload["runtimeInstructions"] = json!(crate::humanize::FACE_ONLY_INSTRUCTIONS);
             payload["faceOnlyAllowed"] = json!(face_only_allowed);
         }
-        let system = prompts::articulation_for(&a.reply_language).map_err(anyhow::Error::msg)?;
+        let mut system =
+            prompts::articulation_for(&a.reply_language).map_err(anyhow::Error::msg)?;
+        if let Some(disposition) = behavior.disposition {
+            system.push('\n');
+            system.push_str(disposition.rule());
+        }
+        if a.memory_recall {
+            system.push('\n');
+            system.push_str(crate::recall::RULE);
+        }
         let response = match self.model(&system, payload).await {
             Ok(value) => value,
             Err(error) => {
@@ -1268,7 +1343,8 @@ impl Engine {
             let lower = raw.to_ascii_lowercase();
             let face_only = policy::js_trim(raw).is_empty();
             let decorated = decorate(&response, &decorations, a.max_output_chars as usize);
-            if !response["text"].is_string()
+            if (a.affect.enabled && !crate::affect::content_allowed(raw))
+                || !response["text"].is_string()
                 || (face_only
                     && !(face_only_allowed
                         && decorated["faceId"].is_string()
@@ -1300,7 +1376,9 @@ impl Engine {
                 .map(|m| text(m, "text").to_owned())
                 .collect::<Vec<_>>();
             if (proactive && policy::quiet(self.now(), a.quiet_hours.as_ref()))
-                || (!face_only && policy::repeated(text(&decorated, "text"), &own))
+                || (!behavior.burst
+                    && !face_only
+                    && policy::repeated(text(&decorated, "text"), &own))
             {
                 db.assessment_status(chat, &t.id, "cancelled")?;
                 db.r#use(&selected.candidate.id)?;
@@ -1322,6 +1400,9 @@ impl Engine {
                 return Ok(());
             }
             // 44–45：先落库再发送；崩溃/超时留下 pending/uncertain，绝不重放。
+            if behavior.burst {
+                crate::affect::reserve_burst(&db, chat, text(&t.last, "id"))?;
+            }
             let delivery_id = db.delivery(chat, proactive, self.now())?;
             if a.emoji.face_only && face_only {
                 db.execute(

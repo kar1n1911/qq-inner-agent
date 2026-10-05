@@ -156,6 +156,8 @@ pub enum Veto {
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Factors {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub affect: Option<AffectFactors>,
     pub base: f64,
     pub settle: f64,
     pub recovery: f64,
@@ -186,6 +188,7 @@ pub fn sending_probability(
 ) -> Admission {
     let proactive = timing.proactive;
     let factors = Factors {
+        affect: None,
         base: if proactive {
             settings.proactive_probability
         } else {
@@ -240,4 +243,37 @@ pub fn sending_probability(
         probability,
         veto,
     }
+}
+
+/// 新因子仅参与发送动机，不进入候选评分/学习奖励；关闭时完整返回原结果。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct AffectFactors {
+    pub mood: f64,
+    pub affinity: f64,
+    pub disposition: f64,
+}
+pub fn sending_probability_with_affect(
+    settings: &SendingSettings,
+    timing: &Timing,
+    forecast: &Forecast,
+    enabled: bool,
+    behavior: &crate::affect::Behavior,
+) -> Admission {
+    let mut gate = sending_probability(settings, timing, forecast);
+    if !enabled {
+        return gate;
+    }
+    let factors = AffectFactors {
+        mood: if behavior.disposition.is_some() {
+            1.
+        } else {
+            1. + 0.2 * behavior.mood.clamp(-1., 1.)
+        },
+        affinity: 1. + 0.2 * behavior.affinity.clamp(-1., 1.),
+        disposition: behavior.disposition.map_or(1., |d| d.motivation()),
+    };
+    gate.probability =
+        (gate.probability * factors.mood * factors.affinity * factors.disposition).clamp(0., 1.);
+    gate.factors.affect = Some(factors);
+    gate
 }

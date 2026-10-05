@@ -311,3 +311,49 @@ fn the_decimal_float_round_trip_is_why_the_matrix_transfers_bits() {
         "serde_json must at least stay within one ULP"
     );
 }
+
+#[test]
+fn affect_disabled_is_identical_and_enabled_factors_change_probability() {
+    use qq_inner_core::{
+        affect::{Behavior, Disposition},
+        sending::sending_probability_with_affect,
+    };
+    let t = timing(true, 15., 300., 6., 5.);
+    let f = forecast(true, 0.1, ResponseMode::Answer);
+    let base = sending_probability(&settings(), &t, &f);
+    for (d, multiplier) in [
+        (Disposition::Angry, 1.4),
+        (Disposition::Supportive, 1.2),
+        (Disposition::Scrutinizing, 0.7),
+        (Disposition::Withdrawn, 0.2),
+    ] {
+        let b = Behavior {
+            mood: -0.8,
+            affinity: 0.,
+            disposition: Some(d),
+            burst: false,
+        };
+        let off = sending_probability_with_affect(&settings(), &t, &f, false, &b);
+        assert_eq!(
+            serde_json::to_string(&off).unwrap(),
+            serde_json::to_string(&base).unwrap()
+        );
+        let on = sending_probability_with_affect(&settings(), &t, &f, true, &b);
+        assert_eq!(on.probability, base.probability * multiplier);
+        assert_eq!(on.factors.affect.unwrap().disposition, multiplier);
+    }
+    let neutral = Behavior::default();
+    assert_eq!(
+        sending_probability_with_affect(&settings(), &t, &f, true, &neutral).probability,
+        base.probability
+    );
+    let positive = Behavior {
+        mood: 0.5,
+        affinity: 0.5,
+        ..Default::default()
+    };
+    assert!(
+        sending_probability_with_affect(&settings(), &t, &f, true, &positive).probability
+            > base.probability
+    );
+}
