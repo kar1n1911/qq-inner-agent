@@ -13,6 +13,7 @@ A persistent conversational agent for one QQ account, connected through NapCat o
 - A Chinese/English web dashboard with live configuration, logs and QQ diagnostics.
 - DeepSeek presets and OpenAI-/Anthropic-compatible API adapters.
 - A Rust runtime core (`qq-inner-core`) with the Node dashboard and CLI retained over a local control socket.
+- Proactive topic sourcing from fresh external content (GitHub/RSS) and cross-group forwarding, gated by the responsibility line and self-review.
 
 ## Rust backend
 
@@ -21,11 +22,11 @@ the OneBot v11 transport, the SQLite store and layered memory, the decision engi
 every per-message policy, and the provider adapter. Node.js now hosts only the web
 dashboard and the CLI, talking to the Rust core over a local NDJSON control socket
 (`data/control.sock`). Configuration, the database schema, `status.json`, and the model
-prompt JSON contract are unchanged, so the Rust and Node cores are interchangeable and
-the switch is reversible.
+prompt JSON contract are unchanged. The old Node core is archived on the `js-legacy`
+branch (marked "no longer updated"); the Rust core is the only implementation in development.
 
 See [`docs/rust-port/ARCHITECTURE.md`](docs/rust-port/ARCHITECTURE.md) for the module map
-and phase history, and [`CHANGELOG.md`](CHANGELOG.md) for the 1.0.0 release notes.
+and phase history, and [`CHANGELOG.md`](CHANGELOG.md) for the release notes.
 
 ## Contents
 

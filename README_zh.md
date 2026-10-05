@@ -13,16 +13,18 @@
 - 中英文 Web 控制台，可实时调整配置、查看日志和 QQ 诊断。
 - 内置 DeepSeek 预设，并支持 OpenAI/Anthropic 兼容的 API 适配器。
 - 一个 Rust 运行时内核（`qq-inner-core`），Node 侧仅保留仪表盘与 CLI，通过本地控制套接字通信。
+- 主动话题来源可接入外部新鲜内容（GitHub/RSS）与群间转发，均带责任线与自我审核安全闸门。
 
 ## Rust 后端
 
 性能关键路径已用 Rust 实现（`rust/`，crate `qq-inner-core`）：OneBot v11 传输、SQLite
 存储与分层记忆、决策引擎及所有逐消息策略、provider 适配。Node.js 现在只承载 Web 控制台
 与 CLI，通过本地 NDJSON 控制套接字（`data/control.sock`）与 Rust 内核通信。配置、数据库
-schema、`status.json` 与模型提示词 JSON 契约保持不变，因此 Rust 与 Node 内核可互换、切换可回退。
+schema、`status.json` 与模型提示词 JSON 契约保持不变。旧 Node 内核已归档到 `js-legacy`
+分支（标记"不再更新"），Rust 内核是唯一在更新的实现。
 
 模块映射与阶段历史见 [`docs/rust-port/ARCHITECTURE.md`](docs/rust-port/ARCHITECTURE.md)，
-1.0.0 发布说明见 [`CHANGELOG.md`](CHANGELOG.md)。
+发布说明见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## 目录
 
