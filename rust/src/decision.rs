@@ -70,6 +70,7 @@ pub fn screen(db: &Store, chat: &str, s: &ChatState, a: &Agent, now: f64) -> Res
                 None,
             )?
             .is_empty()
+            && !a.topic_source.enabled()
         {
             topic = Some("empty_thoughts");
         } else {
