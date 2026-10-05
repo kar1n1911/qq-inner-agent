@@ -215,6 +215,13 @@ pub const LEGACY_PERSONAS: [&str;2]=[
 
 pub fn validate(c: &Value) -> std::result::Result<(), ConfigError> {
     let a = &c["agent"];
+    if let Some(v) = a.get("relay") {
+        let settings: crate::relay::RelaySettings =
+            serde_json::from_value(v.clone()).map_err(|e| ConfigError(e.to_string()))?;
+        settings
+            .validate()
+            .map_err(|e| ConfigError(e.to_string()))?;
+    }
     if let Some(v) = a.get("topicSource") {
         let settings: crate::topic_source::Settings =
             serde_json::from_value(v.clone()).map_err(|e| ConfigError(e.to_string()))?;
@@ -837,6 +844,8 @@ impl Default for OwnerTeaching {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Agent {
+    #[serde(default)]
+    pub relay: crate::relay::RelaySettings,
     #[serde(default)]
     pub topic_source: crate::topic_source::Settings,
     /// P6h：三个功能的入口均默认关闭。
