@@ -429,3 +429,184 @@ async fn repeated_disconnects_respect_backoff_cap() {
     }
     stop(s, t).await;
 }
+
+fn forward_bot(m: &Mock) -> (OneBot, mpsc::UnboundedReceiver<Notification>) {
+    let mut c: config::Onebot =
+        serde_json::from_value(config::defaults()["onebot"].clone()).unwrap();
+    c.url = m.url.clone();
+    c.forward_enabled = true;
+    c.request_timeout_seconds = 2.0;
+    OneBot::new(c, "a+b &?".into())
+}
+
+#[tokio::test]
+async fn forward_reference_sending_and_validation() {
+    let mut m = mock(json!({"user_id":123}), json!(true), 0).await;
+    let (b, mut rx) = forward_bot(&m);
+    let (s, t) = running(&b, &mut rx).await;
+    for nodes in [
+        json!([]),
+        json!([{"id":1}]),
+        json!([{"user_id":2}]),
+        json!([{"user_id":2,"id":0}]),
+        json!([{"user_id":2,"id":"bad"}]),
+        json!([{"user_id":0,"id":1}]),
+        json!([{"user_id":2,"id":1.5}]),
+        json!([{"user_id":2,"id":1,"content":"new text"}]),
+        json!([{"type":"file","data":{"file":"x"}}]),
+        json!([{"user_id":2,"id":1,"file":"x"}]),
+        json!([{"type":"node","data":{"user_id":2,"id":1}}]),
+        json!([{"user_id":2,"id":1,"message_id":null}]),
+    ] {
+        let err = b
+            .send_forward("group:123", nodes.as_array().unwrap().clone())
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "invalid_forward_nodes");
+        assert!(!err.uncertain);
+    }
+    for chat in ["other:1", "group:0", "group:01", "private:-1"] {
+        assert_eq!(
+            b.send_forward(chat, vec![json!({"uin":2,"id":1})])
+                .await
+                .unwrap_err()
+                .code,
+            "invalid_chat"
+        );
+    }
+    assert!(m.requests.try_recv().is_err());
+    for (chat, action, key) in [
+        ("group:123", "send_group_msg", "group_id"),
+        ("private:123", "send_private_msg", "user_id"),
+    ] {
+        let nodes = vec![
+            json!({"user_id":456,"id":-9}),
+            json!({"uin":"789","message_id":"10"}),
+        ];
+        let a = b.clone();
+        let sent = nodes.clone();
+        let call = tokio::spawn(async move { a.send_forward(chat, sent).await });
+        let req = next(&mut m.requests).await;
+        assert_eq!(req["action"], action);
+        assert_eq!(req["params"][key], 123);
+        assert_eq!(
+            req["params"]["message"],
+            json!([{"type":"forward","data":{"nodes":nodes}}])
+        );
+        m.frames
+            .send(response(&req, json!({"message_id":11}), json!(0), "ok"))
+            .unwrap();
+        assert_eq!(call.await.unwrap().unwrap()["message_id"], 11);
+    }
+    assert_eq!(
+        b.get_forward_msg(" ").await.unwrap_err().code,
+        "invalid_forward_id"
+    );
+    stop(s, t).await;
+}
+
+fn forward_config() -> config::Config {
+    config::Config::from_value(&config::merge(
+        &config::defaults(),
+        &json!({"apiKey":"","onebotToken":"","dataDir":"data","agent":{"allowedGroups":["456"]}}),
+    ))
+    .unwrap()
+}
+fn forward_event() -> Value {
+    json!({"post_type":"message","message_type":"group","self_id":123,"user_id":789,
+        "group_id":456,"message_id":42,"time":1000,
+        "message":[{"type":"text","data":{"text":"before "}},
+            {"type":"forward","data":{"forwardId":"opaque-forward"}},
+            {"type":"text","data":{"text":" after"}}]})
+}
+
+#[tokio::test]
+async fn forward_fetch_normalize_text_only_and_fallback() {
+    use qq_inner_core::policy::{normalize, resolve_forwards};
+    let mut m = mock(json!({"user_id":123}), json!(true), 0).await;
+    let (b, mut rx) = forward_bot(&m);
+    let (s, t) = running(&b, &mut rx).await;
+    for field in ["nodes", "messages"] {
+        let a = b.clone();
+        let call = tokio::spawn(async move {
+            let c = forward_config();
+            let resolved = resolve_forwards(&forward_event(), &a, &c.agent, 1000.).await;
+            normalize(&resolved, "123", &c.agent, 1000.).unwrap()
+        });
+        let req = next(&mut m.requests).await;
+        assert_eq!(req["action"], "get_forward_msg");
+        assert_eq!(req["params"], json!({"id":"opaque-forward"}));
+        let mut data = json!({});
+        data[field] = json!([
+            {"content":[{"type":"text","data":{"text":"first node"}},
+                {"type":"at","data":{"qq":"123"}}, {"type":"file","data":{"text":"secret file"}},
+                {"type":"forward","data":{"forwardId":"nested"}}]},
+            {"type":"node","data":{"message":[{"type":"text","data":{"text":"second node"}}]}}
+        ]);
+        m.frames.send(response(&req, data, json!(0), "ok")).unwrap();
+        let message = call.await.unwrap();
+        assert_eq!(message.text, "before first node\nsecond node\n after");
+        assert_eq!(message.hint, qq_inner_core::policy::Hint::Open);
+        assert!(m.requests.try_recv().is_err());
+    }
+    // 失败或响应结构异常时维持旧占位；无 ID 不请求，拒收来源也不请求。
+    for (data, retcode, status) in [
+        (json!({}), json!(1), "failed"),
+        (json!({"nodes":"bad"}), json!(0), "ok"),
+    ] {
+        let a = b.clone();
+        let call = tokio::spawn(async move {
+            resolve_forwards(&forward_event(), &a, &forward_config().agent, 1000.).await
+        });
+        let req = next(&mut m.requests).await;
+        m.frames
+            .send(response(&req, data, retcode, status))
+            .unwrap();
+        assert_eq!(call.await.unwrap(), forward_event());
+    }
+    let mut missing = forward_event();
+    missing["message"][1]["data"] = json!({});
+    assert_eq!(
+        resolve_forwards(&missing, &b, &forward_config().agent, 1000.).await,
+        missing
+    );
+    let mut ignored = forward_event();
+    ignored["group_id"] = json!(999);
+    assert_eq!(
+        resolve_forwards(&ignored, &b, &forward_config().agent, 1000.).await,
+        ignored
+    );
+    assert!(m.requests.try_recv().is_err());
+    stop(s, t).await;
+}
+
+#[tokio::test]
+async fn forward_disabled_preserves_existing_behavior() {
+    use qq_inner_core::policy::{normalize, resolve_forwards};
+    let m = mock(json!({"user_id":123}), json!(true), 0).await;
+    let (b, mut rx) = bot(&m, "a+b &?", "123", 10.0);
+    let (s, t) = running(&b, &mut rx).await;
+    let c = forward_config();
+    assert!(!c.onebot.forward_enabled);
+    assert!(!b.forward_enabled());
+    let event = forward_event();
+    let resolved = resolve_forwards(&event, &b, &c.agent, 1000.).await;
+    assert_eq!(resolved, event);
+    assert_eq!(
+        normalize(&resolved, "123", &c.agent, 1000.).unwrap().text,
+        normalize(&event, "123", &c.agent, 1000.).unwrap().text
+    );
+    assert_eq!(
+        b.send_forward("group:456", vec![json!({"user_id":789,"id":42})])
+            .await
+            .unwrap_err()
+            .code,
+        "forward_disabled"
+    );
+    assert_eq!(
+        b.get_forward_msg("opaque-forward").await.unwrap_err().code,
+        "forward_disabled"
+    );
+    assert!(m.requests.is_empty());
+    stop(s, t).await;
+}
