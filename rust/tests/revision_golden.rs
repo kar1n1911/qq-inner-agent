@@ -1,13 +1,6 @@
-//! Independent acceptance check for `settings::revision`.
-//!
-//! The expected hashes below were produced by the real JavaScript implementation
-//! (`src/settings.mjs`) against the same six fixtures, and are recorded here so the
-//! check does not depend on Node being installed. They also pin two edge cases that
-//! are easy to get wrong:
-//!
-//!   * a missing file and an empty file must hash identically (both contribute an
-//!     empty string, leaving sha256 of a single 0x00 byte), and
-//!   * non-ASCII content must be hashed as UTF-8.
+//! revision 的六组固化金标准已由真实 JS 实现生成，无需再次运行 Node。
+//! 缺文件与空文件同哈希；非 ASCII 按 UTF-8；断言精确比较完整 SHA-256。
+//! 无 Node 的零跳过验证方法见 golden/README.md，所有用例无条件执行。
 use qq_inner_core::settings::revision;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -33,7 +26,7 @@ const CASES: &[RevisionCase<'_>] = &[
         "87a2bae92110433bda8318e9f8fde84dc57dc04c7a9f72b3a1564cb759795fbc",
     ),
     (
-        // sha256 of a lone 0x00 byte — the join separator with two empty inputs.
+        // 两个空输入之间仅留下一个 0x00 分隔字节的 SHA-256。
         "neither",
         &[],
         "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",

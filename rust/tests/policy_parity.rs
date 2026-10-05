@@ -3,8 +3,6 @@
 //! 时区是这里最值得较真的地方：JS 用 ICU 的 `Intl.DateTimeFormat`，Rust 用 `chrono-tz`，
 //! 两者数据库版本不同。因此测试不只比对 `quiet()` 的布尔结果，还直接逐点比对
 //! "本地分钟数"，避免布尔值把偏差掩盖掉。期望值来自已捕获的 JSON 固化金标准，缺失即失败。
-#[path = "golden/mod.rs"]
-mod golden;
 use qq_inner_core::config::{load_with_env, Config};
 use qq_inner_core::policy::{
     active_at, allowed, local_minutes_of_day, pick_length_target, quiet, repeated, Allocation,
@@ -41,7 +39,15 @@ fn config_with(extra: Value) -> Config {
 
 // 输入也与快照逐值匹配，防止参数矩阵改变后误用旧期望值。
 fn expected(payload: &Value) -> Value {
-    golden::expected(include_str!("golden/policy.json"), payload)
+    // 四个不同 payload 全部捕获，包括 active_at；序列化键由 serde_json 的有序对象生成。
+    let cases: std::collections::BTreeMap<String, Value> =
+        serde_json::from_str(include_str!("golden/policy.json")).unwrap();
+    assert_eq!(cases.len(), 4, "必须保留四组不同的 policy 金标准");
+    let key = serde_json::to_string(payload).unwrap();
+    cases
+        .get(&key)
+        .unwrap_or_else(|| panic!("缺少 policy 固化金标准: {key}"))
+        .clone()
 }
 
 /// 覆盖南北半球、半小时偏移、超长 DST 跳变与整点偏移的时区。

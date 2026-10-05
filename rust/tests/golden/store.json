@@ -1,0 +1,3238 @@
+[
+  {
+    "expected": {
+      "decisions": [
+        {
+          "action": "send",
+          "chat": "g",
+          "id": "01c03f23-3bdf-4d2a-ab2c-2077e1ba9262",
+          "score": 3,
+          "tags": [
+            "中文",
+            {
+              "nested": null
+            }
+          ],
+          "ts": 100.25
+        }
+      ],
+      "expectation": {
+        "elapsedSeconds": 0.75,
+        "forecast": {
+          "reply": true
+        },
+        "observation": {
+          "event": "no_message_yet"
+        }
+      },
+      "messages": [
+        {
+          "chat": "g",
+          "id": "js",
+          "name": "测试",
+          "self": 0,
+          "sender": "1",
+          "text": "hello🙂",
+          "ts": 100.25
+        }
+      ],
+      "rawTables": {
+        "activity_rhythm": [],
+        "calls": [],
+        "chat_learning": [
+          {
+            "chat": "g",
+            "epoch": 0,
+            "last_id": "js",
+            "sources": "[{\"id\":\"js\"}]",
+            "style": "style",
+            "updated": 100.25
+          }
+        ],
+        "decisions": [
+          {
+            "action": "send",
+            "chat": "g",
+            "id": "01c03f23-3bdf-4d2a-ab2c-2077e1ba9262",
+            "score": 3,
+            "tags": "[\"中文\",{\"nested\":null}]",
+            "ts": 100.25
+          }
+        ],
+        "decoration_usage": [],
+        "deliveries": [],
+        "expectations": [
+          {
+            "chat": "g",
+            "expires": 160.25,
+            "forecast": "{\"reply\":true}",
+            "observation": null,
+            "ts": 100.25
+          }
+        ],
+        "expressions": [],
+        "group_orientation": [],
+        "handled": [],
+        "learned_memories": [],
+        "memory_layers": [],
+        "memory_revisions": [],
+        "messages": [
+          {
+            "chat": "g",
+            "id": "js",
+            "name": "测试",
+            "self": 0,
+            "sender": "1",
+            "text": "hello🙂",
+            "ts": 100.25
+          }
+        ],
+        "notes": [],
+        "send_assessments": [
+          {
+            "chat": "g",
+            "details": "{\"ok\":true,\"list\":[1,null]}",
+            "human_id": "js",
+            "id": "392a90a3-c3ab-4cf2-a52a-97b7e4bfb52c",
+            "status": "ready",
+            "ts": 100.25
+          }
+        ],
+        "thoughts": []
+      },
+      "schema": {
+        "objects": [
+          {
+            "name": "deliveries_chat_ts",
+            "sql": "CREATE INDEX deliveries_chat_ts ON deliveries(chat,ts)",
+            "tbl_name": "deliveries",
+            "type": "index"
+          },
+          {
+            "name": "learned_memories_chat",
+            "sql": "CREATE INDEX learned_memories_chat ON learned_memories(chat,expires)",
+            "tbl_name": "learned_memories",
+            "type": "index"
+          },
+          {
+            "name": "memory_layers_scope",
+            "sql": "CREATE INDEX memory_layers_scope ON memory_layers(chat,subject,layer,expires)",
+            "tbl_name": "memory_layers",
+            "type": "index"
+          },
+          {
+            "name": "messages_chat_ts",
+            "sql": "CREATE INDEX messages_chat_ts ON messages(chat,ts)",
+            "tbl_name": "messages",
+            "type": "index"
+          },
+          {
+            "name": "thoughts_chat",
+            "sql": "CREATE INDEX thoughts_chat ON thoughts(chat,created)",
+            "tbl_name": "thoughts",
+            "type": "index"
+          },
+          {
+            "name": "activity_rhythm",
+            "sql": "CREATE TABLE activity_rhythm (\n      id INTEGER PRIMARY KEY CHECK(id=1), signature TEXT, started REAL, until REAL,\n      active INTEGER, probability REAL, draw REAL)",
+            "tbl_name": "activity_rhythm",
+            "type": "table"
+          },
+          {
+            "name": "calls",
+            "sql": "CREATE TABLE calls(ts REAL)",
+            "tbl_name": "calls",
+            "type": "table"
+          },
+          {
+            "name": "chat_learning",
+            "sql": "CREATE TABLE chat_learning(chat TEXT PRIMARY KEY, style TEXT, sources TEXT, updated REAL, last_id TEXT, epoch INTEGER DEFAULT 0)",
+            "tbl_name": "chat_learning",
+            "type": "table"
+          },
+          {
+            "name": "decisions",
+            "sql": "CREATE TABLE decisions(id TEXT PRIMARY KEY, chat TEXT, ts REAL, action TEXT, score REAL, tags TEXT)",
+            "tbl_name": "decisions",
+            "type": "table"
+          },
+          {
+            "name": "decoration_usage",
+            "sql": "CREATE TABLE decoration_usage(chat TEXT PRIMARY KEY,ts REAL)",
+            "tbl_name": "decoration_usage",
+            "type": "table"
+          },
+          {
+            "name": "deliveries",
+            "sql": "CREATE TABLE deliveries(id TEXT PRIMARY KEY, chat TEXT, ts REAL, proactive INTEGER, status TEXT, message_id TEXT)",
+            "tbl_name": "deliveries",
+            "type": "table"
+          },
+          {
+            "name": "expectations",
+            "sql": "CREATE TABLE expectations(chat TEXT PRIMARY KEY, ts REAL, expires REAL, forecast TEXT, observation TEXT)",
+            "tbl_name": "expectations",
+            "type": "table"
+          },
+          {
+            "name": "expressions",
+            "sql": "CREATE TABLE expressions(chat TEXT,subject TEXT,kind TEXT,term TEXT,meaning TEXT,situation TEXT,example TEXT,confidence REAL,sources TEXT,updated REAL,last_used REAL DEFAULT 0,PRIMARY KEY(chat,subject,kind,term))",
+            "tbl_name": "expressions",
+            "type": "table"
+          },
+          {
+            "name": "group_orientation",
+            "sql": "CREATE TABLE group_orientation(chat TEXT PRIMARY KEY, started REAL, message_count INTEGER DEFAULT 0,\n      status TEXT DEFAULT 'observing', collected INTEGER DEFAULT 0, sources TEXT DEFAULT '{}', analysis TEXT DEFAULT '{}', retry_at REAL DEFAULT 0,\n      error TEXT, epoch INTEGER DEFAULT 0, joined_at REAL DEFAULT 0)",
+            "tbl_name": "group_orientation",
+            "type": "table"
+          },
+          {
+            "name": "handled",
+            "sql": "CREATE TABLE handled(chat TEXT PRIMARY KEY, human_id TEXT, pause_done INTEGER DEFAULT 0)",
+            "tbl_name": "handled",
+            "type": "table"
+          },
+          {
+            "name": "learned_memories",
+            "sql": "CREATE TABLE learned_memories(id TEXT PRIMARY KEY, chat TEXT, text TEXT, sources TEXT, created REAL, expires REAL)",
+            "tbl_name": "learned_memories",
+            "type": "table"
+          },
+          {
+            "name": "memory_layers",
+            "sql": "CREATE TABLE memory_layers(\n      id TEXT PRIMARY KEY, chat TEXT NOT NULL, subject TEXT NOT NULL, layer TEXT NOT NULL,\n      slot TEXT NOT NULL, text TEXT NOT NULL, sources TEXT NOT NULL, importance REAL,\n      created REAL, updated REAL, expires REAL, revision INTEGER DEFAULT 1, keywords TEXT NOT NULL DEFAULT '[]', confidence REAL NOT NULL DEFAULT 0.6,\n      UNIQUE(chat,subject,layer,slot))",
+            "tbl_name": "memory_layers",
+            "type": "table"
+          },
+          {
+            "name": "memory_revisions",
+            "sql": "CREATE TABLE memory_revisions (\n      memory_id TEXT, revision INTEGER, text TEXT, sources TEXT, updated REAL, replaced REAL,\n      PRIMARY KEY(memory_id,revision))",
+            "tbl_name": "memory_revisions",
+            "type": "table"
+          },
+          {
+            "name": "messages",
+            "sql": "CREATE TABLE messages(chat TEXT, id TEXT, sender TEXT, name TEXT, text TEXT, ts REAL, self INTEGER DEFAULT 0, PRIMARY KEY(chat,id))",
+            "tbl_name": "messages",
+            "type": "table"
+          },
+          {
+            "name": "notes",
+            "sql": "CREATE TABLE notes(id TEXT PRIMARY KEY, chat TEXT, text TEXT, created REAL)",
+            "tbl_name": "notes",
+            "type": "table"
+          },
+          {
+            "name": "send_assessments",
+            "sql": "CREATE TABLE send_assessments(id TEXT PRIMARY KEY, chat TEXT, human_id TEXT, ts REAL, status TEXT, details TEXT, UNIQUE(chat,human_id))",
+            "tbl_name": "send_assessments",
+            "type": "table"
+          },
+          {
+            "name": "thoughts",
+            "sql": "CREATE TABLE thoughts(id TEXT PRIMARY KEY, chat TEXT, text TEXT, kind TEXT, created REAL, used INTEGER DEFAULT 0, score REAL DEFAULT 0, subject TEXT)",
+            "tbl_name": "thoughts",
+            "type": "table"
+          },
+          {
+            "name": "memory_revision_cleanup",
+            "sql": "CREATE TRIGGER memory_revision_cleanup AFTER DELETE ON memory_layers BEGIN\n        DELETE FROM memory_revisions WHERE memory_id=OLD.id;\n      END",
+            "tbl_name": "memory_layers",
+            "type": "trigger"
+          }
+        ],
+        "tables": {
+          "activity_rhythm": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "id",
+                "notnull": 0,
+                "pk": 1,
+                "type": "INTEGER"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "signature",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 2,
+                "dflt_value": null,
+                "name": "started",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 3,
+                "dflt_value": null,
+                "name": "until",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 4,
+                "dflt_value": null,
+                "name": "active",
+                "notnull": 0,
+                "pk": 0,
+                "type": "INTEGER"
+              },
+              {
+                "cid": 5,
+                "dflt_value": null,
+                "name": "probability",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 6,
+                "dflt_value": null,
+                "name": "draw",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              }
+            ],
+            "indexes": []
+          },
+          "calls": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "ts",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              }
+            ],
+            "indexes": []
+          },
+          "chat_learning": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "chat",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "style",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 2,
+                "dflt_value": null,
+                "name": "sources",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 3,
+                "dflt_value": null,
+                "name": "updated",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 4,
+                "dflt_value": null,
+                "name": "last_id",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 5,
+                "dflt_value": "0",
+                "name": "epoch",
+                "notnull": 0,
+                "pk": 0,
+                "type": "INTEGER"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "chat",
+                    "seqno": 0
+                  }
+                ],
+                "name": "sqlite_autoindex_chat_learning_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              }
+            ]
+          },
+          "decisions": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "id",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "chat",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 2,
+                "dflt_value": null,
+                "name": "ts",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 3,
+                "dflt_value": null,
+                "name": "action",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 4,
+                "dflt_value": null,
+                "name": "score",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 5,
+                "dflt_value": null,
+                "name": "tags",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "id",
+                    "seqno": 0
+                  }
+                ],
+                "name": "sqlite_autoindex_decisions_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              }
+            ]
+          },
+          "decoration_usage": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "chat",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "ts",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "chat",
+                    "seqno": 0
+                  }
+                ],
+                "name": "sqlite_autoindex_decoration_usage_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              }
+            ]
+          },
+          "deliveries": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "id",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "chat",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 2,
+                "dflt_value": null,
+                "name": "ts",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 3,
+                "dflt_value": null,
+                "name": "proactive",
+                "notnull": 0,
+                "pk": 0,
+                "type": "INTEGER"
+              },
+              {
+                "cid": 4,
+                "dflt_value": null,
+                "name": "status",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 5,
+                "dflt_value": null,
+                "name": "message_id",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 1,
+                    "name": "chat",
+                    "seqno": 0
+                  },
+                  {
+                    "cid": 2,
+                    "name": "ts",
+                    "seqno": 1
+                  }
+                ],
+                "name": "deliveries_chat_ts",
+                "origin": "c",
+                "partial": 0,
+                "unique": 0
+              },
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "id",
+                    "seqno": 0
+                  }
+                ],
+                "name": "sqlite_autoindex_deliveries_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              }
+            ]
+          },
+          "expectations": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "chat",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "ts",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 2,
+                "dflt_value": null,
+                "name": "expires",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 3,
+                "dflt_value": null,
+                "name": "forecast",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 4,
+                "dflt_value": null,
+                "name": "observation",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "chat",
+                    "seqno": 0
+                  }
+                ],
+                "name": "sqlite_autoindex_expectations_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              }
+            ]
+          },
+          "expressions": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "chat",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "subject",
+                "notnull": 0,
+                "pk": 2,
+                "type": "TEXT"
+              },
+              {
+                "cid": 2,
+                "dflt_value": null,
+                "name": "kind",
+                "notnull": 0,
+                "pk": 3,
+                "type": "TEXT"
+              },
+              {
+                "cid": 3,
+                "dflt_value": null,
+                "name": "term",
+                "notnull": 0,
+                "pk": 4,
+                "type": "TEXT"
+              },
+              {
+                "cid": 4,
+                "dflt_value": null,
+                "name": "meaning",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 5,
+                "dflt_value": null,
+                "name": "situation",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 6,
+                "dflt_value": null,
+                "name": "example",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 7,
+                "dflt_value": null,
+                "name": "confidence",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 8,
+                "dflt_value": null,
+                "name": "sources",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 9,
+                "dflt_value": null,
+                "name": "updated",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 10,
+                "dflt_value": "0",
+                "name": "last_used",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "chat",
+                    "seqno": 0
+                  },
+                  {
+                    "cid": 1,
+                    "name": "subject",
+                    "seqno": 1
+                  },
+                  {
+                    "cid": 2,
+                    "name": "kind",
+                    "seqno": 2
+                  },
+                  {
+                    "cid": 3,
+                    "name": "term",
+                    "seqno": 3
+                  }
+                ],
+                "name": "sqlite_autoindex_expressions_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              }
+            ]
+          },
+          "group_orientation": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "chat",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "started",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 2,
+                "dflt_value": "0",
+                "name": "message_count",
+                "notnull": 0,
+                "pk": 0,
+                "type": "INTEGER"
+              },
+              {
+                "cid": 3,
+                "dflt_value": "'observing'",
+                "name": "status",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 4,
+                "dflt_value": "0",
+                "name": "collected",
+                "notnull": 0,
+                "pk": 0,
+                "type": "INTEGER"
+              },
+              {
+                "cid": 5,
+                "dflt_value": "'{}'",
+                "name": "sources",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 6,
+                "dflt_value": "'{}'",
+                "name": "analysis",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 7,
+                "dflt_value": "0",
+                "name": "retry_at",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 8,
+                "dflt_value": null,
+                "name": "error",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 9,
+                "dflt_value": "0",
+                "name": "epoch",
+                "notnull": 0,
+                "pk": 0,
+                "type": "INTEGER"
+              },
+              {
+                "cid": 10,
+                "dflt_value": "0",
+                "name": "joined_at",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "chat",
+                    "seqno": 0
+                  }
+                ],
+                "name": "sqlite_autoindex_group_orientation_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              }
+            ]
+          },
+          "handled": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "chat",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "human_id",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 2,
+                "dflt_value": "0",
+                "name": "pause_done",
+                "notnull": 0,
+                "pk": 0,
+                "type": "INTEGER"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "chat",
+                    "seqno": 0
+                  }
+                ],
+                "name": "sqlite_autoindex_handled_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              }
+            ]
+          },
+          "learned_memories": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "id",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "chat",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 2,
+                "dflt_value": null,
+                "name": "text",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 3,
+                "dflt_value": null,
+                "name": "sources",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 4,
+                "dflt_value": null,
+                "name": "created",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 5,
+                "dflt_value": null,
+                "name": "expires",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 1,
+                    "name": "chat",
+                    "seqno": 0
+                  },
+                  {
+                    "cid": 5,
+                    "name": "expires",
+                    "seqno": 1
+                  }
+                ],
+                "name": "learned_memories_chat",
+                "origin": "c",
+                "partial": 0,
+                "unique": 0
+              },
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "id",
+                    "seqno": 0
+                  }
+                ],
+                "name": "sqlite_autoindex_learned_memories_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              }
+            ]
+          },
+          "memory_layers": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "id",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "chat",
+                "notnull": 1,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 2,
+                "dflt_value": null,
+                "name": "subject",
+                "notnull": 1,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 3,
+                "dflt_value": null,
+                "name": "layer",
+                "notnull": 1,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 4,
+                "dflt_value": null,
+                "name": "slot",
+                "notnull": 1,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 5,
+                "dflt_value": null,
+                "name": "text",
+                "notnull": 1,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 6,
+                "dflt_value": null,
+                "name": "sources",
+                "notnull": 1,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 7,
+                "dflt_value": null,
+                "name": "importance",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 8,
+                "dflt_value": null,
+                "name": "created",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 9,
+                "dflt_value": null,
+                "name": "updated",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 10,
+                "dflt_value": null,
+                "name": "expires",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 11,
+                "dflt_value": "1",
+                "name": "revision",
+                "notnull": 0,
+                "pk": 0,
+                "type": "INTEGER"
+              },
+              {
+                "cid": 12,
+                "dflt_value": "'[]'",
+                "name": "keywords",
+                "notnull": 1,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 13,
+                "dflt_value": "0.6",
+                "name": "confidence",
+                "notnull": 1,
+                "pk": 0,
+                "type": "REAL"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 1,
+                    "name": "chat",
+                    "seqno": 0
+                  },
+                  {
+                    "cid": 2,
+                    "name": "subject",
+                    "seqno": 1
+                  },
+                  {
+                    "cid": 3,
+                    "name": "layer",
+                    "seqno": 2
+                  },
+                  {
+                    "cid": 10,
+                    "name": "expires",
+                    "seqno": 3
+                  }
+                ],
+                "name": "memory_layers_scope",
+                "origin": "c",
+                "partial": 0,
+                "unique": 0
+              },
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "id",
+                    "seqno": 0
+                  }
+                ],
+                "name": "sqlite_autoindex_memory_layers_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              },
+              {
+                "columns": [
+                  {
+                    "cid": 1,
+                    "name": "chat",
+                    "seqno": 0
+                  },
+                  {
+                    "cid": 2,
+                    "name": "subject",
+                    "seqno": 1
+                  },
+                  {
+                    "cid": 3,
+                    "name": "layer",
+                    "seqno": 2
+                  },
+                  {
+                    "cid": 4,
+                    "name": "slot",
+                    "seqno": 3
+                  }
+                ],
+                "name": "sqlite_autoindex_memory_layers_2",
+                "origin": "u",
+                "partial": 0,
+                "unique": 1
+              }
+            ]
+          },
+          "memory_revisions": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "memory_id",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "revision",
+                "notnull": 0,
+                "pk": 2,
+                "type": "INTEGER"
+              },
+              {
+                "cid": 2,
+                "dflt_value": null,
+                "name": "text",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 3,
+                "dflt_value": null,
+                "name": "sources",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 4,
+                "dflt_value": null,
+                "name": "updated",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 5,
+                "dflt_value": null,
+                "name": "replaced",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "memory_id",
+                    "seqno": 0
+                  },
+                  {
+                    "cid": 1,
+                    "name": "revision",
+                    "seqno": 1
+                  }
+                ],
+                "name": "sqlite_autoindex_memory_revisions_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              }
+            ]
+          },
+          "messages": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "chat",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "id",
+                "notnull": 0,
+                "pk": 2,
+                "type": "TEXT"
+              },
+              {
+                "cid": 2,
+                "dflt_value": null,
+                "name": "sender",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 3,
+                "dflt_value": null,
+                "name": "name",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 4,
+                "dflt_value": null,
+                "name": "text",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 5,
+                "dflt_value": null,
+                "name": "ts",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 6,
+                "dflt_value": "0",
+                "name": "self",
+                "notnull": 0,
+                "pk": 0,
+                "type": "INTEGER"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "chat",
+                    "seqno": 0
+                  },
+                  {
+                    "cid": 5,
+                    "name": "ts",
+                    "seqno": 1
+                  }
+                ],
+                "name": "messages_chat_ts",
+                "origin": "c",
+                "partial": 0,
+                "unique": 0
+              },
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "chat",
+                    "seqno": 0
+                  },
+                  {
+                    "cid": 1,
+                    "name": "id",
+                    "seqno": 1
+                  }
+                ],
+                "name": "sqlite_autoindex_messages_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              }
+            ]
+          },
+          "notes": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "id",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "chat",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 2,
+                "dflt_value": null,
+                "name": "text",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 3,
+                "dflt_value": null,
+                "name": "created",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "id",
+                    "seqno": 0
+                  }
+                ],
+                "name": "sqlite_autoindex_notes_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              }
+            ]
+          },
+          "send_assessments": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "id",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "chat",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 2,
+                "dflt_value": null,
+                "name": "human_id",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 3,
+                "dflt_value": null,
+                "name": "ts",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 4,
+                "dflt_value": null,
+                "name": "status",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 5,
+                "dflt_value": null,
+                "name": "details",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "id",
+                    "seqno": 0
+                  }
+                ],
+                "name": "sqlite_autoindex_send_assessments_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              },
+              {
+                "columns": [
+                  {
+                    "cid": 1,
+                    "name": "chat",
+                    "seqno": 0
+                  },
+                  {
+                    "cid": 2,
+                    "name": "human_id",
+                    "seqno": 1
+                  }
+                ],
+                "name": "sqlite_autoindex_send_assessments_2",
+                "origin": "u",
+                "partial": 0,
+                "unique": 1
+              }
+            ]
+          },
+          "thoughts": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "id",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "chat",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 2,
+                "dflt_value": null,
+                "name": "text",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 3,
+                "dflt_value": null,
+                "name": "kind",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 4,
+                "dflt_value": null,
+                "name": "created",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 5,
+                "dflt_value": "0",
+                "name": "used",
+                "notnull": 0,
+                "pk": 0,
+                "type": "INTEGER"
+              },
+              {
+                "cid": 6,
+                "dflt_value": "0",
+                "name": "score",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 7,
+                "dflt_value": null,
+                "name": "subject",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "id",
+                    "seqno": 0
+                  }
+                ],
+                "name": "sqlite_autoindex_thoughts_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              },
+              {
+                "columns": [
+                  {
+                    "cid": 1,
+                    "name": "chat",
+                    "seqno": 0
+                  },
+                  {
+                    "cid": 4,
+                    "name": "created",
+                    "seqno": 1
+                  }
+                ],
+                "name": "thoughts_chat",
+                "origin": "c",
+                "partial": 0,
+                "unique": 0
+              }
+            ]
+          }
+        }
+      }
+    },
+    "input": {
+      "mode": "write"
+    },
+    "case": "shared_js_database_schema_and_json_roundtrip-0"
+  },
+  {
+    "expected": {
+      "assessment": {
+        "chat": "g",
+        "details": "{\"rust\":[\"中文\",null]}",
+        "human_id": "rust",
+        "id": "144a4c61-ebd9-4947-8644-1e18f81159c0",
+        "status": "ready",
+        "ts": 101
+      },
+      "decisions": [
+        {
+          "action": "send",
+          "chat": "g",
+          "id": "01c03f23-3bdf-4d2a-ab2c-2077e1ba9262",
+          "score": 3,
+          "tags": [
+            "中文",
+            {
+              "nested": null
+            }
+          ],
+          "ts": 100.25
+        },
+        {
+          "action": "wait",
+          "chat": "g",
+          "id": "ba22a4ee-62d7-49b0-9e52-d92fe4ea0157",
+          "score": 2,
+          "tags": {
+            "a": [
+              true,
+              null,
+              "中文"
+            ]
+          },
+          "ts": 101
+        }
+      ],
+      "expectation": {
+        "elapsedSeconds": 0,
+        "forecast": {
+          "rust": true
+        },
+        "observation": {
+          "addressed": true,
+          "at": 101,
+          "event": "human_message"
+        }
+      },
+      "messages": [
+        {
+          "chat": "g",
+          "id": "js",
+          "name": "测试",
+          "self": 0,
+          "sender": "1",
+          "text": "hello🙂",
+          "ts": 100.25
+        },
+        {
+          "chat": "g",
+          "id": "rust",
+          "name": "Rust",
+          "self": 0,
+          "sender": "2",
+          "text": "回应",
+          "ts": 101
+        }
+      ],
+      "rawTables": {
+        "activity_rhythm": [],
+        "calls": [],
+        "chat_learning": [
+          {
+            "chat": "g",
+            "epoch": 0,
+            "last_id": "js",
+            "sources": "[{\"id\":\"js\"}]",
+            "style": "style",
+            "updated": 100.25
+          }
+        ],
+        "decisions": [
+          {
+            "action": "send",
+            "chat": "g",
+            "id": "01c03f23-3bdf-4d2a-ab2c-2077e1ba9262",
+            "score": 3,
+            "tags": "[\"中文\",{\"nested\":null}]",
+            "ts": 100.25
+          },
+          {
+            "action": "wait",
+            "chat": "g",
+            "id": "ba22a4ee-62d7-49b0-9e52-d92fe4ea0157",
+            "score": 2,
+            "tags": "{\"a\":[true,null,\"中文\"]}",
+            "ts": 101
+          }
+        ],
+        "decoration_usage": [],
+        "deliveries": [],
+        "expectations": [
+          {
+            "chat": "g",
+            "expires": 161,
+            "forecast": "{\"rust\":true}",
+            "observation": "{\"addressed\":true,\"at\":101.0,\"event\":\"human_message\"}",
+            "ts": 101
+          }
+        ],
+        "expressions": [],
+        "group_orientation": [],
+        "handled": [],
+        "learned_memories": [],
+        "memory_layers": [],
+        "memory_revisions": [],
+        "messages": [
+          {
+            "chat": "g",
+            "id": "js",
+            "name": "测试",
+            "self": 0,
+            "sender": "1",
+            "text": "hello🙂",
+            "ts": 100.25
+          },
+          {
+            "chat": "g",
+            "id": "rust",
+            "name": "Rust",
+            "self": 0,
+            "sender": "2",
+            "text": "回应",
+            "ts": 101
+          }
+        ],
+        "notes": [],
+        "send_assessments": [
+          {
+            "chat": "g",
+            "details": "{\"ok\":true,\"list\":[1,null]}",
+            "human_id": "js",
+            "id": "392a90a3-c3ab-4cf2-a52a-97b7e4bfb52c",
+            "status": "ready",
+            "ts": 100.25
+          },
+          {
+            "chat": "g",
+            "details": "{\"rust\":[\"中文\",null]}",
+            "human_id": "rust",
+            "id": "144a4c61-ebd9-4947-8644-1e18f81159c0",
+            "status": "ready",
+            "ts": 101
+          }
+        ],
+        "thoughts": []
+      },
+      "schema": {
+        "objects": [
+          {
+            "name": "deliveries_chat_ts",
+            "sql": "CREATE INDEX deliveries_chat_ts ON deliveries(chat,ts)",
+            "tbl_name": "deliveries",
+            "type": "index"
+          },
+          {
+            "name": "learned_memories_chat",
+            "sql": "CREATE INDEX learned_memories_chat ON learned_memories(chat,expires)",
+            "tbl_name": "learned_memories",
+            "type": "index"
+          },
+          {
+            "name": "memory_layers_scope",
+            "sql": "CREATE INDEX memory_layers_scope ON memory_layers(chat,subject,layer,expires)",
+            "tbl_name": "memory_layers",
+            "type": "index"
+          },
+          {
+            "name": "messages_chat_ts",
+            "sql": "CREATE INDEX messages_chat_ts ON messages(chat,ts)",
+            "tbl_name": "messages",
+            "type": "index"
+          },
+          {
+            "name": "thoughts_chat",
+            "sql": "CREATE INDEX thoughts_chat ON thoughts(chat,created)",
+            "tbl_name": "thoughts",
+            "type": "index"
+          },
+          {
+            "name": "activity_rhythm",
+            "sql": "CREATE TABLE activity_rhythm (\n      id INTEGER PRIMARY KEY CHECK(id=1), signature TEXT, started REAL, until REAL,\n      active INTEGER, probability REAL, draw REAL)",
+            "tbl_name": "activity_rhythm",
+            "type": "table"
+          },
+          {
+            "name": "calls",
+            "sql": "CREATE TABLE calls(ts REAL)",
+            "tbl_name": "calls",
+            "type": "table"
+          },
+          {
+            "name": "chat_learning",
+            "sql": "CREATE TABLE chat_learning(chat TEXT PRIMARY KEY, style TEXT, sources TEXT, updated REAL, last_id TEXT, epoch INTEGER DEFAULT 0)",
+            "tbl_name": "chat_learning",
+            "type": "table"
+          },
+          {
+            "name": "decisions",
+            "sql": "CREATE TABLE decisions(id TEXT PRIMARY KEY, chat TEXT, ts REAL, action TEXT, score REAL, tags TEXT)",
+            "tbl_name": "decisions",
+            "type": "table"
+          },
+          {
+            "name": "decoration_usage",
+            "sql": "CREATE TABLE decoration_usage(chat TEXT PRIMARY KEY,ts REAL)",
+            "tbl_name": "decoration_usage",
+            "type": "table"
+          },
+          {
+            "name": "deliveries",
+            "sql": "CREATE TABLE deliveries(id TEXT PRIMARY KEY, chat TEXT, ts REAL, proactive INTEGER, status TEXT, message_id TEXT)",
+            "tbl_name": "deliveries",
+            "type": "table"
+          },
+          {
+            "name": "expectations",
+            "sql": "CREATE TABLE expectations(chat TEXT PRIMARY KEY, ts REAL, expires REAL, forecast TEXT, observation TEXT)",
+            "tbl_name": "expectations",
+            "type": "table"
+          },
+          {
+            "name": "expressions",
+            "sql": "CREATE TABLE expressions(chat TEXT,subject TEXT,kind TEXT,term TEXT,meaning TEXT,situation TEXT,example TEXT,confidence REAL,sources TEXT,updated REAL,last_used REAL DEFAULT 0,PRIMARY KEY(chat,subject,kind,term))",
+            "tbl_name": "expressions",
+            "type": "table"
+          },
+          {
+            "name": "group_orientation",
+            "sql": "CREATE TABLE group_orientation(chat TEXT PRIMARY KEY, started REAL, message_count INTEGER DEFAULT 0,\n      status TEXT DEFAULT 'observing', collected INTEGER DEFAULT 0, sources TEXT DEFAULT '{}', analysis TEXT DEFAULT '{}', retry_at REAL DEFAULT 0,\n      error TEXT, epoch INTEGER DEFAULT 0, joined_at REAL DEFAULT 0)",
+            "tbl_name": "group_orientation",
+            "type": "table"
+          },
+          {
+            "name": "handled",
+            "sql": "CREATE TABLE handled(chat TEXT PRIMARY KEY, human_id TEXT, pause_done INTEGER DEFAULT 0)",
+            "tbl_name": "handled",
+            "type": "table"
+          },
+          {
+            "name": "learned_memories",
+            "sql": "CREATE TABLE learned_memories(id TEXT PRIMARY KEY, chat TEXT, text TEXT, sources TEXT, created REAL, expires REAL)",
+            "tbl_name": "learned_memories",
+            "type": "table"
+          },
+          {
+            "name": "memory_layers",
+            "sql": "CREATE TABLE memory_layers(\n      id TEXT PRIMARY KEY, chat TEXT NOT NULL, subject TEXT NOT NULL, layer TEXT NOT NULL,\n      slot TEXT NOT NULL, text TEXT NOT NULL, sources TEXT NOT NULL, importance REAL,\n      created REAL, updated REAL, expires REAL, revision INTEGER DEFAULT 1, keywords TEXT NOT NULL DEFAULT '[]', confidence REAL NOT NULL DEFAULT 0.6,\n      UNIQUE(chat,subject,layer,slot))",
+            "tbl_name": "memory_layers",
+            "type": "table"
+          },
+          {
+            "name": "memory_revisions",
+            "sql": "CREATE TABLE memory_revisions (\n      memory_id TEXT, revision INTEGER, text TEXT, sources TEXT, updated REAL, replaced REAL,\n      PRIMARY KEY(memory_id,revision))",
+            "tbl_name": "memory_revisions",
+            "type": "table"
+          },
+          {
+            "name": "messages",
+            "sql": "CREATE TABLE messages(chat TEXT, id TEXT, sender TEXT, name TEXT, text TEXT, ts REAL, self INTEGER DEFAULT 0, PRIMARY KEY(chat,id))",
+            "tbl_name": "messages",
+            "type": "table"
+          },
+          {
+            "name": "notes",
+            "sql": "CREATE TABLE notes(id TEXT PRIMARY KEY, chat TEXT, text TEXT, created REAL)",
+            "tbl_name": "notes",
+            "type": "table"
+          },
+          {
+            "name": "send_assessments",
+            "sql": "CREATE TABLE send_assessments(id TEXT PRIMARY KEY, chat TEXT, human_id TEXT, ts REAL, status TEXT, details TEXT, UNIQUE(chat,human_id))",
+            "tbl_name": "send_assessments",
+            "type": "table"
+          },
+          {
+            "name": "thoughts",
+            "sql": "CREATE TABLE thoughts(id TEXT PRIMARY KEY, chat TEXT, text TEXT, kind TEXT, created REAL, used INTEGER DEFAULT 0, score REAL DEFAULT 0, subject TEXT)",
+            "tbl_name": "thoughts",
+            "type": "table"
+          },
+          {
+            "name": "memory_revision_cleanup",
+            "sql": "CREATE TRIGGER memory_revision_cleanup AFTER DELETE ON memory_layers BEGIN\n        DELETE FROM memory_revisions WHERE memory_id=OLD.id;\n      END",
+            "tbl_name": "memory_layers",
+            "type": "trigger"
+          }
+        ],
+        "tables": {
+          "activity_rhythm": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "id",
+                "notnull": 0,
+                "pk": 1,
+                "type": "INTEGER"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "signature",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 2,
+                "dflt_value": null,
+                "name": "started",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 3,
+                "dflt_value": null,
+                "name": "until",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 4,
+                "dflt_value": null,
+                "name": "active",
+                "notnull": 0,
+                "pk": 0,
+                "type": "INTEGER"
+              },
+              {
+                "cid": 5,
+                "dflt_value": null,
+                "name": "probability",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 6,
+                "dflt_value": null,
+                "name": "draw",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              }
+            ],
+            "indexes": []
+          },
+          "calls": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "ts",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              }
+            ],
+            "indexes": []
+          },
+          "chat_learning": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "chat",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "style",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 2,
+                "dflt_value": null,
+                "name": "sources",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 3,
+                "dflt_value": null,
+                "name": "updated",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 4,
+                "dflt_value": null,
+                "name": "last_id",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 5,
+                "dflt_value": "0",
+                "name": "epoch",
+                "notnull": 0,
+                "pk": 0,
+                "type": "INTEGER"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "chat",
+                    "seqno": 0
+                  }
+                ],
+                "name": "sqlite_autoindex_chat_learning_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              }
+            ]
+          },
+          "decisions": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "id",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "chat",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 2,
+                "dflt_value": null,
+                "name": "ts",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 3,
+                "dflt_value": null,
+                "name": "action",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 4,
+                "dflt_value": null,
+                "name": "score",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 5,
+                "dflt_value": null,
+                "name": "tags",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "id",
+                    "seqno": 0
+                  }
+                ],
+                "name": "sqlite_autoindex_decisions_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              }
+            ]
+          },
+          "decoration_usage": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "chat",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "ts",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "chat",
+                    "seqno": 0
+                  }
+                ],
+                "name": "sqlite_autoindex_decoration_usage_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              }
+            ]
+          },
+          "deliveries": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "id",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "chat",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 2,
+                "dflt_value": null,
+                "name": "ts",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 3,
+                "dflt_value": null,
+                "name": "proactive",
+                "notnull": 0,
+                "pk": 0,
+                "type": "INTEGER"
+              },
+              {
+                "cid": 4,
+                "dflt_value": null,
+                "name": "status",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 5,
+                "dflt_value": null,
+                "name": "message_id",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 1,
+                    "name": "chat",
+                    "seqno": 0
+                  },
+                  {
+                    "cid": 2,
+                    "name": "ts",
+                    "seqno": 1
+                  }
+                ],
+                "name": "deliveries_chat_ts",
+                "origin": "c",
+                "partial": 0,
+                "unique": 0
+              },
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "id",
+                    "seqno": 0
+                  }
+                ],
+                "name": "sqlite_autoindex_deliveries_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              }
+            ]
+          },
+          "expectations": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "chat",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "ts",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 2,
+                "dflt_value": null,
+                "name": "expires",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 3,
+                "dflt_value": null,
+                "name": "forecast",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 4,
+                "dflt_value": null,
+                "name": "observation",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "chat",
+                    "seqno": 0
+                  }
+                ],
+                "name": "sqlite_autoindex_expectations_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              }
+            ]
+          },
+          "expressions": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "chat",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "subject",
+                "notnull": 0,
+                "pk": 2,
+                "type": "TEXT"
+              },
+              {
+                "cid": 2,
+                "dflt_value": null,
+                "name": "kind",
+                "notnull": 0,
+                "pk": 3,
+                "type": "TEXT"
+              },
+              {
+                "cid": 3,
+                "dflt_value": null,
+                "name": "term",
+                "notnull": 0,
+                "pk": 4,
+                "type": "TEXT"
+              },
+              {
+                "cid": 4,
+                "dflt_value": null,
+                "name": "meaning",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 5,
+                "dflt_value": null,
+                "name": "situation",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 6,
+                "dflt_value": null,
+                "name": "example",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 7,
+                "dflt_value": null,
+                "name": "confidence",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 8,
+                "dflt_value": null,
+                "name": "sources",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 9,
+                "dflt_value": null,
+                "name": "updated",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 10,
+                "dflt_value": "0",
+                "name": "last_used",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "chat",
+                    "seqno": 0
+                  },
+                  {
+                    "cid": 1,
+                    "name": "subject",
+                    "seqno": 1
+                  },
+                  {
+                    "cid": 2,
+                    "name": "kind",
+                    "seqno": 2
+                  },
+                  {
+                    "cid": 3,
+                    "name": "term",
+                    "seqno": 3
+                  }
+                ],
+                "name": "sqlite_autoindex_expressions_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              }
+            ]
+          },
+          "group_orientation": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "chat",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "started",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 2,
+                "dflt_value": "0",
+                "name": "message_count",
+                "notnull": 0,
+                "pk": 0,
+                "type": "INTEGER"
+              },
+              {
+                "cid": 3,
+                "dflt_value": "'observing'",
+                "name": "status",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 4,
+                "dflt_value": "0",
+                "name": "collected",
+                "notnull": 0,
+                "pk": 0,
+                "type": "INTEGER"
+              },
+              {
+                "cid": 5,
+                "dflt_value": "'{}'",
+                "name": "sources",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 6,
+                "dflt_value": "'{}'",
+                "name": "analysis",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 7,
+                "dflt_value": "0",
+                "name": "retry_at",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 8,
+                "dflt_value": null,
+                "name": "error",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 9,
+                "dflt_value": "0",
+                "name": "epoch",
+                "notnull": 0,
+                "pk": 0,
+                "type": "INTEGER"
+              },
+              {
+                "cid": 10,
+                "dflt_value": "0",
+                "name": "joined_at",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "chat",
+                    "seqno": 0
+                  }
+                ],
+                "name": "sqlite_autoindex_group_orientation_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              }
+            ]
+          },
+          "handled": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "chat",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "human_id",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 2,
+                "dflt_value": "0",
+                "name": "pause_done",
+                "notnull": 0,
+                "pk": 0,
+                "type": "INTEGER"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "chat",
+                    "seqno": 0
+                  }
+                ],
+                "name": "sqlite_autoindex_handled_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              }
+            ]
+          },
+          "learned_memories": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "id",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "chat",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 2,
+                "dflt_value": null,
+                "name": "text",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 3,
+                "dflt_value": null,
+                "name": "sources",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 4,
+                "dflt_value": null,
+                "name": "created",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 5,
+                "dflt_value": null,
+                "name": "expires",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 1,
+                    "name": "chat",
+                    "seqno": 0
+                  },
+                  {
+                    "cid": 5,
+                    "name": "expires",
+                    "seqno": 1
+                  }
+                ],
+                "name": "learned_memories_chat",
+                "origin": "c",
+                "partial": 0,
+                "unique": 0
+              },
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "id",
+                    "seqno": 0
+                  }
+                ],
+                "name": "sqlite_autoindex_learned_memories_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              }
+            ]
+          },
+          "memory_layers": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "id",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "chat",
+                "notnull": 1,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 2,
+                "dflt_value": null,
+                "name": "subject",
+                "notnull": 1,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 3,
+                "dflt_value": null,
+                "name": "layer",
+                "notnull": 1,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 4,
+                "dflt_value": null,
+                "name": "slot",
+                "notnull": 1,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 5,
+                "dflt_value": null,
+                "name": "text",
+                "notnull": 1,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 6,
+                "dflt_value": null,
+                "name": "sources",
+                "notnull": 1,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 7,
+                "dflt_value": null,
+                "name": "importance",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 8,
+                "dflt_value": null,
+                "name": "created",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 9,
+                "dflt_value": null,
+                "name": "updated",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 10,
+                "dflt_value": null,
+                "name": "expires",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 11,
+                "dflt_value": "1",
+                "name": "revision",
+                "notnull": 0,
+                "pk": 0,
+                "type": "INTEGER"
+              },
+              {
+                "cid": 12,
+                "dflt_value": "'[]'",
+                "name": "keywords",
+                "notnull": 1,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 13,
+                "dflt_value": "0.6",
+                "name": "confidence",
+                "notnull": 1,
+                "pk": 0,
+                "type": "REAL"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 1,
+                    "name": "chat",
+                    "seqno": 0
+                  },
+                  {
+                    "cid": 2,
+                    "name": "subject",
+                    "seqno": 1
+                  },
+                  {
+                    "cid": 3,
+                    "name": "layer",
+                    "seqno": 2
+                  },
+                  {
+                    "cid": 10,
+                    "name": "expires",
+                    "seqno": 3
+                  }
+                ],
+                "name": "memory_layers_scope",
+                "origin": "c",
+                "partial": 0,
+                "unique": 0
+              },
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "id",
+                    "seqno": 0
+                  }
+                ],
+                "name": "sqlite_autoindex_memory_layers_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              },
+              {
+                "columns": [
+                  {
+                    "cid": 1,
+                    "name": "chat",
+                    "seqno": 0
+                  },
+                  {
+                    "cid": 2,
+                    "name": "subject",
+                    "seqno": 1
+                  },
+                  {
+                    "cid": 3,
+                    "name": "layer",
+                    "seqno": 2
+                  },
+                  {
+                    "cid": 4,
+                    "name": "slot",
+                    "seqno": 3
+                  }
+                ],
+                "name": "sqlite_autoindex_memory_layers_2",
+                "origin": "u",
+                "partial": 0,
+                "unique": 1
+              }
+            ]
+          },
+          "memory_revisions": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "memory_id",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "revision",
+                "notnull": 0,
+                "pk": 2,
+                "type": "INTEGER"
+              },
+              {
+                "cid": 2,
+                "dflt_value": null,
+                "name": "text",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 3,
+                "dflt_value": null,
+                "name": "sources",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 4,
+                "dflt_value": null,
+                "name": "updated",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 5,
+                "dflt_value": null,
+                "name": "replaced",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "memory_id",
+                    "seqno": 0
+                  },
+                  {
+                    "cid": 1,
+                    "name": "revision",
+                    "seqno": 1
+                  }
+                ],
+                "name": "sqlite_autoindex_memory_revisions_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              }
+            ]
+          },
+          "messages": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "chat",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "id",
+                "notnull": 0,
+                "pk": 2,
+                "type": "TEXT"
+              },
+              {
+                "cid": 2,
+                "dflt_value": null,
+                "name": "sender",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 3,
+                "dflt_value": null,
+                "name": "name",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 4,
+                "dflt_value": null,
+                "name": "text",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 5,
+                "dflt_value": null,
+                "name": "ts",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 6,
+                "dflt_value": "0",
+                "name": "self",
+                "notnull": 0,
+                "pk": 0,
+                "type": "INTEGER"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "chat",
+                    "seqno": 0
+                  },
+                  {
+                    "cid": 5,
+                    "name": "ts",
+                    "seqno": 1
+                  }
+                ],
+                "name": "messages_chat_ts",
+                "origin": "c",
+                "partial": 0,
+                "unique": 0
+              },
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "chat",
+                    "seqno": 0
+                  },
+                  {
+                    "cid": 1,
+                    "name": "id",
+                    "seqno": 1
+                  }
+                ],
+                "name": "sqlite_autoindex_messages_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              }
+            ]
+          },
+          "notes": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "id",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "chat",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 2,
+                "dflt_value": null,
+                "name": "text",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 3,
+                "dflt_value": null,
+                "name": "created",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "id",
+                    "seqno": 0
+                  }
+                ],
+                "name": "sqlite_autoindex_notes_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              }
+            ]
+          },
+          "send_assessments": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "id",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "chat",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 2,
+                "dflt_value": null,
+                "name": "human_id",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 3,
+                "dflt_value": null,
+                "name": "ts",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 4,
+                "dflt_value": null,
+                "name": "status",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 5,
+                "dflt_value": null,
+                "name": "details",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "id",
+                    "seqno": 0
+                  }
+                ],
+                "name": "sqlite_autoindex_send_assessments_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              },
+              {
+                "columns": [
+                  {
+                    "cid": 1,
+                    "name": "chat",
+                    "seqno": 0
+                  },
+                  {
+                    "cid": 2,
+                    "name": "human_id",
+                    "seqno": 1
+                  }
+                ],
+                "name": "sqlite_autoindex_send_assessments_2",
+                "origin": "u",
+                "partial": 0,
+                "unique": 1
+              }
+            ]
+          },
+          "thoughts": {
+            "columns": [
+              {
+                "cid": 0,
+                "dflt_value": null,
+                "name": "id",
+                "notnull": 0,
+                "pk": 1,
+                "type": "TEXT"
+              },
+              {
+                "cid": 1,
+                "dflt_value": null,
+                "name": "chat",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 2,
+                "dflt_value": null,
+                "name": "text",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 3,
+                "dflt_value": null,
+                "name": "kind",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              },
+              {
+                "cid": 4,
+                "dflt_value": null,
+                "name": "created",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 5,
+                "dflt_value": "0",
+                "name": "used",
+                "notnull": 0,
+                "pk": 0,
+                "type": "INTEGER"
+              },
+              {
+                "cid": 6,
+                "dflt_value": "0",
+                "name": "score",
+                "notnull": 0,
+                "pk": 0,
+                "type": "REAL"
+              },
+              {
+                "cid": 7,
+                "dflt_value": null,
+                "name": "subject",
+                "notnull": 0,
+                "pk": 0,
+                "type": "TEXT"
+              }
+            ],
+            "indexes": [
+              {
+                "columns": [
+                  {
+                    "cid": 0,
+                    "name": "id",
+                    "seqno": 0
+                  }
+                ],
+                "name": "sqlite_autoindex_thoughts_1",
+                "origin": "pk",
+                "partial": 0,
+                "unique": 1
+              },
+              {
+                "columns": [
+                  {
+                    "cid": 1,
+                    "name": "chat",
+                    "seqno": 0
+                  },
+                  {
+                    "cid": 4,
+                    "name": "created",
+                    "seqno": 1
+                  }
+                ],
+                "name": "thoughts_chat",
+                "origin": "c",
+                "partial": 0,
+                "unique": 0
+              }
+            ]
+          }
+        }
+      }
+    },
+    "input": {
+      "mode": "read"
+    },
+    "case": "shared_js_database_schema_and_json_roundtrip-1"
+  }
+]

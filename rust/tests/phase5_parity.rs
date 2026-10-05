@@ -1,5 +1,7 @@
 //! P5 契约测试：精确断言状态不变量；概率/时长只使用容差或区间。
-//! 所有业务时间与随机数均显式注入，Node 不可用时仅跳过交叉验证。
+//! 所有业务时间与随机数均显式注入，期望值为固化金标准，所有断言无条件运行。
+#[path = "golden/mod.rs"]
+mod golden;
 use futures_util::future::BoxFuture;
 use qq_inner_core::{
     activity::ActivityRhythm,
@@ -11,54 +13,14 @@ use qq_inner_core::{
     store::Store,
 };
 use serde_json::{json, Value};
-use std::{
-    io::Write,
-    process::{Command, Stdio},
-    sync::{
-        atomic::{AtomicU64, AtomicUsize, Ordering},
-        Arc, Mutex,
-    },
+use std::sync::{
+    atomic::{AtomicU64, AtomicUsize, Ordering},
+    Arc, Mutex,
 };
 use tokio::sync::watch;
 
-fn oracle(input: Value) -> Option<Value> {
-    if !Command::new("node")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-    {
-        eprintln!("SKIP: node unavailable (Rust invariant assertions still run)");
-        return None;
-    }
-    let mut child = Command::new("node")
-        .args([
-            "--input-type=module",
-            "-e",
-            include_str!("fixtures/phase5-oracle.mjs"),
-        ])
-        .current_dir(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .unwrap(),
-        )
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(input.to_string().as_bytes())
-        .unwrap();
-    let out = child.wait_with_output().unwrap();
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    Some(serde_json::from_slice(&out.stdout).unwrap())
+fn expected(input: Value) -> Value {
+    golden::expected(include_str!("golden/phase5.json"), &input)
 }
 fn agent(extra: &Value) -> Agent {
     serde_json::from_value(merge(&defaults()["agent"], extra)).unwrap()
@@ -183,7 +145,8 @@ fn normalize_matrix_matches_real_js() {
             ["self", "self", "other", "other", "open", "open"][i]
         );
     }
-    if let Some(expected) = oracle(json!({"kind":"normalize","cases":cases})) {
+    {
+        let expected = expected(json!({"kind":"normalize","cases":cases}));
         for (i, got) in actual.iter().enumerate() {
             assert_json(got, &expected[i]);
         }
@@ -205,7 +168,8 @@ fn normalize_char_truncation_explicitly_differs_from_js_utf16() {
         let units = got["text"].as_array().unwrap();
         assert_eq!(units.len(), 101);
         assert_eq!(&units[99..], &[json!(0xd83d), json!(0xde00)]);
-        if let Some(js) = oracle(json!({"kind":"normalize","cases":[c]})) {
+        {
+            let js = expected(json!({"kind":"normalize","cases":[c]}));
             assert_eq!(js[0]["text"].as_array().unwrap().len(), 100);
             assert_eq!(js[0]["text"][99], 0xd83d);
             assert_eq!(&units[..100], js[0]["text"].as_array().unwrap());
@@ -313,7 +277,8 @@ fn activity_persistence_redraw_and_disabled_fallback_match_js() {
         })
         .unwrap();
     assert_eq!(count, 1);
-    if let Some(js) = oracle(json!({"kind":"activity","steps":steps})) {
+    {
+        let js = expected(json!({"kind":"activity","steps":steps}));
         assert_json(&json!(trace), &js);
     }
 }
@@ -348,7 +313,8 @@ fn observation_threshold_boundaries_match_js_including_disabled_config() {
         }
     }
     // JS 纯阈值函数不检查 enabled；disabled 放行另由 beforeSpeak 的真实状态机验证。
-    if let Some(js) = oracle(json!({"kind":"threshold","cases":cases})) {
+    {
+        let js = expected(json!({"kind":"threshold","cases":cases}));
         assert_eq!(json!(actual), js);
     }
 }
@@ -513,7 +479,8 @@ async fn orientation_ready_once_rejoin_and_duplicate_notices_match_js() {
     assert!(payloads[0]["sources"].get("history").is_none());
     assert!(!payloads[0].to_string().contains("secret"));
     drop(payloads);
-    if let Some(js) = oracle(json!({"kind":"orientation","agent":a,"steps":steps})) {
+    {
+        let js = expected(json!({"kind":"orientation","agent":a,"steps":steps}));
         assert_json(&json!(trace), &js);
     }
 }
@@ -559,7 +526,8 @@ async fn orientation_failures_keep_gate_closed_and_retry_at_exact_boundary() {
                 .status,
             "ready"
         );
-        if let Some(js) = oracle(json!({"kind":"orientation","agent":a,"steps":steps})) {
+        {
+            let js = expected(json!({"kind":"orientation","agent":a,"steps":steps}));
             assert_json(&json!(trace), &js);
         }
     }
@@ -580,7 +548,8 @@ async fn orientation_disabled_and_private_bypass_without_io_match_js() {
         assert_eq!(trace[1]["calls"], 0);
         assert_eq!(trace[1]["reads"], 0);
         assert_eq!(trace[1]["row"], Value::Null);
-        if let Some(js) = oracle(json!({"kind":"orientation","agent":a,"steps":steps})) {
+        {
+            let js = expected(json!({"kind":"orientation","agent":a,"steps":steps}));
             assert_json(&json!(trace), &js);
         }
     }

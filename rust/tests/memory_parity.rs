@@ -1,3 +1,5 @@
+#[path = "golden/mod.rs"]
+mod golden;
 use qq_inner_core::{
     config::{self, Agent, Emoji, Expression, Memory},
     expression::{self, ExpressionMemory},
@@ -6,11 +8,9 @@ use qq_inner_core::{
     store::{LayeredUpdate, ScopedOptions, Store},
 };
 use serde_json::{json, Value};
-use std::{
-    io::Write,
-    path::PathBuf,
-    process::{Command, Stdio},
-};
+use std::path::PathBuf;
+#[path = "golden/sqlite.rs"]
+mod sqlite;
 fn st<'a>(v: &'a Value, k: &str) -> &'a str {
     v[k].as_str().unwrap_or("")
 }
@@ -252,27 +252,8 @@ fn run(input: &Value) -> Value {
         })
         .collect::<Vec<_>>())
 }
-fn node(input: &Value) -> Value {
-    let mut child = Command::new("node")
-        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/memory-oracle.mjs"))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("Node is required for parity tests");
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(input.to_string().as_bytes())
-        .unwrap();
-    let out = child.wait_with_output().unwrap();
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    serde_json::from_slice(&out.stdout).unwrap()
+fn expected(input: &Value) -> Value {
+    golden::expected(include_str!("golden/memory.json"), input)
 }
 fn equal(a: &Value, b: &Value, path: &str) {
     match (a, b) {
@@ -301,7 +282,7 @@ fn equal(a: &Value, b: &Value, path: &str) {
 }
 fn parity(input: Value) -> Value {
     let actual = run(&input);
-    let expected = node(&input);
+    let expected = expected(&input);
     equal(&actual, &expected, "");
     actual
 }
@@ -312,7 +293,7 @@ fn update(key: &str, layer: &str, content: &str, id: &str, ts: f64) -> Value {
     json!({"subject":"person:20","layer":layer,"operation":"upsert","key":key,"text":content,"sources":[{"id":id,"sender":"20","ts":ts}],"importance":0.8,"confidence":0.9,"keywords":["园艺"]})
 }
 #[test]
-fn parser_batches_scope_and_unicode_match_node() {
+fn parser_batches_scope_and_unicode_match_golden() {
     let a = message("a", "20", 1000.);
     let b = message("b", "21", 1001.);
     let mut base = update("兴趣", "traits", "喜欢种花", "a", 1000.);
@@ -367,7 +348,7 @@ fn parser_batches_scope_and_unicode_match_node() {
     parity(json!({"actions":actions}));
 }
 #[test]
-fn memory_revisions_scopes_retention_and_transaction_match_node() {
+fn memory_revisions_scopes_retention_and_transaction_match_golden() {
     let a = message("a", "20", 1000.);
     let b = message("b", "21", 1001.);
     let mut actions = vec![
@@ -428,7 +409,7 @@ fn memory_revisions_scopes_retention_and_transaction_match_node() {
     parity(json!({"actions":actions}));
 }
 #[test]
-fn expressions_literal_evidence_cooldown_and_decorations_match_node() {
+fn expressions_literal_evidence_cooldown_and_decorations_match_golden() {
     let a = message("a", "20", 1000.);
     let b = message("b", "21", 1001.);
     let c = message("c", "20", 1002.);
@@ -501,7 +482,7 @@ fn expressions_literal_evidence_cooldown_and_decorations_match_node() {
     parity(json!({"actions":actions}));
 }
 #[test]
-fn ranking_rrf_overlap_duplicates_owner_and_budget_match_node() {
+fn ranking_rrf_overlap_duplicates_owner_and_budget_match_golden() {
     let mut rows = Vec::new();
     for i in 0..48 {
         rows.push(json!({"id":format!("id{i:03}"),"subject":format!("person:{}",i%3),"layer":if i==0{"owner_note"}else{"long_term"},"text":format!("{} 园艺{}",["今天种花","今天种花","音乐展览","café","garden flowers","𠀀𠀁"][i%6],i%9),"slot":format!("slot{}",i%4),"keywords":if i%5==0{json!(["rareword"])}else{json!([])},"updated":1000+i*11,"importance":(i%7) as f64/7.,"confidence":if i%9==0{0.1}else{0.9}}));
@@ -558,7 +539,7 @@ fn incremental_batch_converges_to_one_final_enforce_and_js() {
     );
     actions.push(json!({"op":"configure","now":1500}));
     actions.push(json!({"op":"dump"}));
-    let expected = node(&json!({"actions":actions}));
+    let expected = expected(&json!({"actions":actions}));
     equal(
         &dump(&incremental).unwrap(),
         &expected.as_array().unwrap().last().unwrap()["ok"],
@@ -572,7 +553,7 @@ fn incremental_batch_converges_to_one_final_enforce_and_js() {
         .is_empty());
 }
 #[test]
-fn capacity_forgetting_and_live_settings_match_node() {
+fn capacity_forgetting_and_live_settings_match_golden() {
     let mut actions = Vec::new();
     for i in 0..30 {
         let mut u = update(
@@ -645,7 +626,7 @@ fn evidence_caps_empty_sources_and_expired_duplicate_do_not_revive() {
     parity(json!({"actions":actions}));
 }
 #[test]
-fn expression_retention_capacity_and_personal_isolation_match_node() {
+fn expression_retention_capacity_and_personal_isolation_match_golden() {
     let mut actions = Vec::new();
     for i in 0..6 {
         actions.push(json!({"op":"expressionApply","now":1000+i,"updates":[{"subject":"person:20","kind":"expression","term":format!("term{i}"),"meaning":"garden","situation":"casual","example":"literal","confidence":0.9,"sources":[{"id":format!("a{i}"),"sender":"20","ts":1000+i},{"id":format!("b{i}"),"sender":"20","ts":1000+i}]}]}));
@@ -661,7 +642,6 @@ fn expression_retention_capacity_and_personal_isolation_match_node() {
     parity(json!({"expressions":{"maxEntries":3},"actions":actions}));
 }
 #[test]
-#[ignore = "release performance measurement: cargo test --release --test memory_parity measured_performance -- --ignored --nocapture"]
 fn measured_performance() {
     let (settings, _) = settings(&json!({}));
     let seed: Vec<_> = (0..200)
@@ -684,26 +664,8 @@ fn measured_performance() {
         .collect();
     let rows:Vec<_>=(0..80).map(|i|json!({"id":format!("id{i:03}"),"subject":"person:20","layer":"long_term","slot":format!("slot{i}"),"text":format!("园艺种花 周末花园计划 {i} garden flowers rareword"),"keywords":["园艺"],"updated":1000+i,"importance":(i%7) as f64/7.,"confidence":0.9})).collect();
     let input = json!({"seed":seed,"messages":messages,"rows":rows});
-    let mut child = Command::new("node")
-        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/memory-benchmark.mjs"))
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(input.to_string().as_bytes())
-        .unwrap();
-    let out = child.wait_with_output().unwrap();
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let js: Value = serde_json::from_slice(&out.stdout).unwrap();
+    // 原先忽略的基准现默认执行：输出和排名是固化金标准，耗时只报告、不作机器相关断言。
+    let js = expected(&input);
     let mut capture_times = Vec::new();
     let mut rank_times = Vec::new();
     let mut tokenizations = 0;
@@ -736,7 +698,12 @@ fn measured_performance() {
     capture_times.sort_by(f64::total_cmp);
     rank_times.sort_by(f64::total_cmp);
     assert_eq!(tokenizations, 161);
-    println!("PERF capture 200 people/400 messages (median 3): JS {:.3} ms, Rust {:.3} ms, speedup {:.2}x; ranking 80 candidates: JS {:.3} ms, Rust {:.3} ms, speedup {:.2}x; tokenize JS {}, Rust {}",js["captureMs"].as_f64().unwrap(),capture_times[1],js["captureMs"].as_f64().unwrap()/capture_times[1],js["rankingMs"].as_f64().unwrap(),rank_times[1],js["rankingMs"].as_f64().unwrap()/rank_times[1],js["tokenizations"],tokenizations);
+    // Rust 缓存分词，JS 旧实现会重复分词；保留 Rust 的 161 次精确断言，不能要求二者相等。
+    assert!(tokenizations as u64 <= js["tokenizations"].as_u64().unwrap());
+    println!(
+        "PERF Rust capture median {:.3} ms; ranking median {:.3} ms; tokenizations {}",
+        capture_times[1], rank_times[1], tokenizations
+    );
 }
 #[test]
 fn shared_capacity_index_survives_learning_reset_and_rollback() {
@@ -821,17 +788,23 @@ fn shared_sqlite_memory_roundtrip_and_reopen() {
                 &settings,
             )
             .unwrap();
-        let output=Command::new("node").current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap()).args(["--input-type=module","-e",r#"
-import {Store} from './src/store.mjs';import {defaults} from './src/config.mjs';
-const s=new Store(process.argv[1]);const r=s.memory.rows('group:10','person:20','traits',1001)[0];
-if(r.text!=='园艺'||r.sources[0].id!=='a'||r.keywords[0]!=='园艺')throw Error('Rust row not compatible');
-s.memory.apply('group:10',[{subject:'person:20',layer:'traits',key:'兴趣',operation:'upsert',text:'音乐',importance:.8,sources:[{id:'b',sender:'20',ts:1002}]}],1002,defaults.agent.memory);s.close();
-"#]).arg(&path).output().unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        let snapshot = expected(&json!({"kind":"shared_database"}));
+        // 原始 SQL 字段与 JS 读取到的快照一致（仅 UUID 不参与值比较）。
+        sqlite::assert_rows(&s, &snapshot["before"]);
+        let rows = LayeredMemory::new(&s)
+            .rows("group:10", "person:20", "traits", 1001.)
+            .unwrap();
+        assert_eq!(rows[0]["text"], "园艺");
+        assert_eq!(rows[0]["sources"][0]["id"], "a");
+        assert_eq!(rows[0]["keywords"][0], "园艺");
+        // 原生写路径也要产生与历史 JS 更新相同的字段和 revision。
+        LayeredMemory::new(&s).apply("group:10", &[json!({"subject":"person:20","layer":"traits","key":"兴趣","operation":"upsert","text":"音乐","importance":0.8,"sources":[{"id":"b","sender":"20","ts":1002}]})], 1002., &settings).unwrap();
+        sqlite::assert_rows(&s, &snapshot["after"]);
+        // 回放真实 JS 原始行，验证 Rust 能读取旧库 JSON 表示及 revision 关联。
+        s.connection()
+            .execute_batch("DELETE FROM memory_revisions; DELETE FROM memory_layers;")
+            .unwrap();
+        sqlite::insert(s.connection(), &snapshot["after"]);
         let r = LayeredMemory::new(&s)
             .rows("group:10", "person:20", "traits", 1003.)
             .unwrap();
@@ -866,7 +839,7 @@ fn tied_non_uuid_ids_expose_locale_ordering_boundary() {
     let input = json!({"actions":[{"op":"rank","rows":rows,"query":"","now":1000}]});
     // 没有 ICU 排序依赖：UUID 的排序一致，大小写/重音等人为 ID 的同分排序记录为已知边界。
     assert_eq!(run(&input)[0]["ok"][0]["id"], "A");
-    assert_eq!(node(&input)[0]["ok"][0]["id"], "a");
+    assert_eq!(expected(&input)[0]["ok"][0]["id"], "a");
 }
 #[test]
 fn scoped_notes_and_context_obey_distinct_budgets_and_match_gates() {

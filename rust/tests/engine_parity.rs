@@ -1,5 +1,7 @@
 //! 不变量精确：阶段顺序、发送次数、状态与作用域。评分只验证方向/区间；
 //! golden 数值容差仅处理跨语言浮点表示，不把启发式分数当质量真值。
+#[path = "golden/mod.rs"]
+mod golden;
 use anyhow::Result;
 use futures_util::future::BoxFuture;
 use qq_inner_core::{
@@ -10,11 +12,7 @@ use qq_inner_core::{
     store::Store,
 };
 use serde_json::{json, Value};
-use std::{
-    io::Write,
-    process::{Command, Stdio},
-    sync::{Arc, Mutex, Weak},
-};
+use std::sync::{Arc, Mutex, Weak};
 use tokio::sync::{Notify, Semaphore};
 
 struct Harness {
@@ -625,44 +623,12 @@ async fn scripted_conversations_match_real_js_decision_by_decision() {
             .retain(|entry| entry[0] != "log" || entry[1] != "decision");
         actual.push(result);
     }
-    // Node 缺失只跳过 oracle，Rust 场景仍全部执行。
-    if !Command::new("node")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-    {
-        eprintln!("SKIP engine JS golden: node unavailable");
-        return;
-    }
-    let mut child = Command::new("node")
-        .args([
-            "--input-type=module",
-            "-e",
-            include_str!("fixtures/engine-oracle.mjs"),
-        ])
-        .current_dir(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .unwrap(),
-        )
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(json!(cases).to_string().as_bytes())
-        .unwrap();
-    let out = child.wait_with_output().unwrap();
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let expected: Vec<Value> = serde_json::from_slice(&out.stdout).unwrap();
+    // 固化金标准：完整阶段 trace 与落库结果，继续使用原 equivalent 的浮点规则。
+    let expected: Vec<Value> = serde_json::from_value(golden::expected(
+        include_str!("golden/engine.json"),
+        &json!(cases),
+    ))
+    .unwrap();
     assert_eq!(actual.len(), expected.len());
     for (a, b) in actual.iter().zip(&expected) {
         equivalent(a, b, a["label"].as_str().unwrap());

@@ -2,69 +2,16 @@
 //!
 //! 这里覆盖的是最容易写错、也最容易与 JS 产生分歧的部分：端点拼接、围栏剥离、
 //! 状态码分类与响应正文提取。HTTP 传输与预算计数留到接入 store 的阶段。
+#[path = "golden/mod.rs"]
+mod golden;
 use qq_inner_core::provider::{
     classify_status, endpoint, extract_text, models_endpoint, parse_object, status_error,
     ProviderError, ProviderKind, StatusClass,
 };
 use serde_json::{json, Value};
-use std::fs;
-use std::process::Command;
-use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 
-static SEQ: AtomicUsize = AtomicUsize::new(0);
-
-fn node_available() -> bool {
-    Command::new("node")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
-
-fn run_node(payload: &Value) -> Value {
-    let script = r#"
-import { endpoint, parseObject, listModels } from './src/provider.mjs';
-import { readFileSync } from 'node:fs';
-const p = JSON.parse(readFileSync(process.argv[1], 'utf8'));
-const attempt = fn => { try { return { ok: true, value: fn() }; } catch (e) { return { ok: false, code: e.code || e.message }; } };
-// listModels 内部才拼 /models 端点；用一个会失败的 fetcher 把 URL 抓出来。
-const modelsUrl = async (base, kind) => {
-  let captured = null;
-  try {
-    await listModels({ baseUrl: base, kind }, 'k', async url => { captured = url; return { ok: false, status: 500, body: { cancel() {} } }; });
-  } catch {}
-  return captured;
-};
-const endpoints = [], parses = [], models = [];
-for (const c of p.endpoints) endpoints.push(endpoint(c.base, c.kind));
-for (const text of p.parses) parses.push(attempt(() => parseObject(text)));
-for (const c of p.models) models.push(await modelsUrl(c.base, c.kind));
-process.stdout.write(JSON.stringify({ endpoints, parses, models }));
-"#;
-    let dir = std::env::temp_dir().join(format!(
-        "qq-inner-provider-{}-{}",
-        std::process::id(),
-        SEQ.fetch_add(1, AtomicOrdering::Relaxed)
-    ));
-    fs::create_dir_all(&dir).expect("create temp dir");
-    let payload_file = dir.join("payload.json");
-    fs::write(&payload_file, serde_json::to_string(payload).unwrap()).unwrap();
-    let out = Command::new("node")
-        .args(["--input-type=module", "-e", script])
-        .arg(&payload_file)
-        .current_dir(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .unwrap(),
-        )
-        .output()
-        .expect("run node");
-    let _ = fs::remove_dir_all(&dir);
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    serde_json::from_slice(&out.stdout).expect("node output")
+fn expected(payload: &Value) -> Value {
+    golden::expected(include_str!("golden/provider.json"), payload)
 }
 
 fn kind(value: &str) -> ProviderKind {
@@ -73,10 +20,6 @@ fn kind(value: &str) -> ProviderKind {
 
 #[test]
 fn endpoint_matches_javascript_across_trailing_slashes_and_suffixes() {
-    if !node_available() {
-        eprintln!("SKIP: node unavailable");
-        return;
-    }
     let bases = [
         "https://api.openai.com/v1",
         "https://api.openai.com/v1/",
@@ -103,7 +46,7 @@ fn endpoint_matches_javascript_across_trailing_slashes_and_suffixes() {
             endpoints.push(json!({ "base": base, "kind": k }));
         }
     }
-    let js = run_node(&json!({ "endpoints": endpoints, "parses": [], "models": [] }));
+    let js = expected(&json!({ "endpoints": endpoints, "parses": [], "models": [] }));
 
     for (index, case) in endpoints.iter().enumerate() {
         let base = case["base"].as_str().unwrap();
@@ -115,10 +58,6 @@ fn endpoint_matches_javascript_across_trailing_slashes_and_suffixes() {
 
 #[test]
 fn models_endpoint_matches_what_list_models_actually_requests() {
-    if !node_available() {
-        eprintln!("SKIP: node unavailable");
-        return;
-    }
     let bases = [
         "https://example.org",
         "https://example.org/v1",
@@ -133,7 +72,7 @@ fn models_endpoint_matches_what_list_models_actually_requests() {
             models.push(json!({ "base": base, "kind": k }));
         }
     }
-    let js = run_node(&json!({ "endpoints": [], "parses": [], "models": models }));
+    let js = expected(&json!({ "endpoints": [], "parses": [], "models": models }));
 
     for (index, case) in models.iter().enumerate() {
         let base = case["base"].as_str().unwrap();
@@ -149,10 +88,6 @@ fn models_endpoint_matches_what_list_models_actually_requests() {
 
 #[test]
 fn parse_object_matches_javascript_including_error_codes() {
-    if !node_available() {
-        eprintln!("SKIP: node unavailable");
-        return;
-    }
     let parses = [
         "{\"a\":1}",
         "  {\"a\":1}  ",
@@ -173,7 +108,7 @@ fn parse_object_matches_javascript_including_error_codes() {
         "{\"a\":1} trailing",
         "{\"nested\":{\"b\":[1,2]}}",
     ];
-    let js = run_node(&json!({ "endpoints": [], "parses": parses, "models": [] }));
+    let js = expected(&json!({ "endpoints": [], "parses": parses, "models": [] }));
 
     for (index, text) in parses.iter().enumerate() {
         match parse_object(text) {

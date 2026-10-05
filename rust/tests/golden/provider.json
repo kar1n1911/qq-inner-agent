@@ -1,0 +1,380 @@
+[
+  {
+    "expected": {
+      "endpoints": [
+        "https://api.openai.com/v1/chat/completions",
+        "https://api.openai.com/v1/messages",
+        "https://api.openai.com/v1/chat/completions",
+        "https://api.openai.com/v1/messages",
+        "https://api.openai.com/v1/chat/completions",
+        "https://api.openai.com/v1/messages",
+        "https://api.deepseek.com/chat/completions",
+        "https://api.deepseek.com/v1/messages",
+        "https://api.deepseek.com/chat/completions",
+        "https://api.deepseek.com/v1/messages",
+        "https://api.deepseek.com/anthropic/chat/completions",
+        "https://api.deepseek.com/anthropic/v1/messages",
+        "https://api.deepseek.com/anthropic/chat/completions",
+        "https://api.deepseek.com/anthropic/v1/messages",
+        "https://example.org/chat/completions",
+        "https://example.org/v1/messages",
+        "https://example.org/chat/completions",
+        "https://example.org/v1/messages",
+        "http://127.0.0.1:8080/v1/chat/completions",
+        "http://127.0.0.1:8080/v1/messages",
+        "http://127.0.0.1:8080/chat/completions",
+        "http://127.0.0.1:8080/v1/messages",
+        "https://example.org/messages/chat/completions",
+        "https://example.org/messages",
+        "https://example.org/v1/messages/chat/completions",
+        "https://example.org/v1/messages",
+        "https://example.org/chat/completions",
+        "https://example.org/chat/completions/v1/messages",
+        "https://example.org/v1/chat/completions",
+        "https://example.org/v1/chat/completions/v1/messages",
+        "/chat/completions",
+        "/v1/messages",
+        "/chat/completions",
+        "/v1/messages"
+      ],
+      "models": [],
+      "parses": []
+    },
+    "input": {
+      "endpoints": [
+        {
+          "base": "https://api.openai.com/v1",
+          "kind": "openai"
+        },
+        {
+          "base": "https://api.openai.com/v1",
+          "kind": "anthropic"
+        },
+        {
+          "base": "https://api.openai.com/v1/",
+          "kind": "openai"
+        },
+        {
+          "base": "https://api.openai.com/v1/",
+          "kind": "anthropic"
+        },
+        {
+          "base": "https://api.openai.com/v1//",
+          "kind": "openai"
+        },
+        {
+          "base": "https://api.openai.com/v1//",
+          "kind": "anthropic"
+        },
+        {
+          "base": "https://api.deepseek.com",
+          "kind": "openai"
+        },
+        {
+          "base": "https://api.deepseek.com",
+          "kind": "anthropic"
+        },
+        {
+          "base": "https://api.deepseek.com/",
+          "kind": "openai"
+        },
+        {
+          "base": "https://api.deepseek.com/",
+          "kind": "anthropic"
+        },
+        {
+          "base": "https://api.deepseek.com/anthropic",
+          "kind": "openai"
+        },
+        {
+          "base": "https://api.deepseek.com/anthropic",
+          "kind": "anthropic"
+        },
+        {
+          "base": "https://api.deepseek.com/anthropic/",
+          "kind": "openai"
+        },
+        {
+          "base": "https://api.deepseek.com/anthropic/",
+          "kind": "anthropic"
+        },
+        {
+          "base": "https://example.org",
+          "kind": "openai"
+        },
+        {
+          "base": "https://example.org",
+          "kind": "anthropic"
+        },
+        {
+          "base": "https://example.org/",
+          "kind": "openai"
+        },
+        {
+          "base": "https://example.org/",
+          "kind": "anthropic"
+        },
+        {
+          "base": "http://127.0.0.1:8080/v1",
+          "kind": "openai"
+        },
+        {
+          "base": "http://127.0.0.1:8080/v1",
+          "kind": "anthropic"
+        },
+        {
+          "base": "http://127.0.0.1:8080",
+          "kind": "openai"
+        },
+        {
+          "base": "http://127.0.0.1:8080",
+          "kind": "anthropic"
+        },
+        {
+          "base": "https://example.org/messages",
+          "kind": "openai"
+        },
+        {
+          "base": "https://example.org/messages",
+          "kind": "anthropic"
+        },
+        {
+          "base": "https://example.org/v1/messages",
+          "kind": "openai"
+        },
+        {
+          "base": "https://example.org/v1/messages",
+          "kind": "anthropic"
+        },
+        {
+          "base": "https://example.org/chat/completions",
+          "kind": "openai"
+        },
+        {
+          "base": "https://example.org/chat/completions",
+          "kind": "anthropic"
+        },
+        {
+          "base": "https://example.org/v1/chat/completions",
+          "kind": "openai"
+        },
+        {
+          "base": "https://example.org/v1/chat/completions",
+          "kind": "anthropic"
+        },
+        {
+          "base": "",
+          "kind": "openai"
+        },
+        {
+          "base": "",
+          "kind": "anthropic"
+        },
+        {
+          "base": "/",
+          "kind": "openai"
+        },
+        {
+          "base": "/",
+          "kind": "anthropic"
+        }
+      ],
+      "models": [],
+      "parses": []
+    },
+    "case": "endpoint_matches_javascript_across_trailing_slashes_and_suffixes-0"
+  },
+  {
+    "expected": {
+      "endpoints": [],
+      "models": [
+        "https://example.org/models",
+        "https://example.org/v1/models",
+        "https://example.org/v1/models",
+        "https://example.org/v1/models",
+        "https://example.org/v1/models",
+        "https://example.org/v1/models",
+        "https://example.org/anthropic/models",
+        "https://example.org/anthropic/v1/models",
+        "http://127.0.0.1:8080/v1/models",
+        "http://127.0.0.1:8080/v1/models"
+      ],
+      "parses": []
+    },
+    "input": {
+      "endpoints": [],
+      "models": [
+        {
+          "base": "https://example.org",
+          "kind": "openai"
+        },
+        {
+          "base": "https://example.org",
+          "kind": "anthropic"
+        },
+        {
+          "base": "https://example.org/v1",
+          "kind": "openai"
+        },
+        {
+          "base": "https://example.org/v1",
+          "kind": "anthropic"
+        },
+        {
+          "base": "https://example.org/v1/",
+          "kind": "openai"
+        },
+        {
+          "base": "https://example.org/v1/",
+          "kind": "anthropic"
+        },
+        {
+          "base": "https://example.org/anthropic",
+          "kind": "openai"
+        },
+        {
+          "base": "https://example.org/anthropic",
+          "kind": "anthropic"
+        },
+        {
+          "base": "http://127.0.0.1:8080/v1",
+          "kind": "openai"
+        },
+        {
+          "base": "http://127.0.0.1:8080/v1",
+          "kind": "anthropic"
+        }
+      ],
+      "parses": []
+    },
+    "case": "models_endpoint_matches_what_list_models_actually_requests-0"
+  },
+  {
+    "expected": {
+      "endpoints": [],
+      "models": [],
+      "parses": [
+        {
+          "ok": true,
+          "value": {
+            "a": 1
+          }
+        },
+        {
+          "ok": true,
+          "value": {
+            "a": 1
+          }
+        },
+        {
+          "ok": true,
+          "value": {
+            "a": 1
+          }
+        },
+        {
+          "ok": true,
+          "value": {
+            "a": 1
+          }
+        },
+        {
+          "ok": true,
+          "value": {
+            "a": 1
+          }
+        },
+        {
+          "ok": true,
+          "value": {
+            "a": 1
+          }
+        },
+        {
+          "ok": true,
+          "value": {
+            "a": 1
+          }
+        },
+        {
+          "ok": true,
+          "value": {
+            "a": 1
+          }
+        },
+        {
+          "code": "invalid_json_object",
+          "ok": false
+        },
+        {
+          "code": "invalid_json_object",
+          "ok": false
+        },
+        {
+          "code": "invalid_json_object",
+          "ok": false
+        },
+        {
+          "code": "invalid_json_object",
+          "ok": false
+        },
+        {
+          "code": "invalid_json_object",
+          "ok": false
+        },
+        {
+          "code": "invalid_json",
+          "ok": false
+        },
+        {
+          "code": "invalid_json",
+          "ok": false
+        },
+        {
+          "code": "invalid_json",
+          "ok": false
+        },
+        {
+          "code": "invalid_json",
+          "ok": false
+        },
+        {
+          "ok": true,
+          "value": {
+            "nested": {
+              "b": [
+                1,
+                2
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "input": {
+      "endpoints": [],
+      "models": [],
+      "parses": [
+        "{\"a\":1}",
+        "  {\"a\":1}  ",
+        "```json\n{\"a\":1}\n```",
+        "```JSON\n{\"a\":1}\n```",
+        "```\n{\"a\":1}\n```",
+        "```json{\"a\":1}```",
+        "{\"a\":1}```",
+        "```json\n{\"a\":1}",
+        "[1,2,3]",
+        "null",
+        "42",
+        "\"text\"",
+        "true",
+        "not json",
+        "",
+        "   ",
+        "{\"a\":1} trailing",
+        "{\"nested\":{\"b\":[1,2]}}"
+      ]
+    },
+    "case": "parse_object_matches_javascript_including_error_codes-0"
+  }
+]

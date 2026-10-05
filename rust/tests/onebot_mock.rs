@@ -412,7 +412,15 @@ async fn repeated_disconnects_respect_backoff_cap() {
     for count in 1..=3 {
         let started = tokio::time::Instant::now();
         m.frames.send(Message::Close(None)).unwrap();
-        assert!(matches!(next(&mut rx).await,Notification::Status(s) if s=="connected"));
+        // 关闭帧与底层 socket 关闭可能竞争，连接恢复前允许报告 websocket_error。
+        // 仍严格检查重连次数和下面的退避时间上下界，不吞掉其它通知。
+        loop {
+            match next(&mut rx).await {
+                Notification::Status(s) if s == "connected" => break,
+                Notification::Status(s) if s == "websocket_error" => continue,
+                notice => panic!("unexpected reconnect notification: {notice:?}"),
+            }
+        }
         assert_eq!(b.state().reconnects, count);
         // 上限只约束 delay，仍允许 [0,1) 秒抖动及少量调度余量。
         assert!(started.elapsed() >= Duration::from_secs(1));
