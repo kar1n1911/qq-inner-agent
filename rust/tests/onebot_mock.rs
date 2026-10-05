@@ -109,7 +109,8 @@ fn bot(
     OneBot::new(c, token.into())
 }
 async fn next<T>(rx: &mut mpsc::UnboundedReceiver<T>) -> T {
-    timeout(Duration::from_secs(4), rx.recv())
+    // 并行全量测试时机器负载高，连接握手可能超过 4 秒；放宽到 15 秒避免偶发超时。
+    timeout(Duration::from_secs(15), rx.recv())
         .await
         .unwrap()
         .unwrap()
