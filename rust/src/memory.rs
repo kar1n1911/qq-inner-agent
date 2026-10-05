@@ -65,8 +65,18 @@ pub fn parse_memory_updates(
         value.is_array() && array(value).len() <= 4,
         "invalid_memory_updates"
     );
+    // Validate the whole batch before accepting even a compact skip record.
+    ensure!(
+        array(value).iter().all(|v| v.get("verdict").is_none()
+            || matches!(text(v, "verdict"), "learn" | "partial" | "skip")),
+        "invalid_memory_verdict"
+    );
     let mut seen = HashSet::new();
     array(value).iter().map(|v| {
+        if v["verdict"] == "skip" {
+            ensure!(valid_text(&v["reason"], 500), "invalid_memory_reason");
+            return Ok(json!({"verdict":"skip", "reason":trim(text(v,"reason"))}));
+        }
         ensure!(allowed.iter().any(|s|v["subject"]==*s)&&matches!(text(v,"layer"),"long_term"|"traits")&&matches!(text(v,"operation"),"upsert"|"forget")&&valid_text(&v["key"],64)&&v["sourceIds"].is_array()&&(1..=6).contains(&array(&v["sourceIds"]).len())&&array(&v["sourceIds"]).iter().all(|id|id.as_str().is_some_and(|id|humans.contains_key(id))),"invalid_memory_updates");
         let mut ids=HashSet::new();
         let sources:Vec<_>=array(&v["sourceIds"]).iter().filter(|id|ids.insert(id.as_str().unwrap())).map(|id|{let m=humans[id.as_str().unwrap()];json!({"id":id,"sender":m["sender"],"ts":m["ts"]})}).collect();
@@ -81,9 +91,92 @@ pub fn parse_memory_updates(
         let confidence=if v["confidence"].is_null(){json!(0.6)}else{v["confidence"].clone()};
         ensure!(unit(&confidence),"invalid_memory_confidence");
         let mut seen=HashSet::new();let keywords:Vec<_>=array(&keywords).iter().map(|k|trim(k.as_str().unwrap())).filter(|k|seen.insert(*k)).collect();
-        Ok(json!({"keywords":keywords,"confidence":confidence,"subject":v["subject"],"layer":v["layer"],"key":key,"operation":v["operation"],"text":if v["operation"]=="upsert"{trim(text(v,"text"))}else{""},"importance":if v["operation"]=="upsert"{num(v,"importance")}else{0.},"sources":sources}))
+        let mut parsed = json!({"keywords":keywords,"confidence":confidence,"subject":v["subject"],"layer":v["layer"],"key":key,"operation":v["operation"],"text":if v["operation"]=="upsert"{trim(text(v,"text"))}else{""},"importance":if v["operation"]=="upsert"{num(v,"importance")}else{0.},"sources":sources});
+        if let Some(verdict) = v.get("verdict") {
+            parsed["verdict"] = verdict.clone();
+        }
+        if v["verdict"] == "partial" {
+            parsed["confidence"] = json!(num(&parsed, "confidence").min(0.5));
+        }
+        Ok(parsed)
     }).collect()
 }
+/// Only cited human messages are exposed to the reviewer, never the surrounding history.
+pub fn learning_review_input(updates: &[Value], history: &[Value], existing: &[Value]) -> Value {
+    let candidates: Vec<_> = updates
+        .iter()
+        .enumerate()
+        .filter(|(_, v)| v["verdict"] != "skip")
+        .map(|(index, v)| json!({"index":index,"candidate":v}))
+        .collect();
+    let sources: Vec<_> = history
+        .iter()
+        .filter(|m| {
+            !truthy(&m["self"])
+                && updates
+                    .iter()
+                    .any(|v| array(&v["sources"]).iter().any(|s| same_source(s, m)))
+        })
+        .map(|m| json!({"id":m["id"],"sender":m["sender"],"text":m["text"],"ts":m["ts"]}))
+        .collect();
+    json!({"candidates":candidates,"sources":sources,"existing":existing})
+}
+
+/// A malformed or incomplete review rejects the entire learning batch before any writes.
+pub fn apply_learning_review(
+    updates: &[Value],
+    response: &Value,
+    settings: &Memory,
+) -> Result<Vec<Value>> {
+    let expected = updates.iter().filter(|v| v["verdict"] != "skip").count();
+    ensure!(
+        response["reviews"].is_array() && array(&response["reviews"]).len() == expected,
+        "invalid_learning_review"
+    );
+    let mut result = updates.to_vec();
+    let mut seen = HashSet::new();
+    for r in array(&response["reviews"]) {
+        let index = r["index"]
+            .as_u64()
+            .and_then(|n| usize::try_from(n).ok())
+            .filter(|i| *i < updates.len())
+            .ok_or_else(|| anyhow::anyhow!("invalid_learning_review"))?;
+        ensure!(
+            seen.insert(index)
+                && updates[index]["verdict"] != "skip"
+                && valid_text(&r["reason"], 500),
+            "invalid_learning_review"
+        );
+        match text(r, "action") {
+            "keep" => {}
+            "drop" => {
+                result[index]["review"] = r.clone();
+            }
+            "rewrite" => {
+                let max = if updates[index]["layer"] == "long_term" {
+                    settings.long_chars.min(500.)
+                } else {
+                    settings.trait_chars.min(300.)
+                };
+                ensure!(
+                    updates[index]["operation"] == "upsert" && valid_text(&r["text"], max as usize),
+                    "invalid_learning_review"
+                );
+                result[index]["review"] = r.clone();
+                result[index]["text"] = json!(trim(text(r, "text")));
+            }
+            _ => anyhow::bail!("invalid_learning_review"),
+        }
+    }
+    Ok(result)
+}
+
+// Persist triage metadata as one reserved object in the existing keywords JSON array.
+// Model keywords are strictly strings; legacy rows/schema and ordinary learn output stay unchanged.
+fn triage_state(keywords: &[Value]) -> Option<&Value> {
+    keywords.iter().find(|k| k["pending"] == true)
+}
+
 pub(crate) fn merge_sources(previous: &[Value], sources: &[Value]) -> Vec<Value> {
     let mut merged = previous.to_vec();
     for s in sources {
@@ -247,7 +340,80 @@ impl<'a> LayeredMemory<'a> {
         Ok(())
     }
     pub fn apply(&self, chat: &str, updates: &[Value], now: f64, settings: &Memory) -> Result<()> {
-        for v in updates {
+        ensure!(
+            updates.iter().all(|v| v.get("verdict").is_none()
+                || matches!(text(v, "verdict"), "learn" | "partial" | "skip")),
+            "invalid_memory_verdict"
+        );
+        for original in updates {
+            if original["verdict"] == "skip" {
+                self.store.decision(
+                    chat,
+                    "skipped",
+                    0.,
+                    &json!({"reason":original["reason"]}),
+                    now,
+                )?;
+                continue;
+            }
+            if let Some(review) = original.get("review") {
+                self.store.decision(
+                    chat,
+                    text(review, "action"),
+                    0.,
+                    &json!({"reason":review["reason"],"subject":original["subject"],
+                        "layer":original["layer"],"key":original["key"],"text":original["text"]}),
+                    now,
+                )?;
+                if review["action"] == "drop" {
+                    continue;
+                }
+            }
+            let mut v = original.clone();
+            if v["operation"] == "upsert" {
+                let old = self.store.first(
+                    "SELECT * FROM memory_layers WHERE chat=? AND subject=? AND layer=? AND slot=? AND expires>?",
+                    params![chat,text(&v,"subject"),text(&v,"layer"),text(&v,"key"),now])?;
+                let old_keywords: Vec<Value> = old
+                    .as_ref()
+                    .map(|r| serde_json::from_str(text(r, "keywords")))
+                    .transpose()?
+                    .unwrap_or_default();
+                let prior = triage_state(&old_keywords);
+                if prior.is_some() || v["verdict"] == "partial" {
+                    let mut state = prior.cloned().unwrap_or_else(|| json!({"pending":true,
+                        "since":newest(array(&v["sources"]),0.),"baseline":array(&v["sources"]).iter().map(source_identity).collect::<Vec<_>>(),"evidence":[]}));
+                    // Only distinct source identities newer than the initial evidence count.
+                    // Retain identities independently of the rolling 12-source display window.
+                    let mut evidence: HashSet<String> = array(&state["evidence"])
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect();
+                    for source in array(&v["sources"]) {
+                        if num(source, "ts") > num(&state, "since")
+                            && !array(&state["baseline"])
+                                .iter()
+                                .any(|id| id.as_str() == Some(source_identity(source).as_str()))
+                        {
+                            evidence.insert(source_identity(source));
+                        }
+                    }
+                    let promoted = evidence.len() >= settings.partial_evidence.max(1);
+                    let mut keywords = array(&v["keywords"]).to_vec();
+                    if promoted {
+                        v["confidence"] = json!(num(&v, "confidence").max(0.6));
+                    } else {
+                        let mut evidence: Vec<_> = evidence.into_iter().collect();
+                        evidence.sort();
+                        state["evidence"] = json!(evidence);
+                        keywords.push(state);
+                        v["confidence"] = json!(num(&v, "confidence").min(0.5));
+                    }
+                    v["keywords"] = json!(keywords);
+                }
+            }
+            let v = &v;
             if v["operation"] == "forget" {
                 self.store.execute(
                     "DELETE FROM memory_layers WHERE chat=? AND subject=? AND layer=? AND slot=?",
@@ -283,6 +449,14 @@ impl<'a> LayeredMemory<'a> {
         let mut rows=self.store.rows("SELECT * FROM memory_layers WHERE chat=? AND subject=? AND layer=? AND expires>? ORDER BY importance DESC,updated DESC,rowid DESC",params![chat,subject,layer,now])?;
         for r in &mut rows {
             decode(r, &["sources", "keywords"])?;
+            if triage_state(array(&r["keywords"])).is_some() {
+                r["pending"] = json!(true);
+                r["verdict"] = json!("partial");
+                r["keywords"] = json!(array(&r["keywords"])
+                    .iter()
+                    .filter(|k| k.is_string())
+                    .collect::<Vec<_>>());
+            }
         }
         Ok(rows)
     }

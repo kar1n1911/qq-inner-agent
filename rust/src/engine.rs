@@ -941,15 +941,14 @@ impl Engine {
                 && Allocation::parse(text(&formed, "allocation")).is_some(),
             "invalid_formation"
         );
-        let candidates = {
-            let mut core = self.core();
-            let db = self.db()?;
-            if !self.fresh(&core, &db, &t)? {
+        // Review outside the store/core locks and transaction. Both sides of the await
+        // check turn freshness; a reset/new message cannot commit an obsolete review.
+        let reviewed_learning = if t.learn_now && formed.get("learning").is_some() {
+            if !self.fresh(&self.core(), &*self.db()?, &t)? {
                 return Ok(());
             }
-            // 21：可选学习失败只记录，不中止候选流程。
-            if t.learn_now && formed.get("learning").is_some() {
-                let learned = (|| -> Result<Option<usize>> {
+            Some(
+                async {
                     ensure!(!formed["learning"].is_null(), "invalid_learning");
                     let learning = &formed["learning"];
                     let empty = json!([]);
@@ -978,6 +977,51 @@ impl Engine {
                     } else {
                         vec![]
                     };
+                    let input = {
+                        let db = self.db()?;
+                        let mut existing = Vec::new();
+                        for v in &updates {
+                            if v["verdict"] == "skip" {
+                                continue;
+                            }
+                            existing.extend(
+                                LayeredMemory::new(&db)
+                                    .rows(chat, text(v, "subject"), text(v, "layer"), now)?
+                                    .into_iter()
+                                    .filter(|r| r["slot"] == v["key"]),
+                            );
+                        }
+                        crate::memory::learning_review_input(&updates, &t.history, &existing)
+                    };
+                    let updates = if array(&input["candidates"]).is_empty() {
+                        updates
+                    } else {
+                        let response = self
+                            .model(
+                                &prompts::compose_prompt(prompts::LEARNING_REVIEW, &[]),
+                                input,
+                            )
+                            .await?;
+                        crate::memory::apply_learning_review(&updates, &response, &a.memory)?
+                    };
+                    Ok::<_, anyhow::Error>((updates, expressions))
+                }
+                .await,
+            )
+        } else {
+            None
+        };
+        let candidates = {
+            let mut core = self.core();
+            let db = self.db()?;
+            if !self.fresh(&core, &db, &t)? {
+                return Ok(());
+            }
+            // 21：可选学习失败只记录，不中止候选流程。
+            if t.learn_now && formed.get("learning").is_some() {
+                let learned = (|| -> Result<Option<usize>> {
+                    let (updates, expressions) =
+                        reviewed_learning.ok_or_else(|| anyhow::anyhow!("invalid_learning"))??;
                     Ok(db
                         .learn(
                             chat,

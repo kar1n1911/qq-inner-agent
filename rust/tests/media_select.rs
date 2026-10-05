@@ -279,14 +279,7 @@ fn zero_draw_cannot_bypass_temperature_even_with_wild_drift() {
     assert!(ms::candidates(&db, "group:10", "火箭 发射", NOW, &c, false)
         .unwrap()
         .is_empty());
-    message(
-        &db,
-        "group:10",
-        "drift-check",
-        NOW,
-        "火箭 发射 收到",
-        false,
-    );
+    message(&db, "group:10", "drift-check", NOW, "火箭 发射 收到", false);
     assert!(
         ms::select(&db, "group:10", NOW, &c, 0.).unwrap().is_none(),
         "检索不到就不发"

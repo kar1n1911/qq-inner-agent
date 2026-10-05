@@ -13,7 +13,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..', '..');
 const target = path.join(root, 'rust', 'src', 'prompts.rs');
 
-const { identity, outputContract, rules, taskRules, languageRules, formation, evaluation, articulation, forecast } =
+const { identity, outputContract, rules, taskRules, languageRules, formation, evaluation, articulation, forecast, learningReview } =
   await import(path.join(root, 'src', 'prompts.mjs'));
 // ORIENT 提示词住在 orientation.mjs 里，但它同样是"行为的一部分"，一并生成。
 const { orientationPrompt } = await import(path.join(root, 'src', 'orientation.mjs'));
@@ -26,6 +26,7 @@ const items = [
   ['EVALUATION', evaluation],
   ['ARTICULATION', articulation],
   ['FORECAST', forecast],
+  ['LEARNING_REVIEW', learningReview],
   ['ORIENTATION', orientationPrompt],
 ];
 

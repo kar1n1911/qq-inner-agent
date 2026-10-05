@@ -24,12 +24,12 @@ fn every_prompt_constant_matches_the_javascript_source() {
         return;
     }
     let script = r#"
-import { identity, outputContract, rules, composePrompt, boundary, formation, evaluation, articulation, forecast, articulationFor } from './src/prompts.mjs';
+import { identity, outputContract, rules, composePrompt, boundary, formation, evaluation, articulation, forecast, learningReview, articulationFor } from './src/prompts.mjs';
 import { orientationPrompt } from './src/orientation.mjs';
 import { readFileSync } from 'node:fs';
 const langs = JSON.parse(readFileSync(process.argv[1], 'utf8'));
 process.stdout.write(JSON.stringify({
-  identity, outputContract, rules,
+  identity, outputContract, rules, learningReview,
   composed: [formation, evaluation, articulation, forecast].map(c => [[], ...Object.keys(rules).map(n => [n]), Object.keys(rules)].map(disabledRules => composePrompt(c, { disabledRules }))),
   boundary, formation, evaluation, articulation, forecast, orientation: orientationPrompt,
   disabledLanguage: articulationFor('en', { disabledRules: ['language'] }),
@@ -64,6 +64,10 @@ process.stdout.write(JSON.stringify({
     let js: Value = serde_json::from_slice(&out.stdout).expect("node output");
 
     let text = |key: &str| js[key].as_str().expect("string field");
+    assert_eq!(
+        qq_inner_core::prompts::LEARNING_REVIEW,
+        text("learningReview")
+    );
     assert_eq!(IDENTITY, text("identity"));
     assert_eq!(OUTPUT_CONTRACT, text("outputContract"));
     for (name, rule) in RULES {

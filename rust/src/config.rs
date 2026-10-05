@@ -349,6 +349,12 @@ pub fn validate(c: &Value) -> std::result::Result<(), ConfigError> {
         a["memory"].is_object() || a["memory"].is_array(),
         "Invalid memory settings",
     )?;
+    if let Some(n) = a["memory"].get("partialEvidence") {
+        check(
+            number(n, 1., 100., true),
+            "Invalid memory.partialEvidence: expected 1..100",
+        )?;
+    }
     for &(k, min, max) in MEMORY_RANGES {
         check(
             number(&a["memory"][k], min, max, true),
@@ -691,9 +697,22 @@ pub struct Observation {
     pub history_limit: f64,
 }
 
+fn default_partial_evidence() -> usize {
+    2
+}
+fn is_default_partial_evidence(n: &usize) -> bool {
+    *n == 2
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Memory {
+    /// Independent new evidence required after a partial baseline (Rust only).
+    #[serde(
+        default = "default_partial_evidence",
+        skip_serializing_if = "is_default_partial_evidence"
+    )]
+    pub partial_evidence: usize,
     /// 配置键 `agent.memory.recallChars`。
     pub recall_chars: f64,
     /// 配置键 `agent.memory.recallHalfLifeDays`。
