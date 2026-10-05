@@ -7,61 +7,12 @@ use qq_inner_core::prompts::{
     BOUNDARY, EVALUATION, FORECAST, FORMATION, IDENTITY, ORIENTATION, OUTPUT_CONTRACT, RULES,
 };
 use serde_json::Value;
-use std::fs;
-use std::process::Command;
-
-fn node_available() -> bool {
-    Command::new("node")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
 
 #[test]
-fn every_prompt_constant_matches_the_javascript_source() {
-    if !node_available() {
-        eprintln!("SKIP: node unavailable");
-        return;
-    }
-    let script = r#"
-import { identity, outputContract, rules, composePrompt, boundary, formation, evaluation, articulation, forecast, learningReview, articulationFor } from './src/prompts.mjs';
-import { orientationPrompt } from './src/orientation.mjs';
-import { readFileSync } from 'node:fs';
-const langs = JSON.parse(readFileSync(process.argv[1], 'utf8'));
-process.stdout.write(JSON.stringify({
-  identity, outputContract, rules, learningReview,
-  composed: [formation, evaluation, articulation, forecast].map(c => [[], ...Object.keys(rules).map(n => [n]), Object.keys(rules)].map(disabledRules => composePrompt(c, { disabledRules }))),
-  boundary, formation, evaluation, articulation, forecast, orientation: orientationPrompt,
-  disabledLanguage: articulationFor('en', { disabledRules: ['language'] }),
-  disabledReplyRules: articulationFor('en', { disabledRules: ['antiAi', 'decorations'] }),
-  variants: Object.fromEntries(langs.map(l => [l, articulationFor(l)])),
-}));
-"#;
-    let dir = std::env::temp_dir().join(format!("qq-inner-prompts-{}", std::process::id()));
-    fs::create_dir_all(&dir).expect("create temp dir");
-    let lang_file = dir.join("langs.json");
-    fs::write(
-        &lang_file,
-        serde_json::to_string(&["auto", "zh-CN", "en"]).unwrap(),
-    )
-    .unwrap();
-    let out = Command::new("node")
-        .args(["--input-type=module", "-e", script])
-        .arg(&lang_file)
-        .current_dir(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .unwrap(),
-        )
-        .output()
-        .expect("run node");
-    let _ = fs::remove_dir_all(&dir);
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let js: Value = serde_json::from_slice(&out.stdout).expect("node output");
+fn every_prompt_constant_matches_the_frozen_javascript_source() {
+    // 期望值固化自 2026-10-05 的 JS 源(src/prompts.mjs + orientation.mjs),不再依赖 node。
+    let js: Value =
+        serde_json::from_str(include_str!("golden/prompts.json")).expect("frozen golden");
 
     let text = |key: &str| js[key].as_str().expect("string field");
     assert_eq!(
