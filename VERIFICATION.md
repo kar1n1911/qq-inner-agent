@@ -1,5 +1,9 @@
 # Verification — 2026-10-01
 
+> **当前状态(1.1.0)**:Rust 内核 `cargo test` 192 项通过(本机 + 远端 Linux,clippy 零警告)。
+> 旧 Node 实现与其测试已归档到 `js-legacy` 分支,`./agent test` 现只跑 6 个运维 Node 测试。
+> 以下为 2026-10-01 的历史验证记录。
+
 - 93 tests passed, 0 failures (`./agent test`).
 - Expression tests cover literal-source validation, scope/author boundaries, repeated evidence and two-author group admission, pending/changed meanings, confidence and expiry, confirmed reuse cooldown, persona precedence, bounded decorations, native face segments with inert CQ-looking text, and the complete mock engine articulation/send pipeline without extra model stages. Browser QA confirmed Chinese personality fields and saving multiline interests/style alternatives in an isolated dashboard. Real bridge face rendering and inferred slang quality remain unverified.
 - A_Memorix-inspired memory refinements are covered by tests for legacy schema migration, evidence accumulation, stale-evidence rejection, idempotent expiry, bounded revisions and archive cleanup, query-aware notebook ranking, confidence/budget gates, sparse Chinese retrieval, optional metadata validation and preserved scope isolation. Browser QA verified synthetic revised memory details; live recall quality remains unverified.
