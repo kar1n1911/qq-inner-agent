@@ -229,6 +229,70 @@ impl OneBot {
         };
         self.call("send_group_msg",json!({"group_id":id,"message":[{"type":segment["type"],"data":data}],"auto_escape":true})).await
     }
+    pub fn forward_enabled(&self) -> bool {
+        self.config.forward_enabled
+    }
+    /// 安全闸门比“感兴趣”更靠前：仅允许已有消息引用，禁止构造正文或 file 段。
+    pub async fn send_forward(&self, chat: &str, nodes: Vec<Value>) -> Reply {
+        if !self.forward_enabled() {
+            return Err(OneBotError::new("forward_disabled", false));
+        }
+        if nodes.is_empty()
+            || nodes.iter().any(|node| {
+                let Some(fields) = node.as_object() else {
+                    return true;
+                };
+                fields
+                    .keys()
+                    .any(|key| !matches!(key.as_str(), "user_id" | "uin" | "id" | "message_id"))
+                    || !["user_id", "uin"]
+                        .iter()
+                        .any(|key| fields.contains_key(*key))
+                    || !["id", "message_id"]
+                        .iter()
+                        .any(|key| fields.contains_key(*key))
+                    || fields.iter().any(|(key, value)| {
+                        !reference_id(value, matches!(key.as_str(), "user_id" | "uin"))
+                    })
+            })
+        {
+            return Err(OneBotError::new("invalid_forward_nodes", false));
+        }
+        let (kind, id) = chat.split_once(':').unwrap_or(("", ""));
+        if !matches!(kind, "group" | "private") || !reference_id(&json!(id), true) {
+            return Err(OneBotError::new("invalid_chat", false));
+        }
+        let state = self.state();
+        if !state.connected || !state.online {
+            return Err(OneBotError::new("qq_offline", false));
+        }
+        let mut params =
+            json!({"message":[{"type":"forward","data":{"nodes":nodes}}],"auto_escape":true});
+        params[if kind == "group" {
+            "group_id"
+        } else {
+            "user_id"
+        }] = json!(id.parse::<u64>().unwrap());
+        self.call(
+            if kind == "group" {
+                "send_group_msg"
+            } else {
+                "send_private_msg"
+            },
+            params,
+        )
+        .await
+    }
+    /// forwardId 为桥返回的不透明标识，不套用消息整数 ID 的规则。
+    pub async fn get_forward_msg(&self, id: &str) -> Reply {
+        if !self.forward_enabled() {
+            return Err(OneBotError::new("forward_disabled", false));
+        }
+        if id.trim().is_empty() {
+            return Err(OneBotError::new("invalid_forward_id", false));
+        }
+        self.call("get_forward_msg", json!({"id":id})).await
+    }
     fn request_timeout(&self) -> Duration {
         Duration::from_secs_f64(self.config.request_timeout_seconds)
     }
@@ -431,6 +495,27 @@ impl OneBot {
         }
         self.disconnect();
     }
+}
+// OneBot 消息 ID 可为负数；QQ 用户 ID 必须为正整数。拒绝零、浮点数和非数字内容。
+fn reference_id(value: &Value, user: bool) -> bool {
+    let text = match value {
+        Value::String(s) => s.clone(),
+        Value::Number(n) if n.is_i64() || n.is_u64() => n.to_string(),
+        _ => return false,
+    };
+    let digits = if user {
+        text.as_str()
+    } else {
+        text.strip_prefix('-').unwrap_or(&text)
+    };
+    !digits.starts_with('0')
+        && !digits.is_empty()
+        && digits.bytes().all(|b| b.is_ascii_digit())
+        && if user {
+            text.parse::<u64>().is_ok()
+        } else {
+            text.parse::<i64>().is_ok()
+        }
 }
 fn backoff(delay: &mut f64, elapsed: Duration, max: f64, jitter: f64) -> Duration {
     if elapsed > Duration::from_secs(30) {

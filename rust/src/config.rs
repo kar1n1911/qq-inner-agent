@@ -597,6 +597,9 @@ pub struct Provider {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Onebot {
+    /// Rust 专用开关：转发引用收发默认关闭。
+    #[serde(default)]
+    pub forward_enabled: bool,
     /// 配置键 `onebot.url`。
     #[serde(deserialize_with = "deserialize_js_string")]
     pub url: String,

@@ -385,6 +385,84 @@ pub(crate) fn replace_cq(s: &str, mut replace: impl FnMut(&str) -> Option<String
     out
 }
 
+/// 异步解析转发后再进入同步引擎；关闭开关或拉取失败时完整保留原事件。
+/// 安全闸门比“感兴趣”更靠前：先复用来源/时间校验，不递归读取附件或嵌套转发。
+pub async fn resolve_forwards(
+    event: &serde_json::Value,
+    bot: &crate::onebot::OneBot,
+    agent: &Agent,
+    now: f64,
+) -> serde_json::Value {
+    use serde_json::{json, Value};
+    if !bot.forward_enabled() || normalize(event, &bot.state().self_id, agent, now).is_none() {
+        return event.clone();
+    }
+    let mut resolved = event.clone();
+    let Some(segments) = resolved["message"].as_array_mut() else {
+        return resolved;
+    };
+    let mut cache = std::collections::HashMap::<String, Option<String>>::new();
+    for segment in segments {
+        if segment["type"] != "forward" {
+            continue;
+        }
+        let Some(id) = segment["data"]["forwardId"]
+            .as_str()
+            .or_else(|| segment["forwardId"].as_str())
+            .or_else(|| segment["data"]["id"].as_str())
+            .filter(|id| !id.trim().is_empty())
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        if !cache.contains_key(&id) {
+            let text = match bot.get_forward_msg(&id).await {
+                Ok(data) => data
+                    .get("nodes")
+                    .or_else(|| data.get("messages"))
+                    .and_then(Value::as_array)
+                    .map(|nodes| {
+                        let mut text = String::new();
+                        for node in nodes {
+                            let node = if node["type"] == "node" {
+                                &node["data"]
+                            } else {
+                                node
+                            };
+                            let Some(parts) = node
+                                .get("content")
+                                .or_else(|| node.get("message"))
+                                .and_then(Value::as_array)
+                            else {
+                                continue;
+                            };
+                            for part in parts {
+                                if part["type"] == "text" {
+                                    if let Some(value) = part["data"]["text"].as_str() {
+                                        text.push_str(value);
+                                    }
+                                }
+                            }
+                            text.push('\n');
+                            text = clip_chars(&text, agent.max_input_chars as usize);
+                            if text.chars().count() >= agent.max_input_chars as usize {
+                                break;
+                            }
+                        }
+                        text
+                    }),
+                Err(_) => None,
+            };
+            cache.insert(id.clone(), text);
+        }
+        if let Some(Some(text)) = cache.get(&id) {
+            // 独立内部段避免原始指令提取把转发内容识别成 owner 的直接指令。
+            *segment = json!({"type":"resolved_forward_text","data":{"text":text}});
+        }
+    }
+    resolved
+}
+
 pub fn normalize(
     event: &serde_json::Value,
     self_id: &str,
@@ -440,7 +518,7 @@ pub fn normalize(
     if let Some(segments) = event["message"].as_array() {
         for seg in segments {
             match seg["type"].as_str() {
-                Some("text") if seg["data"]["text"].is_string() => {
+                Some("text" | "resolved_forward_text") if seg["data"]["text"].is_string() => {
                     text.push_str(seg["data"]["text"].as_str().unwrap())
                 }
                 Some("at") => {

@@ -295,6 +295,13 @@ impl Runtime {
                 if let Some(control) = &self.control {
                     control.observe(&event);
                 }
+                let event = qq_inner_core::policy::resolve_forwards(
+                    &event,
+                    &self.bot,
+                    &self.config.agent,
+                    (self.now)(),
+                )
+                .await;
                 // 入站采集含同步文件/下载 I/O；单个顺序阻塞任务，不阻塞 Tokio worker。
                 let engine = self.engine.clone();
                 if !matches!(
