@@ -1,6 +1,6 @@
 [package]
 name = "qq-inner-core"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 rust-version = "1.82"
 description = "Rust core for qq-inner-agent: OneBot v11 transport, SQLite store, and the decision engine"

@@ -56,3 +56,37 @@ NDJSON 控制套接字(`data/control.sock`)通信。配置、数据库 schema、
 - **性能对比**(内存 / CPU / 延迟)留待后续。
 - `docs/prompt-and-learning-design.md` 中的**提示词分层、学习分诊、affect 指标、记忆召回
   下钻**等设计已记录,尚未实施。
+
+## 1.1.0 —— 剩余设计落地 + 测试重写 + 话题来源
+
+日期:2026-10-05
+
+### 设计文档剩余功能(全部 Rust 落地,开关化默认关闭)
+
+| 功能 | 模块 |
+| --- | --- |
+| 提示词分层(身份 / 任务契约 / 命名规则片段) | `prompts.rs` |
+| 学习分诊 learn / partial / skip + 落库前自我审核 | `memory.rs` + `engine.rs` |
+| affect 指标(心情 / 认同 / 好感)+ 二维心情 disposition | `affect.rs` |
+| 记忆召回下钻 `recall` | `recall.rs` |
+| 虚构责任线(不编造第三方言行) | `prompts.rs` |
+
+### P11 测试重写
+
+- parity 测试的期望值**冻结为黄金文件**(`rust/tests/golden/`),不再运行 node oracle;
+- `node` 移出 PATH 时全量测试**零跳过**、全部原生通过。
+
+### §21 新话题来源
+
+- 外部新鲜内容接入(`topic_source.rs`):GitHub/RSS 抓取 + 群兴趣词元相关度匹配 + 小时节流/预算/缓存;
+- 群间转发(`relay.rs`):转发现成卡片/链接(低风险)与自造合并转发(高风险、默认关)分级 + 短期记忆去重 + 责任线/自我审核闸门;
+- forward 段收发:发送侧引用原消息 id、接收侧 `get_forward_msg` 读取合并聊天记录并接入 normalize。
+
+### JS 清理
+
+- 旧 JS agent 源(engine / policy / sending / activity / orientation / learning / memory-ranking 等)与旧 Node 测试
+  **归档到 `js-legacy` 分支**(标记"不再更新");main 仅保留仪表盘/CLI 及其运维依赖。
+
+### 测试
+
+- Rust **192 项**,本机(macOS)与远端 Linux 双平台全部通过,clippy 零警告。
