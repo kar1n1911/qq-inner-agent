@@ -1254,3 +1254,12 @@ QQ 原生支持"聊天记录"型转发。经 SnowLuma 的 OneBot 桥,它暴露�
 
 **Rust 侧缺口**:`onebot.rs` 目前只发 `text`/`face`/`image`,没有 forward 段;实现 §21.7 时需新增
 `send_forward(chat, nodes)`,只接受已存在消息的 id 引用,不构造新内容。
+
+### 21.7.2 接收侧:合并转发当前不被阅读
+
+- SnowLuma 把收到的 forward 段上报为 **`"[聊天记录]"` 占位文本**,不带内部 nodes/文本;
+- Rust `normalize` 因此只看到 `[聊天记录]` 占位,读不到内容;
+- SnowLuma 有 `get_forward_msg` action(需 forwardId,内部有 `forwardId` 追踪),但两边都没有
+  "检测 forwardId → 拉取 → 抽文本"的链路;
+- **结论**:群成员发的合并聊天记录,**当前不会被 agent 阅读**;若要读,需新增接收侧的
+  forward 解析 + `get_forward_msg` 调用,并把 nodes 内的文本接入 `normalize`。
