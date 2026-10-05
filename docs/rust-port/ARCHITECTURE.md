@@ -252,7 +252,12 @@ Node 侧先**双读**:控制套接字可用则订阅事件,否则回退到 `stat
 | **P8** | 个性化前端改版 | 视觉与交互改版,功能不回归 | ✅ 已交付(第一轮精修,视觉验证通过) |
 | **P9** | 更像真人的提示词与行为 | 对比样本 + 可判定指标(长度分布、句式黑名单命中率) | ✅ JS 版已交付；Rust 侧由 `tools/gen-prompts.mjs` 从 JS 同步，并有逐字比对 |
 | **P10** | 实况验证、切换与回退 | 在远端跑通;含性能对比(内存 / CPU / 延迟) | ✅ 实况切换完成(Rust 内核 systemd 常驻、连 OneBot、模型调用与发送/控制接口全通)；性能对比留待后续 |
-| **P11** | 冻结 JS 参照值为黄金文件、翻转过渡开关、把 parity 测试**重写为 Rust 原生测试**、移除对 `node` 的依赖 | `node` 移出 PATH 时**不跳过任何测试**;每条测试可追溯到设计文档的某条规则 | ⬜ 规格已备(`phase11-test-rewrite.md`)；因 codex 额度暂停,留有 WIP 检查点于 `pebrel/rust-testrewrite` |
+| **P11** | 冻结 JS 参照值为黄金文件、翻转过渡开关、把 parity 测试**重写为 Rust 原生测试**、移除对 `node` 的依赖 | `node` 移出 PATH 时**不跳过任何测试**;每条测试可追溯到设计文档的某条规则 | ✅ 已合并（黄金文件 + node 零跳过） |
+
+| **P6f** | 提示词分层 + 虚构责任线 | 三层提示词逐字对齐;责任线红线不丢失 | ✅ 已合并 |
+| **P6g** | 学习分诊 learn/partial/skip + 落库前自我审核 | verdict 解析 / partial 升格 / 自审 keep-drop-rewrite | ✅ 已合并 |
+| **P6h** | affect 指标 + 二维心情 disposition + 记忆召回下钻 recall | decay / 单向约束 / 熔断 / 四象限 + recall | ✅ 已合并 |
+| **P6i** | §21 新话题来源(外部内容 + 群间转发 + forward 收发 + 安全) | 相关度 / 节流 / 预算 / 缓存 + 分级门控 + forward 收发 | ✅ 已合并 |
 
 依赖顺序:P1 → P1b → {P2, P3} → P4 → P5 → P6 → P7 → P10。
 P8/P9 与主线解耦,可并行。
@@ -261,7 +266,7 @@ P8/P9 与主线解耦,可并行。
 
 ## 8. 测试策略
 
-1. **以 JS 测试为契约**:`test/*.test.mjs` 定义了行为规范;Rust 侧写等价测试。
+1. **以黄金文件为契约**:parity 测试的期望值冻结在 `rust/tests/golden/`,不依赖 node。
 2. **交叉验证**:对同一份 SQLite 与同一份输入,Node 与 Rust 的决策输出必须一致
    (可做 golden-file 对比)。
 3. **Mock 依赖**:OneBot 用本地 WS mock,provider 用本地 HTTP mock,不产生真实调用。
@@ -274,8 +279,8 @@ P8/P9 与主线解耦,可并行。
 
 - 构建:远端 `~/.cargo/bin/cargo build --release`,产物 `rust/target/release/qq-inner-core`。
 - 切换:改 `qq-inner-agent.service` 的 `ExecStart` 指向 Rust 二进制。
-- **回退**:保留原 Node 内核入口,一键把 `ExecStart` 切回 `node src/main.mjs`
-  (两者共用同一份 `config.json`/`secrets.json`/`agent.sqlite`,可随时互换)。
+- **回退**:旧 Node 内核入口已归档到 `js-legacy` 分支(不再更新);需要时从该分支签出旧实现。
+  main 分支以 Rust 内核为唯一实现。
 - 因此 **P1 起就必须保证数据库 schema 与文件格式的双向兼容**,不允许破坏性迁移。
 
 ---
