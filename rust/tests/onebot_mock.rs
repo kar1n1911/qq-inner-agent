@@ -531,7 +531,23 @@ async fn forward_fetch_normalize_text_only_and_fallback() {
         let call = tokio::spawn(async move {
             let c = forward_config();
             let resolved = resolve_forwards(&forward_event(), &a, &c.agent, 1000.).await;
-            normalize(&resolved, "123", &c.agent, 1000.).unwrap()
+            // 转发文本可供正文读取，但不能进入引擎提取直接指令的 text 段集合。
+            let direct: String = resolved["message"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|part| part["type"] == "text")
+                .filter_map(|part| part["data"]["text"].as_str())
+                .collect();
+            assert_eq!(direct, "before  after");
+            let full = normalize(&resolved, "123", &c.agent, 1000.).unwrap();
+            let mut limited = c.agent.clone();
+            limited.max_input_chars = 12.0;
+            assert_eq!(
+                normalize(&resolved, "123", &limited, 1000.).unwrap().text,
+                full.text.chars().take(12).collect::<String>()
+            );
+            full
         });
         let req = next(&mut m.requests).await;
         assert_eq!(req["action"], "get_forward_msg");
@@ -592,6 +608,19 @@ async fn forward_disabled_preserves_existing_behavior() {
     let event = forward_event();
     let resolved = resolve_forwards(&event, &b, &c.agent, 1000.).await;
     assert_eq!(resolved, event);
+    assert_eq!(
+        normalize(&resolved, "123", &c.agent, 1000.).unwrap().text,
+        "before  [forward]  after"
+    );
+    // 桥已转成中文占位文本的消息也逐字保留，不触发拉取。
+    let mut placeholder = event.clone();
+    placeholder["message"] = json!([{"type":"text","data":{"text":"[聊天记录]"}}]);
+    let unchanged = resolve_forwards(&placeholder, &b, &c.agent, 1000.).await;
+    assert_eq!(unchanged, placeholder);
+    assert_eq!(
+        normalize(&unchanged, "123", &c.agent, 1000.).unwrap().text,
+        "[聊天记录]"
+    );
     assert_eq!(
         normalize(&resolved, "123", &c.agent, 1000.).unwrap().text,
         normalize(&event, "123", &c.agent, 1000.).unwrap().text
