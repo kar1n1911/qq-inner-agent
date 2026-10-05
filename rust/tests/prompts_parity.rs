@@ -1,67 +1,21 @@
 //! `prompts.rs` 与 `src/prompts.mjs` 的逐字一致性测试。
 //!
 //! 提示词是**行为的一部分**:改一个字就可能改变模型输出。因此 Rust 侧的常量由脚本从 JS
-//! 生成,并由这里的测试保证它不会悄悄漂移。Node 不可用时跳过。
+//! 生成,并由这里的测试保证它不会悄悄漂移。期望值来自已捕获的 JSON 固化金标准，缺失即失败。
+#[path = "golden/mod.rs"]
+mod golden;
 use qq_inner_core::prompts::{
     articulation_for, articulation_for_with_rules, compose_prompt, ReplyLanguage, ARTICULATION,
     BOUNDARY, EVALUATION, FORECAST, FORMATION, IDENTITY, ORIENTATION, OUTPUT_CONTRACT, RULES,
 };
 use serde_json::Value;
-use std::fs;
-use std::process::Command;
-
-fn node_available() -> bool {
-    Command::new("node")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
 
 #[test]
 fn every_prompt_constant_matches_the_javascript_source() {
-    if !node_available() {
-        eprintln!("SKIP: node unavailable");
-        return;
-    }
-    let script = r#"
-import { identity, outputContract, rules, composePrompt, boundary, formation, evaluation, articulation, forecast, learningReview, articulationFor } from './src/prompts.mjs';
-import { orientationPrompt } from './src/orientation.mjs';
-import { readFileSync } from 'node:fs';
-const langs = JSON.parse(readFileSync(process.argv[1], 'utf8'));
-process.stdout.write(JSON.stringify({
-  identity, outputContract, rules, learningReview,
-  composed: [formation, evaluation, articulation, forecast].map(c => [[], ...Object.keys(rules).map(n => [n]), Object.keys(rules)].map(disabledRules => composePrompt(c, { disabledRules }))),
-  boundary, formation, evaluation, articulation, forecast, orientation: orientationPrompt,
-  disabledLanguage: articulationFor('en', { disabledRules: ['language'] }),
-  disabledReplyRules: articulationFor('en', { disabledRules: ['antiAi', 'decorations'] }),
-  variants: Object.fromEntries(langs.map(l => [l, articulationFor(l)])),
-}));
-"#;
-    let dir = std::env::temp_dir().join(format!("qq-inner-prompts-{}", std::process::id()));
-    fs::create_dir_all(&dir).expect("create temp dir");
-    let lang_file = dir.join("langs.json");
-    fs::write(
-        &lang_file,
-        serde_json::to_string(&["auto", "zh-CN", "en"]).unwrap(),
-    )
-    .unwrap();
-    let out = Command::new("node")
-        .args(["--input-type=module", "-e", script])
-        .arg(&lang_file)
-        .current_dir(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .parent()
-                .unwrap(),
-        )
-        .output()
-        .expect("run node");
-    let _ = fs::remove_dir_all(&dir);
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
+    let js = golden::expected(
+        include_str!("golden/prompts.json"),
+        &serde_json::json!(["auto", "zh-CN", "en"]),
     );
-    let js: Value = serde_json::from_slice(&out.stdout).expect("node output");
 
     let text = |key: &str| js[key].as_str().expect("string field");
     assert_eq!(

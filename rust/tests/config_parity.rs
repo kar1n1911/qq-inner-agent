@@ -1,3 +1,5 @@
+#[path = "golden/mod.rs"]
+mod golden;
 use qq_inner_core::{config::*, settings::*};
 use serde_json::{json, Value};
 use std::{fs, path::PathBuf, process::Command};
@@ -25,12 +27,6 @@ impl Drop for Fixture {
         fs::remove_dir_all(&self.0).unwrap();
     }
 }
-fn node_available() -> bool {
-    Command::new("node")
-        .arg("--version")
-        .output()
-        .is_ok_and(|o| o.status.success())
-}
 const ENV: [&str; 5] = [
     "LLM_API_KEY",
     "DEEPSEEK_API_KEY",
@@ -38,41 +34,17 @@ const ENV: [&str; 5] = [
     "ANTHROPIC_API_KEY",
     "ONEBOT_TOKEN",
 ];
-fn node(f: &Fixture, env: &[(&str, &str)], mode: &str) -> Value {
-    let mut cmd = Command::new("node");
-    for k in ENV {
-        cmd.env_remove(k);
-    }
-    for (k, v) in env {
-        cmd.env(k, v);
-    }
-    let out=cmd.current_dir(PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap()).args(["--input-type=module","-e",r#"
-import {loadConfig,defaults,merge,validate,readiness} from './src/config.mjs';
-import {revision,readJson} from './src/settings.mjs';
-const root=process.argv[1],mode=process.argv[2];
-try {
- if(mode==='revision') console.log(JSON.stringify(revision(root)));
- else if(mode==='defaults') console.log(JSON.stringify(defaults));
- else if(mode==='validate') console.log(JSON.stringify({ok:true,value:validate(merge(defaults,readJson(root+'/config.json')))}));
- else {const c=loadConfig(root);console.log(JSON.stringify({ok:true,value:c,revision:revision(root),missing:readiness(c)}));}
-} catch(e) {console.log(JSON.stringify({ok:false,error:e.message}));}
-"#]).arg(&f.0).arg(mode).output().unwrap();
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    serde_json::from_slice(&out.stdout).unwrap()
+// 固化金标准保留原始文件字节（含非法 UTF-8）和环境覆盖；路径只替换临时根目录。
+fn expected(f: &Fixture, env: &[(&str, &str)], mode: &str) -> Value {
+    let input = json!({"mode":mode,"env":env,"config":fs::read(f.0.join("config.json")).ok(),"secrets":fs::read(f.0.join("secrets.json")).ok()});
+    let value = golden::expected(include_str!("golden/config.json"), &input);
+    serde_json::from_str(&value.to_string().replace("<ROOT>", &f.0.to_string_lossy())).unwrap()
 }
 
 #[test]
-fn node_load_and_revision_parity() {
-    if !node_available() {
-        eprintln!("SKIP: node unavailable");
-        return;
-    }
+fn load_and_revision_golden() {
     let f = Fixture::new();
-    assert_eq!(defaults(), node(&f, &[], "defaults"));
+    assert_eq!(defaults(), expected(&f, &[], "defaults"));
     let mut fixtures = vec![
         json!({}),
         json!({"provider":{"model":"测试模型","baseUrl":"https://api.deepseek.com/v1"},"agent":{"allowedGroups":[123,"456"],"quietHours":null},"unknown":{"kept":true}}),
@@ -105,7 +77,7 @@ fn node_load_and_revision_parity() {
         ],
     ];
     // 两个文件都缺失也必须与 JS 一致。
-    let n = node(&f, &[], "load");
+    let n = expected(&f, &[], "load");
     let r = load_with_env(&f.0, |_| None).unwrap();
     assert_eq!(r.raw, n["value"]);
     assert_eq!(revision(&f.0).unwrap(), n["revision"]);
@@ -116,7 +88,7 @@ fn node_load_and_revision_parity() {
             &json!({"apiKey":"saved-secret","onebotToken":"saved-token"}),
         );
         for env in &envs {
-            let n = node(&f, env, "load");
+            let n = expected(&f, env, "load");
             let r = load_with_env(&f.0, |key| {
                 env.iter()
                     .find(|(k, _)| *k == key)
@@ -136,7 +108,7 @@ fn node_load_and_revision_parity() {
 fn revision_utf8_missing_and_io_errors() {
     let f = Fixture::new();
     assert_eq!(read_json(&f.0.join("missing")).unwrap(), None);
-    if node_available() {
+    {
         for bytes in [
             vec![],
             b"\xef\xbb\xbf{}\r\n".to_vec(),
@@ -144,7 +116,10 @@ fn revision_utf8_missing_and_io_errors() {
             vec![b'x'; 128],
         ] {
             fs::write(f.0.join("config.json"), bytes).unwrap();
-            assert_eq!(json!(revision(&f.0).unwrap()), node(&f, &[], "revision"));
+            assert_eq!(
+                json!(revision(&f.0).unwrap()),
+                expected(&f, &[], "revision")
+            );
         }
     }
     fs::write(f.0.join("config.json"), b"invalid").unwrap();
@@ -212,9 +187,8 @@ fn migration_and_merge() {
 }
 
 #[test]
-fn invalid_values_match_node() {
+fn invalid_values_match_golden() {
     let f = Fixture::new();
-    let have_node = node_available();
     let cases = vec![
         json!({"ui":{"language":"fr"}}),
         json!({"agent":{"replyLanguage":"fr"}}),
@@ -248,9 +222,9 @@ fn invalid_values_match_node() {
     for extra in cases {
         let r = validate(&merge(&defaults(), &extra));
         assert!(r.is_err(), "{extra}");
-        if have_node {
+        {
             f.write("config.json", &extra);
-            let n = node(&f, &[], "validate");
+            let n = expected(&f, &[], "validate");
             assert_eq!(n["ok"], false, "{extra}");
             if !n["error"].as_str().unwrap().contains("time zone") {
                 assert_eq!(r.unwrap_err().to_string(), n["error"]);

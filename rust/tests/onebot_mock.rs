@@ -121,7 +121,12 @@ async fn running(
     let (stop, shutdown) = watch::channel(false);
     let b = bot.clone();
     let task = tokio::spawn(async move { b.run(shutdown).await });
-    assert!(matches!(next(rx).await, Notification::Status(s) if s == "connected"));
+    // 并行全量测试负载高时连接启动可能排队，原 4 秒窗口会偶发超时。
+    let connected = timeout(Duration::from_secs(15), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(connected, Notification::Status(s) if s == "connected"));
     (stop, task)
 }
 async fn stop(stop: watch::Sender<bool>, task: JoinHandle<()>) {
