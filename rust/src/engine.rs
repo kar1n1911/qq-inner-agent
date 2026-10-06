@@ -683,6 +683,7 @@ impl Engine {
                     core.tasks.push(tokio::spawn(async move {
                         let mut result = Ok(());
                         for chat in exterior {
+                            let nickname = engine.identity_nickname(&chat).await.unwrap_or(None);
                             if let Err(e) = crate::identity::automate(
                                 &engine.store,
                                 &IdentityAdapter(&engine),
@@ -690,6 +691,7 @@ impl Engine {
                                 &engine.config.data_dir,
                                 &chat,
                                 engine.now(),
+                                nickname.as_deref(),
                             )
                             .await
                             {
@@ -840,13 +842,55 @@ impl Engine {
         }
         self.wait_idle().await;
     }
+    async fn identity_nickname(&self, chat: &str) -> Result<Option<String>> {
+        let a = &self.config.agent;
+        if !a.identity.enabled
+            || a.dry_run
+            || !(a.identity.allow_nickname || a.identity.allow_group_card)
+            || !readiness(&self.config).is_empty()
+        {
+            return Ok(None);
+        }
+        let persona = {
+            let db = self.db()?;
+            if !crate::identity::enough(&db, chat, self.now(), &a.identity)?
+                || !crate::identity::ready(&db, self.now(), &a.identity)?
+            {
+                return Ok(None);
+            }
+            crate::identity::persona(&db, chat, &a.persona.text, &a.identity)?
+        };
+        let group_id = chat
+            .strip_prefix("group:")
+            .ok_or_else(|| anyhow::anyhow!("invalid_identity_group"))?;
+        let members = IdentityAdapter(self)
+            .call(
+                "get_group_member_list",
+                json!({"group_id":group_id,"no_cache":true}),
+            )
+            .await?;
+        let samples = crate::identity::nickname_samples(&members, &self.transport.self_id())?;
+        let response = self
+            .model(
+                crate::identity::NAME_PROMPT,
+                json!({"persona":persona,"nicknameSamples":samples}),
+            )
+            .await?;
+        Ok(crate::identity::model_nickname(&response))
+    }
     async fn model(&self, system: &str, payload: Value) -> Result<Value> {
         let mut signal = self.aborted.subscribe();
         ensure!(!*signal.borrow(), "aborted");
         // 只能丢弃 future/结果；Provider 的 spawn_blocking 请求仍会跑完，预算绝不退还。
         tokio::select! { biased;
             _ = signal.changed() => anyhow::bail!("aborted"),
-            result = self.provider.json(system, payload) => result,
+            result = async {
+                if system==crate::identity::NAME_PROMPT {
+                    self.provider.text(system,payload).await.map(Value::String)
+                } else {
+                    self.provider.json(system,payload).await
+                }
+            } => result,
         }
     }
     fn obsolete(&self, core: &Core, db: &Store, t: &Turn) -> Result<bool> {
