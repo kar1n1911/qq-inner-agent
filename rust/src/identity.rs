@@ -118,7 +118,7 @@ pub struct Proposal {
     pub group_card: String,
     pub avatar: Option<String>,
 }
-pub fn propose(store: &Store, chat: &str, persona: &str, now: f64) -> Result<Proposal> {
+pub fn propose(store: &Store, chat: &str, name: &str, persona: &str, now: f64) -> Result<Proposal> {
     ensure!(
         chat.strip_prefix("group:")
             .is_some_and(|id| id.parse::<u64>().is_ok_and(|id| id > 0)),
@@ -128,12 +128,17 @@ pub fn propose(store: &Store, chat: &str, persona: &str, now: f64) -> Result<Pro
     texts.push(persona.into());
     let labels = styles(&texts);
     let label = labels.first().map(|i| STYLES[*i].1).unwrap_or("共学");
-    // 固定 AI 前缀和非人名白名单排除名人姓名及角色仿冒，不依赖不完整的名人黑名单。
-    let name = format!("AI·{label}伙伴");
+    // 拟人：不强调 AI 属性，用基座名字 + 学到的风格标签自然外显；防仿冒靠黑名单 + 成员名去重。
+    let base = name.trim();
+    let nickname = if base.is_empty() {
+        label.to_string()
+    } else {
+        format!("{base}·{label}")
+    };
     Ok(Proposal {
         chat: chat.into(),
-        nickname: name.clone(),
-        group_card: name,
+        nickname: nickname.clone(),
+        group_card: nickname,
         avatar: None,
     })
 }
@@ -159,9 +164,6 @@ pub fn safe_name(name: &str, others: &[String]) -> bool {
     name.encode_utf16().count() <= 24
         && !name.chars().any(char::is_control)
         && !blocked.iter().any(|word| name.contains(word))
-        && STYLES
-            .iter()
-            .any(|(_, label, _)| name == format!("AI·{label}伙伴"))
         && !others
             .iter()
             .any(|other| normalized(other) == normalized(name))
@@ -313,7 +315,7 @@ pub async fn automate<T: OrientationTransport + ?Sized>(
         if !enough(&db, chat, now, cfg)? || !ready(&db, now, cfg)? {
             return Ok(());
         }
-        propose(&db, chat, &agent.persona.text, now)?
+        propose(&db, chat, &agent.name.text, &agent.persona.text, now)?
     };
     if cfg.allow_avatar {
         proposal.avatar = choose_avatar(root);
