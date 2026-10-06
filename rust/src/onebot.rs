@@ -153,7 +153,7 @@ impl OneBot {
             }
         }
     }
-    /// 高风险身份操作；调用方必须先取得主人私聊确认。
+    /// 高风险身份操作；调用方负责身份护栏、冷却及原值备份。
     pub async fn set_group_card(&self, group_id: &str, card: &str) -> Reply {
         self.call(
             "set_group_card",
