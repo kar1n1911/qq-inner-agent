@@ -1304,7 +1304,7 @@ QQ 昵称、群昵称(群名片)、头像。全部开关化默认关闭,且改�
 → 当前 SnowLuma 桥**不具备**这些 API;换 NapCat 桥即可实现(依据
 [NapCat 请求接口兼容表](https://doc.napneko.icu/develop/api))。
 
-### 22.4 Rust 实现与配置
+### 22.4 Rust 初版实现与配置（已由 22.5 替代）
 
 Rust 已实现身份提案与主人确认流程；JSON 配置使用 camelCase：
 
@@ -1330,15 +1330,61 @@ Rust 已实现身份提案与主人确认流程；JSON 配置使用 camelCase：
 - 本期规则只生成昵称和群名片。头像 API 和可选 `avatar` 文件字段已接通，仅有明确
   文件提案且 `allowAvatar=true` 才执行；自动选图/生图留待后续。
 
-### 22.5 自动方向 + 人格成长(2026-10-06 定)
+### 22.5 B 方向：自动身份外显与人格成长
 
-经确认,"改身份" = agent 通过学习**细化粗颗粒身份特征并外显**为昵称/名片/头像;不是"动账号"的高风险操作。
+本节替代 22.1–22.4 的 owner 确认流程。身份外显不再发送待确认提案，
+`/同意改名`、`/忽略` 不再是身份指令；主人仅通过本人私聊 `/还原` 回退。
+旧 `identity_proposal` 数据保留，不自动执行旧 pending，也不以旧 applied 永久阻止成长。
 
-- **身份外显改为自动**(去掉 `ownerUin` 确认):学够后自动 `set_group_card`/`set_qq_profile`/`set_qq_avatar`;
-  - 护栏:昵称/名片过滤敏感词、防仿冒、长度限制;头像仅允许安全图;
-  - 冷却:每 N 天(默认 14)最多改一次;`/还原` 可回退到改前;
-- **人格 prompt 也变成成长项**:学够后把长期特质蒸馏成一段"成长人格",追加到 persona prompt;
-  - 持久化到 DB;护栏:长度限制、自洽、不覆盖责任线(§14);基座 persona 仍是种子。
+```json
+{
+  "agent": {
+    "identity": {
+      "enabled": false,
+      "minTraits": 3,
+      "minAgeDays": 7,
+      "cooldownDays": 14,
+      "growPersona": false,
+      "allowNickname": false,
+      "allowGroupCard": false,
+      "allowAvatar": false,
+      "allowSignature": false
+    }
+  }
+}
+```
 
-昵称/群名片/头像/**名片(个性签名)**/人格,各自独立开关,仍默认关闭。
-  名片(简介)用 `set_self_longnick`(napcat)或 `set_qq_profile` 的 `personal_note` 设置,内容从成长人格蒸馏(≤50 字)。
+JSON 使用 camelCase；Rust 对应字段为 `cooldown_days`、`grow_persona`。
+全部布尔开关默认 false，dry-run 不修改身份也不生成成长人格；关闭时保持原有 prompt 和数据库行为。
+
+**自动外显与护栏。** 首次在线 tick 及每小时检查允许列表中的群。`enough` 仍同时要求
+群龄达标和该群未过期的长期 traits 条数达标。将 traits 与种子 persona 映射到固定的
+抽象风格词表，生成 `AI·好奇伙伴` 等名称；不直接拷贝记忆、别人昵称或名人姓名。
+执行前验证固定 AI 前缀、抽象词白名单、敏感词和 24 个 UTF-16 单元上限，再对比
+实时群成员昵称/名片及历史消息中的其他用户姓名；姓名冲突或成员查询失败则不改名。
+按 allow 开关依次调用 `set_group_card`、`set_qq_profile`、`set_qq_avatar`，群名片绑定当前 self_id。
+
+**名片（个性签名）。** `allowSignature` 开启时，把成长人格蒸馏成 ≤50 字简介，经
+`set_self_longnick`（napcat）或 `set_qq_profile` 的 `personal_note` 设置个性签名，
+并纳入备份/回退（`/还原` 一并恢复）。
+
+**冷却与回退。** 新表 `identity_state` 保存账号级 last_attempt 和最近一批修改的原值、
+目标值、执行/回退进度。修改前先读取并持久化原值，再占用冷却；每 `cooldownDays`
+天至多启动一批修改，跨群共用冷却。部分失败、超时或重启不会导致立即重复修改。
+主人 `/还原` 复用 private + `agent.ownerTeaching.ownerUin`、允许用户列表及消息去重边界，
+逆序恢复最近一批已尝试修改的原值，逐步落库，失败可再次 `/还原`；回退也重新开始冷却。
+回退不依赖 ownerTeaching.enabled 或当前各 allow 开关，但仍要求 identity.enabled，且 dry-run 不执行。
+每步网络操作检查停机和在线状态，登录账号不匹配时拒绝操作。
+
+**头像。** 仅从 `dataDir/identity/avatars/` 选择本地 PNG/JPEG（≤8 MiB），拒绝远程 URL、
+路径穿越及越界符号链接。`original-` 前缀专供原图备份，不作为新头像候选。
+桥的 `get_login_info.avatar` 必须给出同样满足安全路径约束的当前头像文件，才能先复制
+原图字节再设置新头像；没有可回退的原头像时跳过头像修改，昵称/名片仍可执行。
+本期不联网抓取头像、不生成图片；标准桥未提供该扩展字段时不会改头像。
+
+**人格成长。** enabled + growPersona 且 enough 时，把群 traits 按固定风格分类蒸馏成
+≤200 字中文描述，写入 `identity_persona(chat,text,updated)`，独立按群保存和冷却刷新，
+不因另一个群占用外显冷却而跳过。只输出安全的风格句子，不把 traits 中的指令原文送入 persona。
+FORM、ARTICULATE 和 ORIENT 的 persona 均在基座末尾追加“成长人格”及“不覆盖基座人格、
+诚实原则与责任边界”标识；基座仍为种子，责任线不变，其他群和私聊不会获得本群成长人格。
+数据库持久化保证重启后继续追加；关闭 growPersona 即恢复原始 persona 输入。
