@@ -215,6 +215,14 @@ pub const LEGACY_PERSONAS: [&str;2]=[
 
 pub fn validate(c: &Value) -> std::result::Result<(), ConfigError> {
     let a = &c["agent"];
+    if let Some(v) = a.get("identity") {
+        let identity: Identity =
+            serde_json::from_value(v.clone()).map_err(|e| ConfigError(e.to_string()))?;
+        check(
+            identity.min_age_days.is_finite() && identity.min_age_days >= 0.,
+            "agent.identity.minAgeDays must be finite and nonnegative",
+        )?;
+    }
     if let Some(v) = a.get("relay") {
         let settings: crate::relay::RelaySettings =
             serde_json::from_value(v.clone()).map_err(|e| ConfigError(e.to_string()))?;
@@ -841,9 +849,35 @@ impl Default for OwnerTeaching {
     }
 }
 
+/// 身份修改属高风险；总开关和每种修改权限都默认关闭。
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Identity {
+    pub enabled: bool,
+    pub min_traits: usize,
+    pub min_age_days: f64,
+    pub allow_nickname: bool,
+    pub allow_group_card: bool,
+    pub allow_avatar: bool,
+}
+impl Default for Identity {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            min_traits: 3,
+            min_age_days: 7.0,
+            allow_nickname: false,
+            allow_group_card: false,
+            allow_avatar: false,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Agent {
+    #[serde(default)]
+    pub identity: Identity,
     #[serde(default)]
     pub relay: crate::relay::RelaySettings,
     #[serde(default)]

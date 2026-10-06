@@ -153,6 +153,21 @@ impl OneBot {
             }
         }
     }
+    /// 高风险身份操作；调用方必须先取得主人私聊确认。
+    pub async fn set_group_card(&self, group_id: &str, card: &str) -> Reply {
+        self.call(
+            "set_group_card",
+            json!({"group_id":group_id,"user_id":self.state().self_id,"card":card}),
+        )
+        .await
+    }
+    pub async fn set_qq_profile(&self, nickname: &str) -> Reply {
+        self.call("set_qq_profile", json!({"nickname":nickname}))
+            .await
+    }
+    pub async fn set_qq_avatar(&self, file: &str) -> Reply {
+        self.call("set_qq_avatar", json!({"file":file})).await
+    }
     pub async fn send(&self, chat: &str, text: &str, face_id: Option<&str>) -> Reply {
         let s = self.state();
         if !s.connected || !s.online {

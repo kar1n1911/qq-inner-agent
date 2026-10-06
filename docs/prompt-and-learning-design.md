@@ -1304,8 +1304,28 @@ QQ 昵称、群昵称(群名片)、头像。全部开关化默认关闭,且改�
 → 当前 SnowLuma 桥**不具备**这些 API;换 NapCat 桥即可实现(依据
 [NapCat 请求接口兼容表](https://doc.napneko.icu/develop/api))。
 
-### 22.4 实现(Rust,待桥支持)
+### 22.4 Rust 实现与配置
 
-- `onebot.rs` 加 `set_group_card(chat, card)`、`set_qq_profile(nickname, ...)`、`set_qq_avatar(...)`;
-- 引擎加"信息足够"判断 + `ownerUin` 确认门控;
-- 开关化默认关闭;头像需能生成/选择图片(可复用素材采集,或文生图)。
+Rust 已实现身份提案与主人确认流程；JSON 配置使用 camelCase：
+
+```json
+{"agent":{"identity":{"enabled":false,"minTraits":3,"minAgeDays":7,"allowNickname":false,"allowGroupCard":false,"allowAvatar":false}}}
+```
+
+- `enough` 同时要求群龄达到 `minAgeDays`、该群 `subject=group` 且 `layer=traits`
+  的未过期条目达到 `minTraits`。群龄优先用最近入群时间，否则用观察开始时间；
+  无观察记录时用最早的人类群消息。个人 traits 不计数。
+- 首次在线 tick 及其后每小时检查允许列表内的群；以配置 persona 短语和证据来源
+  最多的群 trait 组成昵称、群名片，同频按 slot 排序，并限制生成长度。
+- `identity_proposal` 延迟建表，持久化账号级单个 pending、已成功 action 和 applied；
+  无 pending 且未 applied 才生成提案，避免多个群反复修改账号。
+- 保存提案后私聊 `agent.ownerTeaching.ownerUin`，提示“建议改名 X / 群名片 Y,
+  回复 /同意改名 或 /忽略”。只接受主人本人私聊确认，复用允许用户列表及消息去重
+  边界；身份确认独立于教学开关。
+- `/同意改名` 按各 allow 开关依次调用 `set_group_card`（带当前账号 `user_id=self_id`）、
+  `set_qq_profile`、`set_qq_avatar`。逐项保存成功状态，全部完成后清 pending 并记 applied。
+  失败保留提案且不自动重试；主人核对账号状态后可再次确认，已成功项目不重复调用。
+- `/忽略` 清 pending，不记 applied；下一次每小时检查可再提议。dry-run 不发送提案、
+  不修改身份。总开关及所有 allow 开关默认关闭，关闭时不建表、不改变原行为。
+- 本期规则只生成昵称和群名片。头像 API 和可选 `avatar` 文件字段已接通，仅有明确
+  文件提案且 `allowAvatar=true` 才执行；自动选图/生图留待后续。

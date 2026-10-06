@@ -639,3 +639,35 @@ async fn forward_disabled_preserves_existing_behavior() {
     assert!(m.requests.is_empty());
     stop(s, t).await;
 }
+
+#[tokio::test]
+async fn identity_actions_use_logged_in_account_and_exact_parameters() {
+    let mut m = mock(json!({"user_id":123}), json!(true), 0).await;
+    let (b, mut rx) = bot(&m, "a+b &?", "", 30.);
+    let (shutdown, task) = running(&b, &mut rx).await;
+    for (action, expected) in [
+        (
+            "set_group_card",
+            json!({"group_id":"10","user_id":"123","card":"群名片"}),
+        ),
+        ("set_qq_profile", json!({"nickname":"昵称"})),
+        ("set_qq_avatar", json!({"file":"file:///avatar.png"})),
+    ] {
+        let client = b.clone();
+        let request = tokio::spawn(async move {
+            match action {
+                "set_group_card" => client.set_group_card("10", "群名片").await,
+                "set_qq_profile" => client.set_qq_profile("昵称").await,
+                _ => client.set_qq_avatar("file:///avatar.png").await,
+            }
+        });
+        let packet = next(&mut m.requests).await;
+        assert_eq!(packet["action"], action);
+        assert_eq!(packet["params"], expected);
+        m.frames
+            .send(response(&packet, json!({}), json!(0), "ok"))
+            .unwrap();
+        request.await.unwrap().unwrap();
+    }
+    stop(shutdown, task).await;
+}

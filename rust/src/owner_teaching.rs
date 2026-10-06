@@ -13,6 +13,13 @@ pub(crate) fn sources(v: &[Value]) -> bool {
     v == [json!("owner-teaching")]
 }
 
+/// 共用的主人授权边界；功能开关由各调用方单独检查。
+pub fn authorized(agent: &Agent, chat: &str, sender: &str) -> bool {
+    !sender.is_empty()
+        && sender == agent.owner_teaching.owner_uin
+        && chat == format!("private:{sender}")
+}
+
 /// None 必须继续普通聊天；Some 无论成功失败都消费该指令。
 pub fn handle(
     store: &Store,
@@ -23,10 +30,7 @@ pub fn handle(
     now: f64,
 ) -> Option<String> {
     // 授权边界：群聊无例外，私聊目标必须就是配置中的主人。
-    if !agent.owner_teaching.enabled
-        || sender != agent.owner_teaching.owner_uin
-        || chat != format!("private:{sender}")
-    {
+    if !agent.owner_teaching.enabled || !authorized(agent, chat, sender) {
         return None;
     }
     let input = input.trim();

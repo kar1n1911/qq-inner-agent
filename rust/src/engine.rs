@@ -143,6 +143,9 @@ struct Core {
     teaching_replies: Vec<(String, String)>,
     last_error: Option<String>,
     last_cycle: f64,
+    identity_checked: Option<f64>,
+    identity_busy: bool,
+    identity_commands: Vec<(String, bool)>,
 }
 impl Core {
     fn get(&self, chat: &str) -> Option<&ChatState> {
@@ -340,7 +343,7 @@ impl Engine {
         let a = &self.config.agent;
         let now = self.now();
         let self_id = self.transport.self_id();
-        if a.observation.enabled
+        if (a.observation.enabled || a.identity.enabled)
             && event["post_type"] == "notice"
             && event["notice_type"] == "group_increase"
             && (event["self_id"].is_null() || js_string(&event["self_id"]) == self_id)
@@ -383,9 +386,27 @@ impl Engine {
                 })
                 .unwrap_or_default()
         };
+        // 高风险指令只有主人私聊可消费；独立于普通教学开关。
+        if a.identity.enabled
+            && crate::owner_teaching::authorized(a, &m.chat, &m.sender)
+            && matches!(raw.trim(), "/同意改名" | "/忽略")
+        {
+            let db = self.db()?;
+            if !db.message(&value)? {
+                return Ok(());
+            }
+            db.mark_handled(&m.chat, &m.id, true)?;
+            if core.identity_busy || !core.identity_commands.is_empty() {
+                core.teaching_replies
+                    .push((m.chat, "身份确认正在处理，请稍后再试".into()));
+            } else {
+                core.identity_commands
+                    .push((m.chat, raw.trim() == "/同意改名"));
+            }
+            return Ok(());
+        }
         if a.owner_teaching.enabled
-            && m.sender == a.owner_teaching.owner_uin
-            && m.chat == format!("private:{}", m.sender)
+            && crate::owner_teaching::authorized(a, &m.chat, &m.sender)
             && ["/黑话", "/记住", "/忘记"]
                 .iter()
                 .any(|c| raw.trim().starts_with(c))
@@ -416,6 +437,9 @@ impl Engine {
             for code in report.failures {
                 (self.options.log)("media_collect_failed", json!({"code":code}));
             }
+        }
+        if a.identity.enabled && m.chat.starts_with("group:") {
+            self.db()?.ensure_orientation(&m.chat, now)?;
         }
         self.orientation.observe(&m.chat)?;
         let db = self.db()?;
@@ -573,6 +597,36 @@ impl Engine {
         }
         Ok(())
     }
+    async fn confirm_identity(&self, approve: bool) -> Result<String> {
+        let a = &self.config.agent;
+        if !a.identity.enabled || a.dry_run || *self.aborted.borrow() {
+            return Ok("身份修改已关闭或处于 dry-run，未执行".into());
+        }
+        let Some(mut proposal) = crate::identity::pending(&*self.db()?)? else {
+            return Ok("没有待确认的身份提案".into());
+        };
+        if !approve {
+            crate::identity::clear(&*self.db()?, false)?;
+            return Ok("已忽略身份提案".into());
+        }
+        ensure!(
+            policy::allowed(&proposal.chat, a),
+            "identity_group_not_allowed"
+        );
+        let actions = proposal.actions(&a.identity, &self.transport.self_id());
+        if actions.is_empty() && proposal.completed.is_empty() {
+            return Ok("当前权限没有允许执行的身份修改，提案保留".into());
+        }
+        // 只在明确的主人确认后逐项执行；失败保留提案，成功项目落库避免重复调用。
+        for (action, params) in actions {
+            ensure!(!*self.aborted.borrow(), "identity_stopped");
+            self.transport.call(action, params).await?;
+            proposal.completed.push(action.into());
+            crate::identity::save(&*self.db()?, &proposal)?;
+        }
+        crate::identity::clear(&*self.db()?, true)?;
+        Ok("身份修改已完成".into())
+    }
     pub fn tick(self: &Arc<Self>) -> Result<()> {
         let mut core = self.core();
         let now = self.now();
@@ -592,6 +646,53 @@ impl Engine {
             return Ok(());
         }
         core.tasks.retain(|t| !t.is_finished());
+        if a.identity.enabled {
+            if !core.identity_busy {
+                if let Some((chat, approve)) = core.identity_commands.pop() {
+                    core.identity_busy = true;
+                    let engine = self.clone();
+                    core.tasks.push(tokio::spawn(async move {
+                        let result = engine.confirm_identity(approve).await;
+                        let mut core = engine.core();
+                        core.identity_busy = false;
+                        let reply = result.unwrap_or_else(|e| {
+                            format!("身份修改未完成：{e}；请核对账号状态后再确认，或 /忽略")
+                        });
+                        core.teaching_replies.push((chat, reply));
+                    }));
+                }
+            }
+            if !a.dry_run
+                && !core.identity_busy
+                && core.identity_commands.is_empty()
+                && !a.owner_teaching.owner_uin.is_empty()
+                && core.identity_checked.is_none_or(|t| now - t >= 3600.)
+            {
+                core.identity_checked = Some(now);
+                let db = self.db()?;
+                if crate::identity::pending(&db)?.is_none() && !crate::identity::applied(&db)? {
+                    // 允许列表沿用引擎群聊边界，不向已移除的群提出修改。
+                    let groups = db.rows("SELECT chat FROM group_orientation UNION SELECT DISTINCT chat FROM messages WHERE chat LIKE 'group:%' ORDER BY chat", [])?;
+                    for row in groups {
+                        let chat = row["chat"].as_str().unwrap_or("");
+                        if !policy::allowed(chat, a) {
+                            continue;
+                        }
+                        if crate::identity::enough(&db, chat, now, &a.identity)? {
+                            let proposal =
+                                crate::identity::propose(&db, chat, &a.persona.text, now)?;
+                            crate::identity::save(&db, &proposal)?;
+                            core.teaching_replies.push((
+                                format!("private:{}", a.owner_teaching.owner_uin),
+                                proposal.notice(),
+                            ));
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
         for (chat, reply) in std::mem::take(&mut core.teaching_replies) {
             if a.dry_run {
                 continue;
