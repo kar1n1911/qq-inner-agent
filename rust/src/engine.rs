@@ -1569,6 +1569,22 @@ impl Engine {
             system.push('\n');
             system.push_str(crate::recall::RULE);
         }
+        if a.backstory.enabled {
+            let core = self.core();
+            let db = self.db()?;
+            if !self.fresh(&core, &db, &t)? {
+                return Ok(());
+            }
+            // 仅直接回应当前人类消息时允许制造；主动话题只召回。
+            let stories = if t.trigger != "topic" && t.hint != Hint::Other {
+                crate::backstory::prepare(&db, chat, text(&t.last, "text"), self.now())?
+            } else {
+                crate::backstory::recall(&db, chat, self.now(), 8)?
+            };
+            payload["backstories"] = json!(stories);
+            system.push('\n');
+            system.push_str(crate::backstory::RULE);
+        }
         let response = match self.model(&system, payload).await {
             Ok(value) => value,
             Err(error) => {

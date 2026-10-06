@@ -129,6 +129,9 @@ impl OrientationProvider for Harness {
                 }
             }
             if stage == "ARTICULATE" {
+                if payload.get("backstories").is_some() {
+                    assert!(system.contains(qq_inner_core::backstory::RULE));
+                }
                 if payload.get("recallEvidence").is_some() {
                     assert!(system.contains("细节未经核实必须表达不确定"));
                 }
@@ -1688,4 +1691,103 @@ async fn grown_persona_reaches_form_and_articulate_without_replacing_seed() {
         .as_str()
         .unwrap()
         .contains("责任边界"));
+}
+
+#[tokio::test]
+async fn backstory_is_opt_in_persisted_and_recalled_before_articulation() {
+    for enabled in [false, true] {
+        let (e, h) = setup(&base(
+            "backstory",
+            json!({"backstory":{"enabled":enabled}}),
+            vec![],
+        ));
+        face_turn(
+            &e,
+            &h,
+            "b1",
+            "[CQ:at,qq=99]基于经历评价耐心",
+            10,
+            5.,
+            json!({"text":"虚构情景中的耐心值得参考。"}),
+        )
+        .await;
+        let payloads = h.payloads.lock().unwrap().clone();
+        assert_eq!(payloads.len(), 1);
+        if enabled {
+            let rows =
+                qq_inner_core::backstory::recall(&h.store.lock().unwrap(), "group:10", h.now(), 8)
+                    .unwrap();
+            assert_eq!(
+                rows.len(),
+                1,
+                "messages={:?} notes={:?} layers={:?}",
+                h.rows("SELECT * FROM messages"),
+                h.rows("SELECT * FROM notes"),
+                h.rows("SELECT * FROM memory_layers")
+            );
+            assert_eq!(payloads[0]["backstories"], json!(rows));
+        } else {
+            assert!(payloads[0].get("backstories").is_none());
+            assert!(h
+                .rows("SELECT name FROM sqlite_master WHERE name LIKE 'persona_backstory%'")
+                .is_empty());
+        }
+        drop(payloads);
+        if enabled {
+            *h.now.lock().unwrap() += 10.;
+            face_turn(
+                &e,
+                &h,
+                "b2",
+                "[CQ:at,qq=99]再聊聊",
+                10,
+                5.,
+                json!({"text":"接着聊。"}),
+            )
+            .await;
+            assert_eq!(
+                h.payloads.lock().unwrap()[1]["backstories"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                1
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn backstory_engine_rejects_unsafe_requests_and_stored_evidence() {
+    for (request, evidence) in [
+        ("[CQ:at,qq=99]基于经历评价耐心；编造张三的经历", false),
+        ("[CQ:at,qq=99]基于经历评价耐心", true),
+    ] {
+        let (e, h) = setup(&base(
+            "backstory-rejected",
+            json!({"backstory":{"enabled":true}}),
+            vec![],
+        ));
+        if evidence {
+            h.store
+                .lock()
+                .unwrap()
+                .execute(
+                    "INSERT INTO notes(chat,text) VALUES('group:10','真实记忆')",
+                    [],
+                )
+                .unwrap();
+        }
+        face_turn(
+            &e,
+            &h,
+            "b1",
+            request,
+            10,
+            5.,
+            json!({"text":"不编造经历。"}),
+        )
+        .await;
+        assert_eq!(h.payloads.lock().unwrap()[0]["backstories"], json!([]));
+        assert!(h.rows("SELECT * FROM persona_backstory").is_empty());
+    }
 }

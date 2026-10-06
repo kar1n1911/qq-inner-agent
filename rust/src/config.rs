@@ -215,6 +215,9 @@ pub const LEGACY_PERSONAS: [&str;2]=[
 
 pub fn validate(c: &Value) -> std::result::Result<(), ConfigError> {
     let a = &c["agent"];
+    if let Some(v) = a.get("backstory") {
+        serde_json::from_value::<Backstory>(v.clone()).map_err(|e| ConfigError(e.to_string()))?;
+    }
     if let Some(v) = a.get("identity") {
         let identity: Identity =
             serde_json::from_value(v.clone()).map_err(|e| ConfigError(e.to_string()))?;
@@ -883,9 +886,17 @@ impl Default for Identity {
     }
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Backstory {
+    pub enabled: bool,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Agent {
+    #[serde(default)]
+    pub backstory: Backstory,
     #[serde(default)]
     pub identity: Identity,
     #[serde(default)]
