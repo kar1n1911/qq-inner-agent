@@ -1397,6 +1397,10 @@ impl Engine {
             payload["runtimeInstructions"] = json!(crate::humanize::FACE_ONLY_INSTRUCTIONS);
             payload["faceOnlyAllowed"] = json!(face_only_allowed);
         }
+        if a.multi_bubble {
+            payload["multiBubble"] = json!(true);
+            payload["bubbleInstructions"] = json!(crate::humanize::MULTI_BUBBLE_INSTRUCTIONS);
+        }
         let mut system =
             prompts::articulation_for(&a.reply_language).map_err(anyhow::Error::msg)?;
         if let Some(disposition) = behavior.disposition {
@@ -1496,10 +1500,37 @@ impl Engine {
         };
         // 46：与 JS 一样，发送不受模型取消信号中断；stop 等待实际投递结果。
         let content = text(&decorated, "text");
-        let sent = self
-            .transport
-            .send(chat, content, decorated["faceId"].as_str())
-            .await;
+        let face = decorated["faceId"].as_str();
+        // 多气泡（门控）：response.bubbles 非空时依次发送，face 挂最后一条，条间加打字延迟。
+        let bubbles: Vec<String> = if a.multi_bubble {
+            array(&response["bubbles"])
+                .iter()
+                .filter_map(|b| b.as_str().map(str::trim))
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let seq: Vec<String> = if bubbles.is_empty() { vec![content.to_owned()] } else { bubbles };
+        let n = seq.len();
+        let mut sent = None;
+        for (i, bubble) in seq.iter().enumerate() {
+            if i > 0 {
+                // 打字延迟：与长度成比例（15ms/字符）+ 固定间隔 700ms + 抖动。
+                // 抖动随当前心情强度缩放（心情越强、打字越不稳）；affect 关闭时 mood 恒为 0。
+                let typing_ms = (bubble.chars().count() as f64 * 15.0) as u64;
+                let mood_arousal = behavior.mood.abs().min(1.0);
+                let jitter_range = (300.0 * (1.0 + mood_arousal)).max(1.0) as u64;
+                let jitter_ms = rand::random::<u64>() % jitter_range;
+                tokio::time::sleep(std::time::Duration::from_millis(700 + typing_ms + jitter_ms))
+                    .await;
+            }
+            // face 只挂在最后一条（整体回复的结尾）。
+            let bubble_face = if i == n - 1 { face } else { None };
+            sent = Some(self.transport.send(chat, bubble, bubble_face).await);
+        }
+        let sent = sent.expect("at least one bubble");
         let mut core = self.core();
         let db = self.db()?;
         match sent {

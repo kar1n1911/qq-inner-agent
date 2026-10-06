@@ -870,6 +870,10 @@ pub struct Agent {
     pub expression: Expression,
     /// 配置键 `agent.emoji`。
     pub emoji: Emoji,
+    /// 配置键 `agent.multiBubble`（默认关闭）：articulation 可返回 `bubbles` 数组，
+    /// 引擎按间隔依次发送并加与长度成比例的打字延迟（含抖动）。
+    #[serde(default)]
+    pub multi_bubble: bool,
     /// 配置键 `agent.learning`。
     pub learning: Learning,
     /// 配置键 `agent.observation`。
