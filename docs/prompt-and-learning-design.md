@@ -1347,7 +1347,8 @@ Rust 已实现身份提案与主人确认流程；JSON 配置使用 camelCase：
       "growPersona": false,
       "allowNickname": false,
       "allowGroupCard": false,
-      "allowAvatar": false
+      "allowAvatar": false,
+      "allowSignature": false
     }
   }
 }
@@ -1361,7 +1362,7 @@ JSON 使用 camelCase；Rust 对应字段为 `cooldown_days`、`grow_persona`。
 抽象风格词表，生成 `AI·好奇伙伴` 等名称；不直接拷贝记忆、别人昵称或名人姓名。
 执行前验证固定 AI 前缀、抽象词白名单、敏感词和 24 个 UTF-16 单元上限，再对比
 实时群成员昵称/名片及历史消息中的其他用户姓名；姓名冲突或成员查询失败则不改名。
-按 allow 开关依次调用 `set_group_card`、`set_qq_profile`、`set_qq_avatar`，群名片绑定当前 self_id。
+按 allow 开关依次调用 `set_group_card`、`set_qq_profile`、`set_qq_avatar`、`set_self_longnick`，群名片绑定当前 self_id。
 
 **冷却与回退。** 新表 `identity_state` 保存账号级 last_attempt 和最近一批修改的原值、
 目标值、执行/回退进度。修改前先读取并持久化原值，再占用冷却；每 `cooldownDays`
@@ -1383,3 +1384,16 @@ JSON 使用 camelCase；Rust 对应字段为 `cooldown_days`、`grow_persona`。
 FORM、ARTICULATE 和 ORIENT 的 persona 均在基座末尾追加“成长人格”及“不覆盖基座人格、
 诚实原则与责任边界”标识；基座仍为种子，责任线不变，其他群和私聊不会获得本群成长人格。
 数据库持久化保证重启后继续追加；关闭 growPersona 即恢复原始 persona 输入。
+
+**名片/简介（个性签名）。** 新增 `allowSignature`（Rust 字段 `allow_signature`），默认 false。
+`propose` 从本群已保存的成长人格提取最多四个抽象风格词，组成 ≤50 字中文简介，例如
+“AI伙伴：好奇、求真、倾听，保持诚实，与你共同成长。”；不会直接截取包含姓名或指令的人格原文。
+尚无持久化成长人格时，使用同一 traits 蒸馏规则临时生成，不因此开启 growPersona 或修改 prompt。
+
+`OneBot::set_signature(text)` 调用 NapCat `set_self_longnick`，参数为 `{"longNick":text}`，
+注意大写 N，依据 [NapCat 官方接口文档](https://napcat.apifox.cn/226659186e0)。
+修改前调用 `get_stranger_info(user_id=self_id,no_cache=true)` 读取 `long_nick` 并核对账号，
+该返回字段见 [NapCat 实现](https://github.com/NapNeko/NapCatQQ/blob/main/packages/napcat-onebot/action/go-cqhttp/GetStrangerInfo.ts)。
+将原签名（包括空字符串）和新签名作为 `set_self_longnick` Change 的 before/after 持久化，
+纳入同一冷却和 `/还原` 流程；读不到原值时不发出修改，回退通过同一 API 原样恢复，不受新签名长度限制。
+仅开启 allowSignature 也可自动更新简介，不要求开启昵称、群名片、头像或 prompt 成长开关。

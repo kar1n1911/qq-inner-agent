@@ -865,6 +865,7 @@ pub struct Identity {
     pub allow_nickname: bool,
     pub allow_group_card: bool,
     pub allow_avatar: bool,
+    pub allow_signature: bool,
 }
 impl Default for Identity {
     fn default() -> Self {
@@ -877,6 +878,7 @@ impl Default for Identity {
             allow_nickname: false,
             allow_group_card: false,
             allow_avatar: false,
+            allow_signature: false,
         }
     }
 }

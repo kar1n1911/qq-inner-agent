@@ -669,7 +669,8 @@ impl Engine {
                         crate::identity::grow(&db, chat, now, &a.identity)?;
                         if (a.identity.allow_nickname
                             || a.identity.allow_group_card
-                            || a.identity.allow_avatar)
+                            || a.identity.allow_avatar
+                            || a.identity.allow_signature)
                             && crate::identity::ready(&db, now, &a.identity)?
                         {
                             exterior.push(chat.to_owned());

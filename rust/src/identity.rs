@@ -117,6 +117,7 @@ pub struct Proposal {
     pub nickname: String,
     pub group_card: String,
     pub avatar: Option<String>,
+    pub signature: String,
 }
 pub fn propose(store: &Store, chat: &str, persona: &str, now: f64) -> Result<Proposal> {
     ensure!(
@@ -125,6 +126,15 @@ pub fn propose(store: &Store, chat: &str, persona: &str, now: f64) -> Result<Pro
         "invalid_identity_group"
     );
     let mut texts = traits(store, chat, now)?;
+    // 签名从已持久化的本群成长人格蒸馏；未启用 prompt 成长时仅临时蒸馏，不写入 persona。
+    init(store)?;
+    let rows = store.rows("SELECT text FROM identity_persona WHERE chat=?", [chat])?;
+    let grown = rows
+        .first()
+        .and_then(|r| r["text"].as_str())
+        .map(str::to_owned)
+        .unwrap_or_else(|| distill(&texts));
+    let signature = signature(&grown);
     texts.push(persona.into());
     let labels = styles(&texts);
     let label = labels.first().map(|i| STYLES[*i].1).unwrap_or("共学");
@@ -135,6 +145,7 @@ pub fn propose(store: &Store, chat: &str, persona: &str, now: f64) -> Result<Pro
         nickname: name.clone(),
         group_card: name,
         avatar: None,
+        signature,
     })
 }
 fn normalized(s: &str) -> String {
@@ -223,6 +234,29 @@ pub fn ready(store: &Store, now: f64, cfg: &Identity) -> Result<bool> {
             .is_none_or(|last| now - last >= cfg.cooldown_days * 86400.),
     )
 }
+fn distill(texts: &[String]) -> String {
+    let labels = styles(texts);
+    let parts: Vec<_> = labels.iter().map(|i| STYLES[*i].2).collect();
+    if parts.is_empty() {
+        "在本群交流中，我逐渐重视倾听与共同学习，表达时保持耐心和尊重。".into()
+    } else {
+        format!(
+            "在本群长期交流中，我逐渐形成这样的风格：{}。",
+            parts.join("；")
+        )
+    }
+}
+/// 只输出抽象风格白名单，不截取未经校验的人格原文，避免把指令/姓名公开成签名。
+fn signature(grown: &str) -> String {
+    let labels = styles(&[grown.into()]);
+    let words: Vec<_> = labels.iter().map(|i| STYLES[*i].1).collect();
+    let summary = if words.is_empty() {
+        "共学".into()
+    } else {
+        words.join("、")
+    };
+    format!("AI伙伴：{summary}，保持诚实，与你共同成长。")
+}
 pub fn grow(store: &Store, chat: &str, now: f64, cfg: &Identity) -> Result<()> {
     if !cfg.enabled || !cfg.grow_persona || !enough(store, chat, now, cfg)? {
         return Ok(());
@@ -236,16 +270,7 @@ pub fn grow(store: &Store, chat: &str, now: f64, cfg: &Identity) -> Result<()> {
     {
         return Ok(());
     }
-    let labels = styles(&traits(store, chat, now)?);
-    let parts: Vec<_> = labels.iter().map(|i| STYLES[*i].2).collect();
-    let text = if parts.is_empty() {
-        "在本群交流中，我逐渐重视倾听与共同学习，表达时保持耐心和尊重。".into()
-    } else {
-        format!(
-            "在本群长期交流中，我逐渐形成这样的风格：{}。",
-            parts.join("；")
-        )
-    };
+    let text = distill(&traits(store, chat, now)?);
     ensure!(text.chars().count() <= 200, "grown_persona_too_long");
     store.execute("INSERT INTO identity_persona(chat,text,updated) VALUES(?,?,?) ON CONFLICT(chat) DO UPDATE SET text=excluded.text,updated=excluded.updated",params![chat,text,now])?;
     Ok(())
@@ -318,7 +343,11 @@ pub async fn automate<T: OrientationTransport + ?Sized>(
     if cfg.allow_avatar {
         proposal.avatar = choose_avatar(root);
     }
-    if !cfg.allow_group_card && !cfg.allow_nickname && proposal.avatar.is_none() {
+    if !cfg.allow_group_card
+        && !cfg.allow_nickname
+        && !cfg.allow_signature
+        && proposal.avatar.is_none()
+    {
         return Ok(());
     }
     let self_id = transport.self_id();
@@ -424,6 +453,35 @@ pub async fn automate<T: OrientationTransport + ?Sized>(
                     });
                 }
             }
+        }
+    }
+    if cfg.allow_signature {
+        ensure!(
+            proposal.signature.chars().count() <= 50,
+            "identity_signature_too_long"
+        );
+        let old = transport
+            .call(
+                "get_stranger_info",
+                json!({"user_id":self_id,"no_cache":true}),
+            )
+            .await?;
+        ensure!(
+            crate::config::js_string(&old["user_id"]) == self_id,
+            "identity_account_changed"
+        );
+        // 空签名也是合法原值；缺字段不能视为已备份，更不能猜空字符串回退。
+        let original = old["long_nick"]
+            .as_str()
+            .context("identity_original_signature_unavailable")?;
+        if original != proposal.signature {
+            changes.push(Change {
+                action: "set_self_longnick".into(),
+                before: json!({"longNick":original}),
+                after: json!({"longNick":proposal.signature}),
+                attempted: false,
+                restored: false,
+            });
         }
     }
     if changes.is_empty() {

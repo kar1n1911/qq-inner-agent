@@ -168,6 +168,11 @@ impl OneBot {
     pub async fn set_qq_avatar(&self, file: &str) -> Reply {
         self.call("set_qq_avatar", json!({"file":file})).await
     }
+    /// NapCat 参数大小写为 longNick；与 get_stranger_info 的 long_nick 不同。
+    pub async fn set_signature(&self, text: &str) -> Reply {
+        self.call("set_self_longnick", json!({"longNick":text}))
+            .await
+    }
     pub async fn send(&self, chat: &str, text: &str, face_id: Option<&str>) -> Reply {
         let s = self.state();
         if !s.connected || !s.online {
