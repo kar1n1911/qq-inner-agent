@@ -178,6 +178,10 @@ pub fn safe_avatar(root: &Path, file: &str) -> Result<String> {
         "unsafe_avatar_path"
     );
     let allowed = root.join("identity/avatars").canonicalize()?;
+    ensure!(
+        allowed.starts_with(root.canonicalize()?),
+        "unsafe_avatar_directory"
+    );
     let canonical = path.canonicalize()?;
     ensure!(
         canonical.starts_with(&allowed) && canonical.is_file(),
@@ -359,6 +363,10 @@ pub async fn automate<T: OrientationTransport + ?Sized>(
                 json!({"group_id":group_id,"user_id":self_id,"no_cache":true}),
             )
             .await?;
+        ensure!(
+            crate::config::js_string(&old["user_id"]) == self_id,
+            "identity_account_changed"
+        );
         let card = old["card"]
             .as_str()
             .context("identity_original_card_unavailable")?;
@@ -399,6 +407,14 @@ pub async fn automate<T: OrientationTransport + ?Sized>(
                 .and_then(|f| safe_avatar(root, f).ok())
             {
                 if original != file {
+                    // 备份图片字节到受控目录，原来源文件被替换也不影响回退。
+                    let target = root
+                        .join("identity/avatars")
+                        .canonicalize()?
+                        .join(format!("original-{}.png", crate::store::uuid()));
+                    std::fs::copy(original.trim_start_matches("file://"), &target)?;
+                    let original =
+                        safe_avatar(root, target.to_str().context("invalid_avatar_path")?)?;
                     changes.push(Change {
                         action: "set_qq_avatar".into(),
                         before: json!({"file":original}),

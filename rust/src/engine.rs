@@ -77,6 +77,23 @@ impl OrientationTransport for OrientationAdapter {
         self.0.call(action, params)
     }
 }
+// 身份网络操作每一步都检查停机/离线状态，避免热重载后继续修改账号。
+struct IdentityAdapter<'a>(&'a Engine);
+impl OrientationTransport for IdentityAdapter<'_> {
+    fn self_id(&self) -> String {
+        self.0.transport.self_id()
+    }
+    fn call<'a>(&'a self, action: &'a str, params: Value) -> BoxFuture<'a, Result<Value>> {
+        Box::pin(async move {
+            let state = self.0.transport.state();
+            ensure!(
+                !*self.0.aborted.borrow() && state.connected && state.online,
+                "identity_transport_stopped"
+            );
+            self.0.transport.call(action, params).await
+        })
+    }
+}
 pub type Clock = Arc<dyn Fn() -> f64 + Send + Sync>;
 pub type Random = Arc<dyn Fn() -> f64 + Send + Sync>;
 pub type Logger = Arc<dyn Fn(&str, Value) + Send + Sync>;
@@ -622,7 +639,7 @@ impl Engine {
                 core.tasks.push(tokio::spawn(async move {
                     let result = crate::identity::restore(
                         &engine.store,
-                        engine.transport.as_ref(),
+                        &IdentityAdapter(&engine),
                         &engine.config.data_dir,
                         engine.now(),
                     )
@@ -637,7 +654,7 @@ impl Engine {
                 }));
             } else if core.identity_checked.is_none_or(|t| now - t >= 3600.) {
                 core.identity_checked = Some(now);
-                let mut exterior = None;
+                let mut exterior = Vec::new();
                 {
                     let db = self.db()?;
                     let groups=db.rows("SELECT chat FROM group_orientation UNION SELECT DISTINCT chat FROM messages WHERE chat LIKE 'group:%' ORDER BY chat",[])?;
@@ -650,29 +667,34 @@ impl Engine {
                         }
                         // 人格成长按群持久化，不受账号级外显冷却或其他群抢占影响。
                         crate::identity::grow(&db, chat, now, &a.identity)?;
-                        if exterior.is_none()
-                            && (a.identity.allow_nickname
-                                || a.identity.allow_group_card
-                                || a.identity.allow_avatar)
+                        if (a.identity.allow_nickname
+                            || a.identity.allow_group_card
+                            || a.identity.allow_avatar)
                             && crate::identity::ready(&db, now, &a.identity)?
                         {
-                            exterior = Some(chat.to_owned());
+                            exterior.push(chat.to_owned());
                         }
                     }
                 }
-                if let Some(chat) = exterior {
+                if !exterior.is_empty() {
                     core.identity_busy = true;
                     let engine = self.clone();
                     core.tasks.push(tokio::spawn(async move {
-                        let result = crate::identity::automate(
-                            &engine.store,
-                            engine.transport.as_ref(),
-                            &engine.config.agent,
-                            &engine.config.data_dir,
-                            &chat,
-                            engine.now(),
-                        )
-                        .await;
+                        let mut result = Ok(());
+                        for chat in exterior {
+                            if let Err(e) = crate::identity::automate(
+                                &engine.store,
+                                &IdentityAdapter(&engine),
+                                &engine.config.agent,
+                                &engine.config.data_dir,
+                                &chat,
+                                engine.now(),
+                            )
+                            .await
+                            {
+                                result = Err(e);
+                            }
+                        }
                         let mut core = engine.core();
                         core.identity_busy = false;
                         if let Err(e) = result {

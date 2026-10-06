@@ -122,6 +122,12 @@ impl OrientationProvider for Harness {
                 .split_whitespace()
                 .next()
                 .unwrap();
+            if matches!(stage, "FORM" | "ARTICULATE") {
+                if let Some(expected) = self.model.lock().unwrap()["expectPersona"].as_str() {
+                    assert!(payload["persona"].as_str().unwrap().contains(expected));
+                    assert!(payload["persona"].as_str().unwrap().starts_with("基座种子"));
+                }
+            }
             if stage == "ARTICULATE" {
                 if payload.get("recallEvidence").is_some() {
                     assert!(system.contains("细节未经核实必须表达不确定"));
@@ -1661,4 +1667,25 @@ async fn topic_probability_rejection_and_reply_priority() {
     let trace = h.trace.lock().unwrap();
     assert!(trace.iter().any(|v| v[0] == "model" && v[3] == "message"));
     assert!(!trace.iter().any(|v| v[0] == "model" && v[3] == "topic"));
+}
+
+#[tokio::test]
+async fn grown_persona_reaches_form_and_articulate_without_replacing_seed() {
+    let (engine, h) = setup(&base(
+        "grown-persona",
+        json!({"persona":"基座种子，保持诚实。","identity":{"enabled":true,"growPersona":true,"minTraits":1,"minAgeDays":0}}),
+        vec![],
+    ));
+    h.store.lock().unwrap().execute("INSERT INTO memory_layers(id,chat,subject,layer,slot,text,sources) VALUES('grown','group:10','group','traits','style','好奇探索，重视证据','[]')",[]).unwrap();
+    *h.model.lock().unwrap() = json!({"expectPersona":"成长人格"});
+    engine
+        .ingest(&h.event(&json!({"text":"[CQ:at,qq=99]如何判断盆土干湿？"})))
+        .unwrap();
+    engine.tick().unwrap();
+    engine.wait_idle().await;
+    assert!(!h.payloads.lock().unwrap().is_empty());
+    assert!(h.payloads.lock().unwrap()[0]["persona"]
+        .as_str()
+        .unwrap()
+        .contains("责任边界"));
 }
