@@ -56,6 +56,7 @@
 | 近似群**自动跨群共享** | ✅ | ✅ 已实现（P6b） | 学习分诊 | 十五 |
 | 落库前**自我审核** | ✅ | ✅ 已实现（P6g） | — | 十六 |
 | 新话题来源(外部新鲜内容 + 群间转发) | ✅ | ✅ 已实现（P6i：forward 段收发 / topic_source / relay） | — | 二十一 |
+| 身份自治(改昵称 / 群昵称 / 头像) | ✅ | ⬜ 待实现（依赖桥 set_profile/set_group_card/set_avatar，SnowLuma 无、NapCat 有） | — | 二十二 |
 
 ### ⚠️ 涉及"已迁移模块行为"的新设计,必须做成**可开关且默认关闭**
 
@@ -1275,3 +1276,36 @@ QQ 原生支持"聊天记录"型转发。经 SnowLuma 的 OneBot 桥,它暴露�
 
 **原则**:让 agent 做"转手"(低风险),不让 agent 做"编辑"(高风险)。转发对象优先是
 "已被别人转发过的卡片/链接",而不是"agent 从原始聊天里现编一份"。
+
+---
+
+## 二十二、身份自治(改昵称 / 群昵称 / 头像)
+
+### 22.1 目标
+
+agent 在某段时间后(观察期结束、特质/人格稳定)"认为信息足够"时,自动修改自己的
+QQ 昵称、群昵称(群名片)、头像。全部开关化默认关闭,且改账号身份属高风险,需 `ownerUin` 确认。
+
+### 22.2 触发与判断
+
+- 开关:`agent.identity.enabled`(默认 false);
+- "信息足够":观察期结束 + 长期特质条目达到阈值(如 traits 稳定 N 条)后,
+  用学到的 persona/特质归纳出新昵称 / 群昵称 / 头像描述;
+- 改名前需 `ownerUin` 确认(改的是账号身份,不是发言内容)。
+
+### 22.3 API 依赖(关键)
+
+| 功能 | OneBot API | SnowLuma | NapCat |
+| --- | --- | --- | --- |
+| 改 QQ 昵称 | `set_qq_profile`(go-cqhttp 扩展) | ❌ 未暴露 | ✅ |
+| 改群昵称(群名片) | `set_group_card`(OneBot 11 标准) | ❌ 未暴露 | ✅ |
+| 改头像 | `set_qq_avatar`(napcat 扩展) | ❌ 未暴露 | ✅ |
+
+→ 当前 SnowLuma 桥**不具备**这些 API;换 NapCat 桥即可实现(依据
+[NapCat 请求接口兼容表](https://doc.napneko.icu/develop/api))。
+
+### 22.4 实现(Rust,待桥支持)
+
+- `onebot.rs` 加 `set_group_card(chat, card)`、`set_qq_profile(nickname, ...)`、`set_qq_avatar(...)`;
+- 引擎加"信息足够"判断 + `ownerUin` 确认门控;
+- 开关化默认关闭;头像需能生成/选择图片(可复用素材采集,或文生图)。
