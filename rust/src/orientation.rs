@@ -130,8 +130,21 @@ impl OrientationTransport for OneBot {
 }
 pub trait OrientationProvider: Send + Sync {
     fn json<'a>(&'a self, system: &'a str, payload: Value) -> BoxFuture<'a, Result<Value>>;
+    /// 仅昵称生成使用纯文本；默认适配便于已有测试/替代 provider 返回字符串值。
+    fn text<'a>(&'a self, system: &'a str, payload: Value) -> BoxFuture<'a, Result<String>> {
+        Box::pin(async move {
+            self.json(system, payload)
+                .await?
+                .as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| anyhow::anyhow!("invalid_model_text"))
+        })
+    }
 }
 impl OrientationProvider for Provider {
+    fn text<'a>(&'a self, system: &'a str, payload: Value) -> BoxFuture<'a, Result<String>> {
+        Box::pin(async move { Ok(self.complete(system, &payload.to_string()).await?) })
+    }
     fn json<'a>(&'a self, system: &'a str, payload: Value) -> BoxFuture<'a, Result<Value>> {
         Box::pin(async move { Ok(Provider::json(self, system, &payload).await?) })
     }

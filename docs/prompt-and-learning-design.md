@@ -1362,7 +1362,7 @@ JSON 使用 camelCase；Rust 对应字段为 `cooldown_days`、`grow_persona`。
 抽象风格词表，在基座名字后附加风格标签（如 `小兰·好奇`）生成自然昵称；不强调 AI 属性、不直接拷贝记忆、别人昵称或名人姓名。
 执行前验证敏感词、24 个 UTF-16 单元上限，再对比
 实时群成员昵称/名片及历史消息中的其他用户姓名；姓名冲突或成员查询失败则不改名。
-按 allow 开关依次调用 `set_group_card`、`set_qq_profile`、`set_qq_avatar`，群名片绑定当前 self_id。
+按 allow 开关依次调用 `set_group_card`、`set_qq_profile`、`set_qq_avatar`、`set_self_longnick`，群名片绑定当前 self_id。
 
 **名片（个性签名）。** `allowSignature` 开启时，把成长人格蒸馏成 ≤50 字简介，经
 `set_self_longnick`（napcat）或 `set_qq_profile` 的 `personal_note` 设置个性签名，
@@ -1393,3 +1393,11 @@ FORM、ARTICULATE 和 ORIENT 的 persona 均在基座末尾追加“成长人格
 参考本群成员昵称样本(命名风格、来源、变体),结合自身 persona 与学到的特质,**自拟一个
 自然、符合群文化的群内昵称**(2–8 字,不露 AI、不抄袭他人),风格参考贴吧昵称的多样与创意;
 拟名后仍过 `safe_name`(黑名单 + 成员名去重 + 长度)。模型不可用时回退到 trait 蒸馏兜底。
+
+**名片/简介（个性签名）。** 新增 `allowSignature`（Rust 字段 `allow_signature`），默认 false。
+`propose` 从本群已保存的成长人格提取最多四个抽象风格词，组成 ≤50 字中文简介；不会直接截取包含姓名或指令的人格原文。
+尚无持久化成长人格时，使用同一 traits 蒸馏规则临时生成，不因此开启 growPersona 或修改 prompt。
+
+`OneBot::set_signature(text)` 调用 NapCat `set_self_longnick`，参数为 `{"longNick":text}`，注意大写 N。
+修改前调用 `get_stranger_info` 读取 `long_nick` 并核对账号，将原签名和新签名持久化，
+纳入同一冷却和 `/还原` 流程；读不到原值时不发出修改。仅开启 allowSignature 也可自动更新简介。

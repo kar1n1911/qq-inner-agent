@@ -652,13 +652,15 @@ async fn identity_actions_use_logged_in_account_and_exact_parameters() {
         ),
         ("set_qq_profile", json!({"nickname":"昵称"})),
         ("set_qq_avatar", json!({"file":"file:///avatar.png"})),
+        ("set_self_longnick", json!({"longNick":"好奇共学"})),
     ] {
         let client = b.clone();
         let request = tokio::spawn(async move {
             match action {
                 "set_group_card" => client.set_group_card("10", "群名片").await,
                 "set_qq_profile" => client.set_qq_profile("昵称").await,
-                _ => client.set_qq_avatar("file:///avatar.png").await,
+                "set_qq_avatar" => client.set_qq_avatar("file:///avatar.png").await,
+                _ => client.set_signature("好奇共学").await,
             }
         });
         let packet = next(&mut m.requests).await;
