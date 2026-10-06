@@ -1401,3 +1401,29 @@ FORM、ARTICULATE 和 ORIENT 的 persona 均在基座末尾追加“成长人格
 `OneBot::set_signature(text)` 调用 NapCat `set_self_longnick`，参数为 `{"longNick":text}`，注意大写 N。
 修改前调用 `get_stranger_info` 读取 `long_nick` 并核对账号，将原签名和新签名持久化，
 纳入同一冷却和 `/还原` 流程；读不到原值时不发出修改。仅开启 allowSignature 也可自动更新简介。
+
+---
+
+## 二十三、过往情景(可制造的不可变记忆)
+
+### 23.1 目标
+某些情况下(被要求"基于实际历史经历"评价某事),agent 允许制造一个"无法查验"的过往情景;
+一旦创建即记入记忆,**可追加细节、不可更改或删除**,保证人格的过往叙述始终一致。
+
+### 23.2 触发与阈值(高危)
+- 开关:`agent.backstory.enabled`(默认 false);
+- **特别高阈值**:仅在被明确要求"基于经历评价 / 你以前是否…"、且当前无相关真实记忆时才触发;
+- 高危:出问题威胁整个人格的创建与使用,故创建前须极谨慎,宁可"不造"也不"乱造"。
+
+### 23.3 不可变语义
+- 新表 `persona_backstory(id, chat, text, created)`:只 INSERT,无 UPDATE/DELETE;
+- 细节追加到 `persona_backstory_detail(id, backstory_id, text, created)`,只增不改删;
+- DB 层不暴露 update/delete 接口,违反不可变语义的操作一律拒绝。
+
+### 23.4 安全边界
+- 情景必须是**自身"无法查验"的经历**,不涉及真实第三方言行、不冒充真人、不违背责任线(§14);
+- 无害、不误导;创建即永久。
+
+### 23.5 实现(Rust)
+- `backstory.rs`:建表 + create(制造)+ add_detail(追加)+ recall(召回);
+- 引擎在 articulation 前,满足高阈值时 → 制造 + 落库 + 注入当前回复;后续 recall 把过往情景作为不可变的"我的经历"参与上下文。
