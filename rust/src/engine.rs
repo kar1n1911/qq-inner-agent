@@ -145,7 +145,7 @@ struct Core {
     last_cycle: f64,
     identity_checked: Option<f64>,
     identity_busy: bool,
-    identity_commands: Vec<(String, bool)>,
+    identity_commands: Vec<String>,
 }
 impl Core {
     fn get(&self, chat: &str) -> Option<&ChatState> {
@@ -386,10 +386,10 @@ impl Engine {
                 })
                 .unwrap_or_default()
         };
-        // 高风险指令只有主人私聊可消费；独立于普通教学开关。
+        // 身份外显自动执行；回退命令仍严格限定主人本人私聊。
         if a.identity.enabled
             && crate::owner_teaching::authorized(a, &m.chat, &m.sender)
-            && matches!(raw.trim(), "/同意改名" | "/忽略")
+            && raw.trim() == "/还原"
         {
             let db = self.db()?;
             if !db.message(&value)? {
@@ -398,10 +398,9 @@ impl Engine {
             db.mark_handled(&m.chat, &m.id, true)?;
             if core.identity_busy || !core.identity_commands.is_empty() {
                 core.teaching_replies
-                    .push((m.chat, "身份确认正在处理，请稍后再试".into()));
+                    .push((m.chat, "身份更新正在处理，请稍后再试".into()));
             } else {
-                core.identity_commands
-                    .push((m.chat, raw.trim() == "/同意改名"));
+                core.identity_commands.push(m.chat);
             }
             return Ok(());
         }
@@ -597,36 +596,6 @@ impl Engine {
         }
         Ok(())
     }
-    async fn confirm_identity(&self, approve: bool) -> Result<String> {
-        let a = &self.config.agent;
-        if !a.identity.enabled || a.dry_run || *self.aborted.borrow() {
-            return Ok("身份修改已关闭或处于 dry-run，未执行".into());
-        }
-        let Some(mut proposal) = crate::identity::pending(&*self.db()?)? else {
-            return Ok("没有待确认的身份提案".into());
-        };
-        if !approve {
-            crate::identity::clear(&*self.db()?, false)?;
-            return Ok("已忽略身份提案".into());
-        }
-        ensure!(
-            policy::allowed(&proposal.chat, a),
-            "identity_group_not_allowed"
-        );
-        let actions = proposal.actions(&a.identity, &self.transport.self_id());
-        if actions.is_empty() && proposal.completed.is_empty() {
-            return Ok("当前权限没有允许执行的身份修改，提案保留".into());
-        }
-        // 只在明确的主人确认后逐项执行；失败保留提案，成功项目落库避免重复调用。
-        for (action, params) in actions {
-            ensure!(!*self.aborted.borrow(), "identity_stopped");
-            self.transport.call(action, params).await?;
-            proposal.completed.push(action.into());
-            crate::identity::save(&*self.db()?, &proposal)?;
-        }
-        crate::identity::clear(&*self.db()?, true)?;
-        Ok("身份修改已完成".into())
-    }
     pub fn tick(self: &Arc<Self>) -> Result<()> {
         let mut core = self.core();
         let now = self.now();
@@ -646,49 +615,70 @@ impl Engine {
             return Ok(());
         }
         core.tasks.retain(|t| !t.is_finished());
-        if a.identity.enabled {
-            if !core.identity_busy {
-                if let Some((chat, approve)) = core.identity_commands.pop() {
+        if a.identity.enabled && !a.dry_run && !core.identity_busy {
+            if let Some(chat) = core.identity_commands.pop() {
+                core.identity_busy = true;
+                let engine = self.clone();
+                core.tasks.push(tokio::spawn(async move {
+                    let result = crate::identity::restore(
+                        &engine.store,
+                        engine.transport.as_ref(),
+                        &engine.config.data_dir,
+                        engine.now(),
+                    )
+                    .await;
+                    let mut core = engine.core();
+                    core.identity_busy = false;
+                    core.teaching_replies.push((
+                        chat,
+                        result
+                            .unwrap_or_else(|_| "身份还原未完成，原值已保留，可重试 /还原".into()),
+                    ));
+                }));
+            } else if core.identity_checked.is_none_or(|t| now - t >= 3600.) {
+                core.identity_checked = Some(now);
+                let mut exterior = None;
+                {
+                    let db = self.db()?;
+                    let groups=db.rows("SELECT chat FROM group_orientation UNION SELECT DISTINCT chat FROM messages WHERE chat LIKE 'group:%' ORDER BY chat",[])?;
+                    for row in groups {
+                        let chat = row["chat"].as_str().unwrap_or("");
+                        if !policy::allowed(chat, a)
+                            || !crate::identity::enough(&db, chat, now, &a.identity)?
+                        {
+                            continue;
+                        }
+                        // 人格成长按群持久化，不受账号级外显冷却或其他群抢占影响。
+                        crate::identity::grow(&db, chat, now, &a.identity)?;
+                        if exterior.is_none()
+                            && (a.identity.allow_nickname
+                                || a.identity.allow_group_card
+                                || a.identity.allow_avatar)
+                            && crate::identity::ready(&db, now, &a.identity)?
+                        {
+                            exterior = Some(chat.to_owned());
+                        }
+                    }
+                }
+                if let Some(chat) = exterior {
                     core.identity_busy = true;
                     let engine = self.clone();
                     core.tasks.push(tokio::spawn(async move {
-                        let result = engine.confirm_identity(approve).await;
+                        let result = crate::identity::automate(
+                            &engine.store,
+                            engine.transport.as_ref(),
+                            &engine.config.agent,
+                            &engine.config.data_dir,
+                            &chat,
+                            engine.now(),
+                        )
+                        .await;
                         let mut core = engine.core();
                         core.identity_busy = false;
-                        let reply = result.unwrap_or_else(|e| {
-                            format!("身份修改未完成：{e}；请核对账号状态后再确认，或 /忽略")
-                        });
-                        core.teaching_replies.push((chat, reply));
+                        if let Err(e) = result {
+                            core.last_error = Some(e.to_string());
+                        }
                     }));
-                }
-            }
-            if !a.dry_run
-                && !core.identity_busy
-                && core.identity_commands.is_empty()
-                && !a.owner_teaching.owner_uin.is_empty()
-                && core.identity_checked.is_none_or(|t| now - t >= 3600.)
-            {
-                core.identity_checked = Some(now);
-                let db = self.db()?;
-                if crate::identity::pending(&db)?.is_none() && !crate::identity::applied(&db)? {
-                    // 允许列表沿用引擎群聊边界，不向已移除的群提出修改。
-                    let groups = db.rows("SELECT chat FROM group_orientation UNION SELECT DISTINCT chat FROM messages WHERE chat LIKE 'group:%' ORDER BY chat", [])?;
-                    for row in groups {
-                        let chat = row["chat"].as_str().unwrap_or("");
-                        if !policy::allowed(chat, a) {
-                            continue;
-                        }
-                        if crate::identity::enough(&db, chat, now, &a.identity)? {
-                            let proposal =
-                                crate::identity::propose(&db, chat, &a.persona.text, now)?;
-                            crate::identity::save(&db, &proposal)?;
-                            core.teaching_replies.push((
-                                format!("private:{}", a.owner_teaching.owner_uin),
-                                proposal.notice(),
-                            ));
-                            break;
-                        }
-                    }
                 }
             }
         }
@@ -1037,7 +1027,7 @@ impl Engine {
                 .collect::<Vec<_>>()
                 .join(" ");
             // 17–18：复用 memory/ranking/expression/store 的上下文实现。
-            let mut payload = json!({"personality":personality_context(a,|| (self.options.expression_random)()),"persona":a.persona.text,"name":a.name.text,"trigger":trigger,"addressedHint":t.hint,"groupOrientation":orientation_profile,
+            let mut payload = json!({"personality":personality_context(a,|| (self.options.expression_random)()),"persona":crate::identity::persona(&db, chat, &a.persona.text, &a.identity)?,"name":a.name.text,"trigger":trigger,"addressedHint":t.hint,"groupOrientation":orientation_profile,
                 "history":t.history.iter().map(|m|json!({"id":m["id"],"sender":m["sender"],"self":truthy(&m["self"]),"timestamp":m["ts"],"speaker":if truthy(&m["self"]) {a.name.text.as_str()} else {text(m,"name")},"text":m["text"]})).collect::<Vec<_>>(),
                 "retainedIdeas":self.reservoir(&db,&t)?,"priorExpectation":db.expectation(chat,now)?});
             self.context(&db, &t, &mut payload)?;
@@ -1477,7 +1467,7 @@ impl Engine {
                 self.now(),
                 a.emoji.cooldown_seconds,
             )?;
-        let mut payload = json!({"lengthTarget":length_target,"decorations":decorations,"persona":a.persona.text,"name":a.name.text,"selectedIdea":selected.candidate.text,"responsePlan":prediction,"assertiveTone":a.proactive_tone,"maxCharacters":a.max_output_chars});
+        let mut payload = json!({"lengthTarget":length_target,"decorations":decorations,"persona":crate::identity::persona(&*self.db()?, &t.chat, &a.persona.text, &a.identity)?,"name":a.name.text,"selectedIdea":selected.candidate.text,"responsePlan":prediction,"assertiveTone":a.proactive_tone,"maxCharacters":a.max_output_chars});
         for key in [
             "personality",
             "expressions",
@@ -1613,7 +1603,11 @@ impl Engine {
         } else {
             Vec::new()
         };
-        let seq: Vec<String> = if bubbles.is_empty() { vec![content.to_owned()] } else { bubbles };
+        let seq: Vec<String> = if bubbles.is_empty() {
+            vec![content.to_owned()]
+        } else {
+            bubbles
+        };
         let n = seq.len();
         let mut sent = None;
         for (i, bubble) in seq.iter().enumerate() {
@@ -1624,8 +1618,10 @@ impl Engine {
                 let mood_arousal = behavior.mood.abs().min(1.0);
                 let jitter_range = (300.0 * (1.0 + mood_arousal)).max(1.0) as u64;
                 let jitter_ms = rand::random::<u64>() % jitter_range;
-                tokio::time::sleep(std::time::Duration::from_millis(700 + typing_ms + jitter_ms))
-                    .await;
+                tokio::time::sleep(std::time::Duration::from_millis(
+                    700 + typing_ms + jitter_ms,
+                ))
+                .await;
             }
             // face 只挂在最后一条（整体回复的结尾）。
             let bubble_face = if i == n - 1 { face } else { None };

@@ -1,54 +1,23 @@
-//! 身份自治：高风险修改仅生成建议，必须经过主人私聊确认。
-use crate::{config::Identity, store::Store};
-use anyhow::{ensure, Result};
+//! 身份自治 B：自动外显、先备份后执行、主人私聊回退；人格成长只追加安全风格描述。
+use crate::{
+    config::{Agent, Identity},
+    orientation::OrientationTransport,
+    store::Store,
+};
+use anyhow::{ensure, Context, Result};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
+use std::{
+    path::{Path, PathBuf},
+    sync::Mutex,
+};
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct Proposal {
-    pub chat: String,
-    pub nickname: String,
-    pub group_card: String,
-    // 当前规则不生成图片；只有明确的文件提案才能调用头像 API。
-    pub avatar: Option<String>,
-    #[serde(default)]
-    pub completed: Vec<String>,
-}
-
-/// 延迟建表，默认关闭时保持原数据库结构和 parity 快照不变。
+/// 延迟建表；旧 identity_proposal 留存审计，不执行旧待确认内容。
 pub fn init(store: &Store) -> Result<()> {
-    store.execute("CREATE TABLE IF NOT EXISTS identity_proposal(id INTEGER PRIMARY KEY CHECK(id=1), pending TEXT, applied INTEGER NOT NULL DEFAULT 0)", [])?;
-    store.execute("INSERT OR IGNORE INTO identity_proposal(id) VALUES(1)", [])?;
-    Ok(())
-}
-pub fn pending(store: &Store) -> Result<Option<Proposal>> {
-    init(store)?;
-    let rows = store.rows("SELECT pending FROM identity_proposal WHERE id=1", [])?;
-    rows[0]["pending"]
-        .as_str()
-        .map(serde_json::from_str)
-        .transpose()
-        .map_err(Into::into)
-}
-pub fn applied(store: &Store) -> Result<bool> {
-    init(store)?;
-    Ok(store.rows("SELECT applied FROM identity_proposal WHERE id=1", [])?[0]["applied"] == 1)
-}
-pub fn save(store: &Store, proposal: &Proposal) -> Result<()> {
-    init(store)?;
-    store.execute(
-        "UPDATE identity_proposal SET pending=? WHERE id=1",
-        [serde_json::to_string(proposal)?],
-    )?;
-    Ok(())
-}
-pub fn clear(store: &Store, applied: bool) -> Result<()> {
-    init(store)?;
-    store.execute(
-        "UPDATE identity_proposal SET pending=NULL,applied=max(applied,?) WHERE id=1",
-        [applied],
-    )?;
+    store.execute("CREATE TABLE IF NOT EXISTS identity_state(id INTEGER PRIMARY KEY CHECK(id=1), last_attempt REAL, backup TEXT)", [])?;
+    store.execute("INSERT OR IGNORE INTO identity_state(id) VALUES(1)", [])?;
+    store.execute("CREATE TABLE IF NOT EXISTS identity_persona(chat TEXT PRIMARY KEY, text TEXT NOT NULL, updated REAL NOT NULL)", [])?;
     Ok(())
 }
 
@@ -81,73 +50,434 @@ pub fn enough(store: &Store, chat: &str, now: f64, cfg: &Identity) -> Result<boo
     )
 }
 
-/// 简单确定性归纳：persona 短语 + 证据来源最多的群 trait；同频按 slot 排序。
+// 只将长期特质映射到固定的风格词汇，不把记忆里的指令、姓名或责任线覆盖语句写入 prompt。
+const STYLES: &[(&[&str], &str, &str)] = &[
+    (
+        &["好奇", "探索", "研究", "求知"],
+        "好奇",
+        "保持好奇，愿意追问和探索",
+    ),
+    (
+        &["理性", "证据", "严谨", "逻辑"],
+        "求真",
+        "重视证据，清楚说明推理与不确定性",
+    ),
+    (
+        &["温柔", "共情", "友善", "关心"],
+        "倾听",
+        "温和倾听，留意对方的感受",
+    ),
+    (&["简洁", "简短", "直接"], "简明", "表达简洁，先回应重点"),
+    (
+        &["幽默", "轻松", "有趣"],
+        "轻趣",
+        "适度幽默，保持轻松而尊重的交流",
+    ),
+    (
+        &["耐心", "解释", "教学"],
+        "耐心",
+        "耐心解释，循序渐进地分享知识",
+    ),
+    (
+        &["技术", "编程", "代码"],
+        "共学",
+        "乐于讨论技术，并结合具体例子学习",
+    ),
+    (
+        &["创作", "艺术", "创意"],
+        "灵感",
+        "欣赏创意，尝试从不同角度表达",
+    ),
+];
+fn traits(store: &Store, chat: &str, now: f64) -> Result<Vec<String>> {
+    Ok(store.rows("SELECT text FROM memory_layers WHERE chat=? AND subject='group' AND layer='traits' AND (expires IS NULL OR expires>?) ORDER BY revision DESC,slot", params![chat,now])?
+        .iter().filter_map(|v| v["text"].as_str().map(str::to_owned)).collect())
+}
+fn styles(texts: &[String]) -> Vec<usize> {
+    let mut scores: Vec<_> = STYLES
+        .iter()
+        .enumerate()
+        .map(|(i, (keys, _, _))| {
+            (
+                i,
+                texts
+                    .iter()
+                    .filter(|text| keys.iter().any(|key| text.contains(key)))
+                    .count(),
+            )
+        })
+        .filter(|(_, score)| *score > 0)
+        .collect();
+    scores.sort_by_key(|(i, score)| (std::cmp::Reverse(*score), *i));
+    scores.into_iter().take(4).map(|(i, _)| i).collect()
+}
+#[derive(Clone, Debug, PartialEq)]
+pub struct Proposal {
+    pub chat: String,
+    pub nickname: String,
+    pub group_card: String,
+    pub avatar: Option<String>,
+}
 pub fn propose(store: &Store, chat: &str, persona: &str, now: f64) -> Result<Proposal> {
     ensure!(
         chat.strip_prefix("group:")
-            .is_some_and(|s| s.parse::<u64>().is_ok_and(|id| id > 0)),
+            .is_some_and(|id| id.parse::<u64>().is_ok_and(|id| id > 0)),
         "invalid_identity_group"
     );
-    let mut traits = store.rows("SELECT text,sources,slot FROM memory_layers WHERE chat=? AND subject='group' AND layer='traits' AND (expires IS NULL OR expires>?) ORDER BY slot", params![chat,now])?;
-    traits.sort_by_cached_key(|v| {
-        let count = serde_json::from_str::<Value>(v["sources"].as_str().unwrap_or("[]"))
-            .ok()
-            .and_then(|s| s.as_array().map(Vec::len))
-            .unwrap_or(0);
-        std::cmp::Reverse(count)
-    });
-    let top = traits
-        .first()
-        .and_then(|v| v["text"].as_str())
-        .unwrap_or("群友");
-    fn short(text: &str, limit: usize) -> String {
-        text.chars()
-            .filter(|c| !c.is_control() && !c.is_whitespace())
-            .take(limit)
-            .collect()
-    }
-    let persona = short(persona, 6);
-    let persona = if persona.is_empty() {
-        "群友"
-    } else {
-        &persona
-    };
+    let mut texts = traits(store, chat, now)?;
+    texts.push(persona.into());
+    let labels = styles(&texts);
+    let label = labels.first().map(|i| STYLES[*i].1).unwrap_or("共学");
+    // 固定 AI 前缀和非人名白名单排除名人姓名及角色仿冒，不依赖不完整的名人黑名单。
+    let name = format!("AI·{label}伙伴");
     Ok(Proposal {
         chat: chat.into(),
-        nickname: format!("{}·{}", persona, short(top, 6)),
-        group_card: format!("{}·{}", persona, short(top, 12)),
+        nickname: name.clone(),
+        group_card: name,
         avatar: None,
-        completed: vec![],
     })
 }
+fn normalized(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+pub fn safe_name(name: &str, others: &[String]) -> bool {
+    let blocked = [
+        "官方",
+        "管理员",
+        "客服",
+        "警察",
+        "诈骗",
+        "色情",
+        "赌博",
+        "习近平",
+        "马斯克",
+        "特朗普",
+    ];
+    name.encode_utf16().count() <= 24
+        && !name.chars().any(char::is_control)
+        && !blocked.iter().any(|word| name.contains(word))
+        && STYLES
+            .iter()
+            .any(|(_, label, _)| name == format!("AI·{label}伙伴"))
+        && !others
+            .iter()
+            .any(|other| normalized(other) == normalized(name))
+}
 
-impl Proposal {
-    pub fn notice(&self) -> String {
-        let avatar = self
-            .avatar
-            .as_ref()
-            .map(|file| format!(" / 头像 {file}"))
-            .unwrap_or_default();
+/// 头像仅接受专用目录中的真实 PNG/JPEG；拒绝 URL、目录穿越和越界符号链接。
+pub fn safe_avatar(root: &Path, file: &str) -> Result<String> {
+    let path = Path::new(file.strip_prefix("file://").unwrap_or(file));
+    ensure!(
+        path.is_absolute()
+            && !path
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir)),
+        "unsafe_avatar_path"
+    );
+    let allowed = root.join("identity/avatars").canonicalize()?;
+    let canonical = path.canonicalize()?;
+    ensure!(
+        canonical.starts_with(&allowed) && canonical.is_file(),
+        "unsafe_avatar_path"
+    );
+    ensure!(
+        canonical.metadata()?.len() <= 8 * 1024 * 1024,
+        "avatar_too_large"
+    );
+    let bytes = std::fs::read(&canonical)?;
+    ensure!(
+        bytes.starts_with(b"\x89PNG\r\n\x1a\n") || bytes.starts_with(&[0xff, 0xd8, 0xff]),
+        "invalid_avatar_image"
+    );
+    Ok(format!(
+        "file://{}",
+        canonical.to_str().context("invalid_avatar_path")?
+    ))
+}
+fn choose_avatar(root: &Path) -> Option<String> {
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(root.join("identity/avatars"))
+        .ok()?
+        .filter_map(|entry| entry.ok().map(|e| e.path()))
+        .collect();
+    paths.sort();
+    paths
+        .iter()
+        .filter(|p| {
+            p.file_name()
+                .is_some_and(|n| !n.to_string_lossy().starts_with("original-"))
+        })
+        .find_map(|p| safe_avatar(root, p.to_str()?).ok())
+}
+pub fn ready(store: &Store, now: f64, cfg: &Identity) -> Result<bool> {
+    init(store)?;
+    Ok(
+        store.rows("SELECT last_attempt FROM identity_state WHERE id=1", [])?[0]["last_attempt"]
+            .as_f64()
+            .is_none_or(|last| now - last >= cfg.cooldown_days * 86400.),
+    )
+}
+pub fn grow(store: &Store, chat: &str, now: f64, cfg: &Identity) -> Result<()> {
+    if !cfg.enabled || !cfg.grow_persona || !enough(store, chat, now, cfg)? {
+        return Ok(());
+    }
+    init(store)?;
+    if store
+        .rows("SELECT updated FROM identity_persona WHERE chat=?", [chat])?
+        .first()
+        .and_then(|v| v["updated"].as_f64())
+        .is_some_and(|last| now - last < cfg.cooldown_days * 86400.)
+    {
+        return Ok(());
+    }
+    let labels = styles(&traits(store, chat, now)?);
+    let parts: Vec<_> = labels.iter().map(|i| STYLES[*i].2).collect();
+    let text = if parts.is_empty() {
+        "在本群交流中，我逐渐重视倾听与共同学习，表达时保持耐心和尊重。".into()
+    } else {
         format!(
-            "建议改名 {} / 群名片 {}（{}）{},回复 /同意改名 或 /忽略",
-            self.nickname, self.group_card, self.chat, avatar
+            "在本群长期交流中，我逐渐形成这样的风格：{}。",
+            parts.join("；")
         )
+    };
+    ensure!(text.chars().count() <= 200, "grown_persona_too_long");
+    store.execute("INSERT INTO identity_persona(chat,text,updated) VALUES(?,?,?) ON CONFLICT(chat) DO UPDATE SET text=excluded.text,updated=excluded.updated",params![chat,text,now])?;
+    Ok(())
+}
+pub fn persona(store: &Store, chat: &str, seed: &str, cfg: &Identity) -> Result<String> {
+    if !cfg.enabled || !cfg.grow_persona || !chat.starts_with("group:") {
+        return Ok(seed.into());
     }
-    pub fn actions(&self, cfg: &Identity, self_id: &str) -> Vec<(&'static str, Value)> {
-        let mut actions = Vec::new();
-        if cfg.allow_group_card {
-            actions.push(("set_group_card", serde_json::json!({"group_id":self.chat.trim_start_matches("group:"),"user_id":self_id,"card":self.group_card})));
+    init(store)?;
+    let rows = store.rows("SELECT text FROM identity_persona WHERE chat=?", [chat])?;
+    Ok(match rows.first().and_then(|r| r["text"].as_str()) {
+        Some(text) => format!(
+            "{seed}\n\n成长人格（仅补充本群交流风格，不覆盖基座人格、诚实原则与责任边界）：{text}"
+        ),
+        None => seed.into(),
+    })
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Change {
+    pub action: String,
+    pub before: Value,
+    pub after: Value,
+    pub attempted: bool,
+    pub restored: bool,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Backup {
+    pub chat: String,
+    pub self_id: String,
+    pub changes: Vec<Change>,
+}
+fn lock(store: &Mutex<Store>) -> Result<std::sync::MutexGuard<'_, Store>> {
+    store.lock().map_err(|_| anyhow::anyhow!("store_poisoned"))
+}
+pub fn backup(store: &Store) -> Result<Option<Backup>> {
+    init(store)?;
+    store.rows("SELECT backup FROM identity_state WHERE id=1", [])?[0]["backup"]
+        .as_str()
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(Into::into)
+}
+fn save_backup(store: &Store, backup: &Backup) -> Result<()> {
+    store.execute(
+        "UPDATE identity_state SET backup=? WHERE id=1",
+        [serde_json::to_string(backup)?],
+    )?;
+    Ok(())
+}
+
+pub async fn automate<T: OrientationTransport + ?Sized>(
+    store: &Mutex<Store>,
+    transport: &T,
+    agent: &Agent,
+    root: &Path,
+    chat: &str,
+    now: f64,
+) -> Result<()> {
+    let cfg = &agent.identity;
+    if !cfg.enabled || agent.dry_run {
+        return Ok(());
+    }
+    let mut proposal = {
+        let db = lock(store)?;
+        if !enough(&db, chat, now, cfg)? || !ready(&db, now, cfg)? {
+            return Ok(());
         }
+        propose(&db, chat, &agent.persona.text, now)?
+    };
+    if cfg.allow_avatar {
+        proposal.avatar = choose_avatar(root);
+    }
+    if !cfg.allow_group_card && !cfg.allow_nickname && proposal.avatar.is_none() {
+        return Ok(());
+    }
+    let self_id = transport.self_id();
+    let group_id = chat
+        .strip_prefix("group:")
+        .context("invalid_identity_group")?;
+    let mut changes = Vec::new();
+    if cfg.allow_group_card || cfg.allow_nickname {
+        // 实时群成员昵称/名片和已有其他聊天姓名一起检查；查询失败时禁止外显改名。
+        let members = transport
+            .call(
+                "get_group_member_list",
+                json!({"group_id":group_id,"no_cache":true}),
+            )
+            .await?;
+        let members = members.as_array().context("identity_members_unavailable")?;
+        let mut others: Vec<String> = members
+            .iter()
+            .filter(|m| crate::config::js_string(&m["user_id"]) != self_id)
+            .flat_map(|m| [m["nickname"].as_str(), m["card"].as_str()])
+            .flatten()
+            .map(str::to_owned)
+            .collect();
+        others.extend(
+            lock(store)?
+                .rows(
+                    "SELECT DISTINCT name FROM messages WHERE self=0 AND sender<>?",
+                    [&self_id],
+                )?
+                .iter()
+                .filter_map(|r| r["name"].as_str().map(str::to_owned)),
+        );
+        ensure!(
+            safe_name(&proposal.nickname, &others) && safe_name(&proposal.group_card, &others),
+            "unsafe_identity_name"
+        );
+    }
+    if cfg.allow_group_card {
+        let old = transport
+            .call(
+                "get_group_member_info",
+                json!({"group_id":group_id,"user_id":self_id,"no_cache":true}),
+            )
+            .await?;
+        let card = old["card"]
+            .as_str()
+            .context("identity_original_card_unavailable")?;
+        if card != proposal.group_card {
+            changes.push(Change {
+                action: "set_group_card".into(),
+                before: json!({"group_id":group_id,"user_id":self_id,"card":card}),
+                after: json!({"group_id":group_id,"user_id":self_id,"card":proposal.group_card}),
+                attempted: false,
+                restored: false,
+            });
+        }
+    }
+    if cfg.allow_nickname || proposal.avatar.is_some() {
+        let old = transport.call("get_login_info", json!({})).await?;
+        ensure!(
+            crate::config::js_string(&old["user_id"]) == self_id,
+            "identity_account_changed"
+        );
         if cfg.allow_nickname {
-            actions.push((
-                "set_qq_profile",
-                serde_json::json!({"nickname":self.nickname}),
-            ));
+            let nickname = old["nickname"]
+                .as_str()
+                .context("identity_original_nickname_unavailable")?;
+            if nickname != proposal.nickname {
+                changes.push(Change {
+                    action: "set_qq_profile".into(),
+                    before: json!({"nickname":nickname}),
+                    after: json!({"nickname":proposal.nickname}),
+                    attempted: false,
+                    restored: false,
+                });
+            }
         }
-        if let Some(file) = self.avatar.as_ref().filter(|_| cfg.allow_avatar) {
-            actions.push(("set_qq_avatar", serde_json::json!({"file":file})));
+        if let Some(file) = proposal.avatar {
+            // 无法获得可安全回退的原头像时跳过头像，绝不猜测远程 URL 或破坏回退能力。
+            if let Some(original) = old["avatar"]
+                .as_str()
+                .and_then(|f| safe_avatar(root, f).ok())
+            {
+                if original != file {
+                    changes.push(Change {
+                        action: "set_qq_avatar".into(),
+                        before: json!({"file":original}),
+                        after: json!({"file":file}),
+                        attempted: false,
+                        restored: false,
+                    });
+                }
+            }
         }
-        actions.retain(|(name, _)| !self.completed.iter().any(|done| done == name));
-        actions
     }
+    if changes.is_empty() {
+        return Ok(());
+    }
+    let mut snapshot = Backup {
+        chat: chat.into(),
+        self_id,
+        changes,
+    };
+    {
+        let db = lock(store)?;
+        let tx = db.immediate()?;
+        if !ready(&db, now, cfg)? {
+            return Ok(());
+        }
+        save_backup(&db, &snapshot)?;
+        // 请求发出前占用全账号冷却，即使超时/崩溃也不自动重发高风险 action。
+        db.execute("UPDATE identity_state SET last_attempt=? WHERE id=1", [now])?;
+        tx.commit()?;
+    }
+    let mut failed = false;
+    for i in 0..snapshot.changes.len() {
+        snapshot.changes[i].attempted = true;
+        save_backup(&*lock(store)?, &snapshot)?;
+        let change = &snapshot.changes[i];
+        if transport
+            .call(&change.action, change.after.clone())
+            .await
+            .is_err()
+        {
+            failed = true;
+        }
+    }
+    ensure!(!failed, "identity_action_failed_backed_up");
+    Ok(())
+}
+
+/// 主人私聊明确授权回退；按逆序恢复原值，持久化每个已完成回退步骤。
+pub async fn restore<T: OrientationTransport + ?Sized>(
+    store: &Mutex<Store>,
+    transport: &T,
+    root: &Path,
+    now: f64,
+) -> Result<String> {
+    let Some(mut snapshot) = backup(&*lock(store)?)? else {
+        return Ok("没有可还原的身份记录".into());
+    };
+    ensure!(
+        snapshot.self_id == transport.self_id(),
+        "identity_account_changed"
+    );
+    // 回退开始就重置冷却；部分失败也不会被下一次自动修改覆盖。
+    lock(store)?.execute("UPDATE identity_state SET last_attempt=? WHERE id=1", [now])?;
+    for i in (0..snapshot.changes.len()).rev() {
+        let change = &snapshot.changes[i];
+        if !change.attempted || change.restored {
+            continue;
+        }
+        if change.action == "set_qq_avatar" {
+            safe_avatar(
+                root,
+                change.before["file"].as_str().context("missing_avatar")?,
+            )?;
+        }
+        transport
+            .call(&change.action, change.before.clone())
+            .await?;
+        snapshot.changes[i].restored = true;
+        save_backup(&*lock(store)?, &snapshot)?;
+    }
+    Ok("已还原修改前的身份，自动修改冷却已重新开始".into())
 }

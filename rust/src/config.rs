@@ -219,6 +219,10 @@ pub fn validate(c: &Value) -> std::result::Result<(), ConfigError> {
         let identity: Identity =
             serde_json::from_value(v.clone()).map_err(|e| ConfigError(e.to_string()))?;
         check(
+            identity.cooldown_days.is_finite() && identity.cooldown_days >= 0.,
+            "agent.identity.cooldownDays must be finite and nonnegative",
+        )?;
+        check(
             identity.min_age_days.is_finite() && identity.min_age_days >= 0.,
             "agent.identity.minAgeDays must be finite and nonnegative",
         )?;
@@ -856,6 +860,8 @@ pub struct Identity {
     pub enabled: bool,
     pub min_traits: usize,
     pub min_age_days: f64,
+    pub cooldown_days: f64,
+    pub grow_persona: bool,
     pub allow_nickname: bool,
     pub allow_group_card: bool,
     pub allow_avatar: bool,
@@ -866,6 +872,8 @@ impl Default for Identity {
             enabled: false,
             min_traits: 3,
             min_age_days: 7.0,
+            cooldown_days: 14.0,
+            grow_persona: false,
             allow_nickname: false,
             allow_group_card: false,
             allow_avatar: false,
