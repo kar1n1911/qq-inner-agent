@@ -1043,6 +1043,26 @@ impl Config {
     }
 }
 
+/// Editable defaults, including serde-defaulted fields, without loading files or secrets.
+pub fn public_defaults() -> Result<Value> {
+    let defaults = defaults();
+    let mut input = defaults.clone();
+    for key in ["apiKey", "onebotToken", "dataDir"] {
+        input[key] = json!("");
+    }
+    let config = Config::from_value(&input)?;
+    // Restore public scalar values in place of RuntimeText's internal representation.
+    let mut schema = merge(&serde_json::to_value(&config)?, &defaults);
+    for key in ["apiKey", "onebotToken", "dataDir"] {
+        schema.as_object_mut().unwrap().remove(key);
+    }
+    // These defaults are deliberately omitted by runtime serialization for parity.
+    schema["agent"]["emoji"]["learnFrequency"] = json!(config.agent.emoji.learn_frequency);
+    schema["agent"]["emoji"]["faceOnly"] = json!(config.agent.emoji.face_only);
+    schema["agent"]["memory"]["partialEvidence"] = json!(config.agent.memory.partial_evidence);
+    Ok(schema)
+}
+
 fn absolute(root: &Path, directory: &str) -> Result<PathBuf> {
     // path.resolve 是词法解析，不能 canonicalize：目录未创建或为符号链接时也必须成功。
     let path = std::env::current_dir()?.join(root).join(directory);

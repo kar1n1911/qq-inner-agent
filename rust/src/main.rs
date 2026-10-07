@@ -111,8 +111,7 @@ async fn main() -> Result<()> {
             );
         }
         Command::ConfigDefaults => {
-            // 从 defaults() 反序列化出完整 struct（补齐所有 #[serde(default)] 新字段），再序列化回完整 schema。
-            let schema = config::Config::from_value(&config::defaults())?;
+            let schema = config::public_defaults()?;
             println!("{}", serde_json::to_string_pretty(&schema)?);
         }
         Command::Selftest => {

@@ -234,6 +234,73 @@ fn invalid_values_match_golden() {
 }
 
 #[test]
+fn cli_defaults_are_complete_editable_and_secret_free() {
+    let f = Fixture::new();
+    f.write(
+        "secrets.json",
+        &json!({"apiKey":"file-secret","onebotToken":"file-token"}),
+    );
+    f.write("config.json", &json!({"agent":{"name":"local-name"}}));
+    let out = Command::new(env!("CARGO_BIN_EXE_qq-inner-core"))
+        .arg("--root")
+        .arg(&f.0)
+        .arg("config-defaults")
+        .env("LLM_API_KEY", "env-secret")
+        .env("ONEBOT_TOKEN", "env-token")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8(out.stdout).unwrap();
+    for secret in [
+        "file-secret",
+        "file-token",
+        "env-secret",
+        "env-token",
+        "local-name",
+    ] {
+        assert!(!text.contains(secret));
+    }
+    let schema: Value = serde_json::from_str(&text).unwrap();
+    for key in ["apiKey", "onebotToken", "dataDir"] {
+        assert!(schema.get(key).is_none());
+    }
+    for pointer in [
+        "/onebot/forwardEnabled",
+        "/agent/affect",
+        "/agent/identity",
+        "/agent/relay",
+        "/agent/topicSource",
+        "/agent/backstory",
+        "/agent/multiBubble",
+        "/agent/memoryRecall",
+        "/agent/threeLayerDecision",
+        "/agent/ownerTeaching",
+        "/agent/emoji/learnFrequency",
+        "/agent/emoji/faceOnly",
+        "/agent/memory/partialEvidence",
+    ] {
+        assert!(schema.pointer(pointer).is_some(), "missing {pointer}");
+    }
+    for pointer in [
+        "/agent/name",
+        "/agent/persona",
+        "/provider/model",
+        "/provider/workspaceId",
+        "/onebot/selfId",
+    ] {
+        assert_eq!(schema.pointer(pointer), defaults().pointer(pointer));
+    }
+    f.write("config.json", &schema);
+    let loaded = load_with_env(&f.0, |_| None).unwrap();
+    assert_eq!(loaded.config.agent.name.text, defaults()["agent"]["name"]);
+    assert_eq!(loaded.config.agent.memory.partial_evidence, 2);
+}
+
+#[test]
 fn cli_redaction_and_selftest() {
     let f = Fixture::new();
     f.write(
