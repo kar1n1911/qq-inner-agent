@@ -42,6 +42,8 @@ enum Command {
     },
     /// Print a normalized summary with credentials redacted.
     Config,
+    /// Print the full default configuration schema (dashboard's dynamic whitelist).
+    ConfigDefaults,
     /// Authenticate with the OneBot bridge and report online status.
     Check,
 }
@@ -107,6 +109,11 @@ async fn main() -> Result<()> {
                 "{}",
                 serde_json::to_string_pretty(&config::summary(&loaded.config))?
             );
+        }
+        Command::ConfigDefaults => {
+            // 从 defaults() 反序列化出完整 struct（补齐所有 #[serde(default)] 新字段），再序列化回完整 schema。
+            let schema = config::Config::from_value(&config::defaults())?;
+            println!("{}", serde_json::to_string_pretty(&schema)?);
         }
         Command::Selftest => {
             // 使用同一配置加载流程；SQLite 仍仅在内存中自检。

@@ -2,6 +2,21 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { defaults, merge, validate } from './config.mjs';
+import { execFileSync } from 'node:child_process';
+
+// 动态白名单：优先用 Rust 内核导出的默认 schema（config-defaults 命令），
+// 避免每次新增配置键都要手改 config.mjs 的 defaults。内核不可用时回退到 JS 静态 defaults。
+let _rustSchema = null;
+function schema(root) {
+  if (_rustSchema) return _rustSchema;
+  try {
+    const bin = process.env.AGENT_CORE || path.join(root, 'rust', 'target', 'release', 'qq-inner-core');
+    _rustSchema = JSON.parse(execFileSync(bin, ['config-defaults'], { timeout: 5000 }).toString('utf8'));
+  } catch {
+    _rustSchema = defaults;
+  }
+  return _rustSchema;
+}
 
 export function readJson(file, fallback = {}) { return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : fallback; }
 export function revision(root) {
@@ -21,13 +36,14 @@ export function knownConfig(value, shape = defaults, prefix = '') {
   return value;
 }
 export function publicSettings(root) {
-  const config = validate(merge(defaults, readJson(path.join(root, 'config.json'))));
+  const shape = schema(root);
+  const config = validate(merge(shape, readJson(path.join(root, 'config.json'))));
   // Never send unknown manually-added fields (which could contain credentials).
   function pick(value, shape) {
     return Object.fromEntries(Object.keys(shape).map(k => [k, shape[k] && typeof shape[k] === 'object' && !Array.isArray(shape[k]) && value[k] !== null ? pick(value[k], shape[k]) : value[k]]));
   }
   const secrets = readJson(path.join(root, 'secrets.json'));
-  return { config: pick(config, defaults), revision: revision(root), hasApiKey: !!secrets.apiKey, hasOnebotToken: !!secrets.onebotToken };
+  return { config: pick(config, shape), revision: revision(root), hasApiKey: !!secrets.apiKey, hasOnebotToken: !!secrets.onebotToken };
 }
 export function recoverSettings(root) {
   const journal = path.join(root, '.settings-write');
@@ -40,7 +56,8 @@ export function recoverSettings(root) {
 }
 export function saveSettings(root, payload) {
   if (payload.revision !== revision(root)) throw Object.assign(Error('Settings changed elsewhere. Reload before saving.'), { status: 409 });
-  const config = validate(merge(defaults, knownConfig(payload.config)));
+  const shape = schema(root);
+  const config = validate(merge(shape, knownConfig(payload.config, shape)));
   const old = publicSettings(root);
   if (config.storage.directory !== old.config.storage.directory) throw Error('Moving the data directory requires stopping the service and editing the local config.');
   for (const k of ['name', 'persona']) if (typeof config.agent[k] !== 'string' || !config.agent[k].trim() || config.agent[k].length > 12000) throw Error(`Invalid agent.${k}`);
