@@ -3,7 +3,7 @@ use crate::{
     config::Agent,
     engine::policy::{self, Hint},
     engine::ChatState,
-    media_select,
+    media::media_select,
     memory::num,
     store::Store,
 };

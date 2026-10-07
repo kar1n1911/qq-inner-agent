@@ -3,8 +3,6 @@ pub mod config;
 pub mod control;
 pub mod engine;
 pub mod media;
-pub mod media_select;
-pub mod media_source;
 pub mod memory;
 pub mod onebot;
 pub mod prompts;

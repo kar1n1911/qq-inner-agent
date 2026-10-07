@@ -1651,7 +1651,7 @@ async fn independent_topic_gates_and_probability() {
             None
         );
         let mut g =
-            qq_inner_core::media_select::group_activity(&db, "group:10", h.now(), 300.).unwrap();
+            qq_inner_core::media::media_select::group_activity(&db, "group:10", h.now(), 300.).unwrap();
         let p = qq_inner_core::engine::decision::topic_probability(&g, 1000., 300.);
         g.since_human *= 2.;
         assert!(qq_inner_core::engine::decision::topic_probability(&g, 2000., 300.) >= p);

@@ -1,9 +1,12 @@
 //! 显式启用的 Rust 入站采集入口；默认 Store 和消息写入契约保持不变。
+pub mod media_select;
+pub mod media_source;
+
 use crate::{
     config::{js_string, Agent},
     persona::conversation,
     engine::policy,
-    media_source::{self, Evidence, Override},
+    media::media_source::{Evidence, Override},
     settings::sha256,
     store::Store,
 };
@@ -343,7 +346,7 @@ impl Store {
     pub fn enable_media(&self) -> Result<()> {
         let tx = self.immediate()?;
         self.connection()
-            .execute_batch(include_str!("store/media.sql"))?;
+            .execute_batch(include_str!("../store/media.sql"))?;
         // 和 store 初始化一样先探测后 ALTER；旧素材必须默认 unknown，不能猜公开。
         let columns = self.rows("PRAGMA table_info(media_assets)", [])?;
         let old_senders = !columns.iter().any(|r| r["name"] == "distinct_senders");

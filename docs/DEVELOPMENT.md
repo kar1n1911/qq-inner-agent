@@ -13,7 +13,7 @@
 | [情绪系统](#3-情绪系统) | 心情/认同/好感 + 二维 disposition | `persona/affect.rs` |
 | [记忆召回](#4-记忆召回) | recall 下钻 | `persona/recall.rs` |
 | [决策系统](#5-决策系统) | 引擎 48 步 / 三层决策 / 策略 / 发送 / 活跃 / 观察 | `engine/mod.rs` `engine/decision.rs` `engine/policy.rs` `engine/sending.rs` `engine/activity.rs` `engine/orientation.rs` |
-| [素材系统](#6-素材系统) | 表情包采集 / 选择 / 来源可公开性 | `media.rs` `media_select.rs` `media_source.rs` |
+| [素材系统](#6-素材系统) | 表情包采集 / 选择 / 来源可公开性 | `media/mod.rs` `media/media_select.rs` `media/media_source.rs` |
 | [话题来源](#7-话题来源-21) | 外部内容抓取 + 群间转发 | `topic_source.rs` `relay.rs` |
 | [传输系统](#8-传输系统) | OneBot v11 + LLM provider | `onebot.rs` `provider.rs` `provider_transport.rs` |
 | [存储与配置](#9-存储与配置) | SQLite / 观察期持久化 / 配置协议 / 文件协议 | `store.rs` `store/*.rs` `config.rs` `settings.rs` |
@@ -98,9 +98,9 @@ agent "是谁、怎么说话"这一整条链。
 
 | 功能 | 实现位置 |
 | --- | --- |
-| 入站表情包采集(哈希去重、即时落盘) | `media.rs` |
-| 素材选择(群温度 + 场合适配度,与自身 activity 独立) | `media_select.rs` |
-| 来源可公开性(本地处理,不上传/不反向图搜) | `media_source.rs` |
+| 入站表情包采集(哈希去重、即时落盘) | `media/mod.rs` |
+| 素材选择(群温度 + 场合适配度,与自身 activity 独立) | `media/media_select.rs` |
+| 来源可公开性(本地处理,不上传/不反向图搜) | `media/media_source.rs` |
 
 ---
 

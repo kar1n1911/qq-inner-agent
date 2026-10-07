@@ -2,7 +2,7 @@
 use crate::{
     persona::conversation::{self, Classification, Relation, Stage},
     engine::policy::Message,
-    media_source::{self, SourceTier},
+    media::media_source::{self, SourceTier},
     store::Store,
     memory::text::{similarity, terms},
 };

@@ -15,7 +15,7 @@ use crate::{
     persona::expression::{
         decorate, decoration_choices, parse_expressions, personality_context, ExpressionMemory,
     },
-    media_select,
+    media::media_select,
     memory::{array, num, parse_memory_updates, text, LayeredMemory},
     onebot::{OneBot, OneBotError, State as TransportState},
     prompts,
