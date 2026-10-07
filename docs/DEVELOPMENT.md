@@ -167,3 +167,4 @@ Node 只承载仪表盘与 CLI(旧 agent 实现已归档到 `js-legacy` 分支):
 - 每个系统的 parity/单测在 `rust/tests/`:`config_parity.rs` `policy_parity.rs` `sending_parity.rs` `prompts_parity.rs` `engine_parity.rs` `memory_parity.rs` `store_parity.rs` `activity_parity.rs` `provider_parity.rs` `phase5_parity.rs` `identity.rs` `backstory.rs` `onebot_mock.rs` 等;
 - parity 期望值冻结在 `rust/tests/golden/`(不依赖 node);
 - 运行:`cargo test`;`cargo clippy --all-targets -- -D warnings`。
+- **磁盘提示**:本仓库有约 25 个测试二进制,每次 `cargo test` 都会往 `rust/target/debug` 写调试产物,反复跑可涨到 10G+。已在 `Cargo.toml` 用 `[profile.dev] debug = "line-tables-only"` 限制;在服务器上跑过测试后,用 `cargo clean --profile dev`(或删 `rust/target/debug`)回收空间,保留 `target/release` 即可。

@@ -40,3 +40,9 @@ opt-level = 3
 lto = "thin"
 codegen-units = 1
 strip = true
+
+# 远程/CI 反复跑 cargo test 会堆积 target/debug（本仓库约 25 个测试二进制，
+# 每个都链接完整依赖树）；只保留行号表、去掉变量/类型调试信息，体积可显著下降。
+# 生产始终走 release（strip = true），不影响运行。
+[profile.dev]
+debug = "line-tables-only"
