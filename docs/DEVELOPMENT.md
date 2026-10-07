@@ -8,16 +8,16 @@
 
 | 系统 | 职责 | 核心文件 |
 | --- | --- | --- |
-| [人格系统](#1-人格系统) | persona / 身份自治 / 过往情景 / 人类化 | `config.rs` `expression.rs` `identity.rs` `backstory.rs` `humanize.rs` `prompts.rs` |
-| [记忆系统](#2-记忆系统) | 三层记忆 / 召回排序 / 学习 / 词元 | `memory/mod.rs` `memory/ranking.rs` `store/learning.rs` `conversation.rs` `memory/text.rs` |
-| [情绪系统](#3-情绪系统) | 心情/认同/好感 + 二维 disposition | `affect.rs` |
-| [记忆召回](#4-记忆召回) | recall 下钻 | `recall.rs` |
+| [人格系统](#1-人格系统) | persona / 身份自治 / 过往情景 / 人类化 | `config.rs` `persona/expression.rs` `persona/mod.rs` `persona/backstory.rs` `persona/humanize.rs` `prompts.rs` |
+| [记忆系统](#2-记忆系统) | 三层记忆 / 召回排序 / 学习 / 词元 | `memory/mod.rs` `memory/ranking.rs` `store/learning.rs` `persona/conversation.rs` `memory/text.rs` |
+| [情绪系统](#3-情绪系统) | 心情/认同/好感 + 二维 disposition | `persona/affect.rs` |
+| [记忆召回](#4-记忆召回) | recall 下钻 | `persona/recall.rs` |
 | [决策系统](#5-决策系统) | 引擎 48 步 / 三层决策 / 策略 / 发送 / 活跃 / 观察 | `engine/mod.rs` `engine/decision.rs` `engine/policy.rs` `engine/sending.rs` `engine/activity.rs` `engine/orientation.rs` |
 | [素材系统](#6-素材系统) | 表情包采集 / 选择 / 来源可公开性 | `media.rs` `media_select.rs` `media_source.rs` |
 | [话题来源](#7-话题来源-21) | 外部内容抓取 + 群间转发 | `topic_source.rs` `relay.rs` |
 | [传输系统](#8-传输系统) | OneBot v11 + LLM provider | `onebot.rs` `provider.rs` `provider_transport.rs` |
 | [存储与配置](#9-存储与配置) | SQLite / 观察期持久化 / 配置协议 / 文件协议 | `store.rs` `store/*.rs` `config.rs` `settings.rs` |
-| [控制与运行时](#10-控制与运行时) | 控制套接字 / 主循环 / 主人教学 | `control.rs` `main.rs` `owner_teaching.rs` |
+| [控制与运行时](#10-控制与运行时) | 控制套接字 / 主循环 / 主人教学 | `control.rs` `main.rs` `persona/owner_teaching.rs` |
 
 全部源码位于 `rust/src/`。Node 侧(仪表盘/CLI)见[最后一节](#11-node-侧)。
 
@@ -30,19 +30,19 @@ agent "是谁、怎么说话"这一整条链。
 | 功能 | 实现位置 |
 | --- | --- |
 | 基座人格 `agent.persona`(种子文本) | `config.rs` — `Agent.persona`(`RuntimeText`) |
-| 行为/回复风格/兴趣/变体 `agent.personality` | `config.rs` — `Agent.personality`;`expression.rs` — `personality_context()` 组装成 payload |
+| 行为/回复风格/兴趣/变体 `agent.personality` | `config.rs` — `Agent.personality`;`persona/expression.rs` — `personality_context()` 组装成 payload |
 | 提示词里的 persona 注入 | `prompts.rs`(生成物,勿手改,见[提示词](#提示词));`engine/mod.rs` — formation/articulation payload 的 `persona` 字段 |
-| **身份自治**(§22:昵称/群名片/头像/签名自动外显 + 人格成长) | `identity.rs` — `enough`/`propose`/`automate`/`grow`/`persona`/`backup`/`restore`;`onebot.rs` — `set_group_card`/`set_qq_profile`/`set_qq_avatar`/`set_signature` |
-| **模型自拟昵称**(贴吧式) | `identity.rs` — `NAME_PROMPT`/`member_names`/`model_nickname`;引擎 tick 里调模型生成 |
-| **过往情景**(§23:不可变虚构自身过往) | `backstory.rs` — `create`(只 INSERT)/`add_detail`(只追加)/`recall`;`engine/mod.rs` — articulation 前的 prepare/recall |
-| 人类化运行时片段(只发表情 / 多气泡指令) | `humanize.rs` — `FACE_ONLY_INSTRUCTIONS`/`MULTI_BUBBLE_INSTRUCTIONS` |
+| **身份自治**(§22:昵称/群名片/头像/签名自动外显 + 人格成长) | `persona/mod.rs` — `enough`/`propose`/`automate`/`grow`/`persona`/`backup`/`restore`;`onebot.rs` — `set_group_card`/`set_qq_profile`/`set_qq_avatar`/`set_signature` |
+| **模型自拟昵称**(贴吧式) | `persona/mod.rs` — `NAME_PROMPT`/`member_names`/`model_nickname`;引擎 tick 里调模型生成 |
+| **过往情景**(§23:不可变虚构自身过往) | `persona/backstory.rs` — `create`(只 INSERT)/`add_detail`(只追加)/`recall`;`engine/mod.rs` — articulation 前的 prepare/recall |
+| 人类化运行时片段(只发表情 / 多气泡指令) | `persona/humanize.rs` — `FACE_ONLY_INSTRUCTIONS`/`MULTI_BUBBLE_INSTRUCTIONS` |
 | 多气泡 + 打字延迟发送 | `engine/mod.rs` — articulation 后的发送循环(解析 `bubbles`、条间延迟随心情抖动) |
 
 ### 提示词
 
 - **源**:`src/prompts.mjs`(仓库根,JS);**生成物**:`rust/src/prompts.rs`。
 - 改动提示词:`src/prompts.mjs` → `node rust/tools/gen-prompts.mjs` → `cargo test --test prompts_parity`。
-- 运行时片段(不进入生成物):`humanize.rs` / `recall.rs` 的常量,由 engine 追加到 payload。
+- 运行时片段(不进入生成物):`persona/humanize.rs` / `persona/recall.rs` 的常量,由 engine 追加到 payload。
 
 ---
 
@@ -53,7 +53,7 @@ agent "是谁、怎么说话"这一整条链。
 | 三层记忆(short/long/notebook + traits) | `memory/mod.rs` — `LayeredMemory` 等;表结构在 `store.rs` 的建表 |
 | 召回排序(词汇重叠 + 中文双字 + 时效) | `memory/ranking.rs` — 稀疏召回,调用方先限 chat/subject |
 | 学习事务(落库前 self-review) | `store/learning.rs`;引擎调用在 `engine/mod.rs` |
-| 结构判断(沉默不转学习信号) | `conversation.rs` |
+| 结构判断(沉默不转学习信号) | `persona/conversation.rs` |
 | 词元化 / 相似度 | `memory/text.rs` — `terms()`/`similarity()`(对应旧 `store.mjs`) |
 | 中文检索(unicode 归一) | `memory/memory_unicode.rs` |
 
@@ -63,11 +63,11 @@ agent "是谁、怎么说话"这一整条链。
 
 | 功能 | 实现位置 |
 | --- | --- |
-| 三指标(mood 消息级 / agreement 消息级 / affinity 人物级) | `affect.rs` — `rate`/`read`/`update` |
-| 衰减(affinity 7 天、其余 4h) | `affect.rs` — `decay()` |
-| 二维 disposition(四象限) | `affect.rs` — `disposition(valence, rationality)` → Angry/Withdrawn/Scrutinizing/Supportive |
-| 单向约束(agreement 不聚合 affinity)+ 有界步长 + 负性非对称 | `affect.rs` — `update()` 内的断言与步长 |
-| Angry 熔断(无回应连发 ≤3) | `affect.rs` — `burst_allowed`/`reserve_burst` |
+| 三指标(mood 消息级 / agreement 消息级 / affinity 人物级) | `persona/affect.rs` — `rate`/`read`/`update` |
+| 衰减(affinity 7 天、其余 4h) | `persona/affect.rs` — `decay()` |
+| 二维 disposition(四象限) | `persona/affect.rs` — `disposition(valence, rationality)` → Angry/Withdrawn/Scrutinizing/Supportive |
+| 单向约束(agreement 不聚合 affinity)+ 有界步长 + 负性非对称 | `persona/affect.rs` — `update()` 内的断言与步长 |
+| Angry 熔断(无回应连发 ≤3) | `persona/affect.rs` — `burst_allowed`/`reserve_burst` |
 | 接入发送概率(motivation 因子) | `engine/sending.rs` — `sending_probability_with_affect`(定义);`engine/mod.rs` 调用,门控 `agent.affect.enabled` |
 
 ---
@@ -76,7 +76,7 @@ agent "是谁、怎么说话"这一整条链。
 
 | 功能 | 实现位置 |
 | --- | --- |
-| recall 下钻(两级召回,预算含 id/时间戳) | `recall.rs` — `RULE`/`CONTRACT`/`Budget`;`engine/mod.rs` — articulation system 里追加 `RULE` |
+| recall 下钻(两级召回,预算含 id/时间戳) | `persona/recall.rs` — `RULE`/`CONTRACT`/`Budget`;`engine/mod.rs` — articulation system 里追加 `RULE` |
 
 ---
 
@@ -141,7 +141,7 @@ agent "是谁、怎么说话"这一整条链。
 | 控制套接字服务端(方法表 + 事件) | `control.rs` |
 | 主循环(1s tick / status / revision 监视 / 信号) | `main.rs` |
 | 完整配置 schema(`config-defaults` 子命令,dashboard 动态白名单用) | `main.rs` — `Command::ConfigDefaults`(`config::Config::from_value(&defaults())` round-trip) |
-| 主人私聊教学(/记住 /黑话 /忘记 /还原) | `owner_teaching.rs` |
+| 主人私聊教学(/记住 /黑话 /忘记 /还原) | `persona/owner_teaching.rs` |
 | 模块注册 | `lib.rs` |
 
 ---

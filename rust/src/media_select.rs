@@ -1,6 +1,6 @@
 //! P6b：默认关闭的素材选择；群温度与自身 activity 完全独立。
 use crate::{
-    conversation::{self, Classification, Relation, Stage},
+    persona::conversation::{self, Classification, Relation, Stage},
     engine::policy::Message,
     media_source::{self, SourceTier},
     store::Store,

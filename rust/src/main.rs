@@ -145,7 +145,7 @@ use qq_inner_core::{
     control::{Backend, Events, LiveRemote, Server},
     engine::activity::ActivityRhythm,
     engine::{Clock, Engine, Logger, Options},
-    expression::ExpressionMemory,
+    persona::expression::ExpressionMemory,
     memory::LayeredMemory,
     onebot::{Notification, OneBot},
     provider::Provider,

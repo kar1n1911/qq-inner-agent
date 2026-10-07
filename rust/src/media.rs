@@ -1,7 +1,7 @@
 //! 显式启用的 Rust 入站采集入口；默认 Store 和消息写入契约保持不变。
 use crate::{
     config::{js_string, Agent},
-    conversation,
+    persona::conversation,
     engine::policy,
     media_source::{self, Evidence, Override},
     settings::sha256,

@@ -1,4 +1,4 @@
-use qq_inner_core::{affect, store::Store};
+use qq_inner_core::{persona::affect, store::Store};
 use serde_json::json;
 pub fn store() -> Store {
     let s = Store::in_memory().unwrap();

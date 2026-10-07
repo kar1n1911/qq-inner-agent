@@ -1,5 +1,5 @@
 mod affect_support;
-use qq_inner_core::affect::{self, Dimension::*};
+use qq_inner_core::persona::affect::{self, Dimension::*};
 #[test]
 fn decay_and_read_writeback() {
     assert_eq!(affect::decay(1., 0., 10., 10.), 0.5);

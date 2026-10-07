@@ -257,7 +257,7 @@ pub fn sending_probability_with_affect(
     timing: &Timing,
     forecast: &Forecast,
     enabled: bool,
-    behavior: &crate::affect::Behavior,
+    behavior: &crate::persona::affect::Behavior,
 ) -> Admission {
     let mut gate = sending_probability(settings, timing, forecast);
     if !enabled {

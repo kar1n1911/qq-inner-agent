@@ -108,7 +108,7 @@ impl<'a> ExpressionMemory<'a> {
                 .unwrap_or_default();
             let sources = array(&v["sources"]);
             // 教学没有人类时间戳，允许主人再次改写，且来源保持为唯一教学标记。
-            let teaching = crate::owner_teaching::sources(sources);
+            let teaching = crate::persona::owner_teaching::sources(sources);
             if !teaching
                 && old.is_some()
                 && newest(sources, f64::NEG_INFINITY) < newest(&previous, f64::NEG_INFINITY)
@@ -144,7 +144,7 @@ impl<'a> ExpressionMemory<'a> {
         for subject in memory_subjects(chat, sender)? {
             for mut r in self.store.rows("SELECT * FROM expressions WHERE chat=? AND subject=? AND updated>? AND confidence>=? AND (last_used=0 OR last_used<=?)",params![chat,subject,now-settings.retention_days*86400.,settings.min_confidence,now-settings.reuse_seconds])? {
                 decode(&mut r,&["sources"])?;
-                if (!crate::owner_teaching::sources(array(&r["sources"])) && array(&r["sources"]).len()<2)||(r["subject"]=="group"&&array(&r["sources"]).iter().map(|s|s["sender"].to_string()).collect::<HashSet<_>>().len()<2){continue;}
+                if (!crate::persona::owner_teaching::sources(array(&r["sources"])) && array(&r["sources"]).len()<2)||(r["subject"]=="group"&&array(&r["sources"]).iter().map(|s|s["sender"].to_string()).collect::<HashSet<_>>().len()<2){continue;}
                 r["id"]=json!(json!([r["subject"],r["kind"],r["term"]]).to_string());r["layer"]=r["kind"].clone();r["text"]=json!(format!("{}：{}；适用：{}",text(&r,"term"),text(&r,"meaning"),text(&r,"situation")));r["importance"]=json!(0.5);rows.push(r);
             }
         }
@@ -211,7 +211,7 @@ pub fn decoration_choices(
     let last = store.first("SELECT ts FROM decoration_usage WHERE chat=?", [chat])?;
     // P6c 门控新功能：原概率保留为上限；关闭时不查询历史、不多消耗随机数。
     let probability = if settings.learn_frequency && chat.starts_with("group:") {
-        crate::humanize::face_probability(store, chat, now)?.min(settings.probability)
+        crate::persona::humanize::face_probability(store, chat, now)?.min(settings.probability)
     } else {
         settings.probability
     };

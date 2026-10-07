@@ -4,7 +4,7 @@ use qq_inner_core::{
     config::{defaults, merge, Config, Identity},
     engine::orientation::{OrientationProvider, OrientationTransport},
     engine::{Engine, EngineTransport, Options},
-    identity,
+    persona as identity,
     onebot::{OneBotError, State},
     store::Store,
 };

@@ -1,9 +1,7 @@
 //! 内核模块入口；供运行时模块与 Node 交叉验证使用。
 pub mod config;
 pub mod control;
-pub mod conversation;
 pub mod engine;
-pub mod expression;
 pub mod media;
 pub mod media_select;
 pub mod media_source;
@@ -14,17 +12,8 @@ pub mod provider;
 pub mod settings;
 pub mod store;
 
-pub mod humanize;
-
-pub mod owner_teaching;
-
-pub mod affect;
-pub mod recall;
-
 pub mod topic_source;
 
 pub mod relay;
 
-pub mod identity;
-
-pub mod backstory;
+pub mod persona;

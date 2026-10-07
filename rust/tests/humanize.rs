@@ -1,8 +1,8 @@
 //! 新功能不变量精确断言；衰减只验证方向，避免把经验参数误当语言理解真值。
 use qq_inner_core::{
     config::{defaults, merge, Config},
-    expression::decoration_choices,
-    humanize::{capture, enable, face_probability},
+    persona::expression::decoration_choices,
+    persona::humanize::{capture, enable, face_probability},
     store::Store,
 };
 use serde_json::{json, Value};

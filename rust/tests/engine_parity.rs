@@ -130,7 +130,7 @@ impl OrientationProvider for Harness {
             }
             if stage == "ARTICULATE" {
                 if payload.get("backstories").is_some() {
-                    assert!(system.contains(qq_inner_core::backstory::RULE));
+                    assert!(system.contains(qq_inner_core::persona::backstory::RULE));
                 }
                 if payload.get("recallEvidence").is_some() {
                     assert!(system.contains("细节未经核实必须表达不确定"));
@@ -1731,7 +1731,7 @@ async fn backstory_is_opt_in_persisted_and_recalled_before_articulation() {
         assert_eq!(payloads.len(), 1);
         if enabled {
             let rows =
-                qq_inner_core::backstory::recall(&h.store.lock().unwrap(), "group:10", h.now(), 8)
+                qq_inner_core::persona::backstory::recall(&h.store.lock().unwrap(), "group:10", h.now(), 8)
                     .unwrap();
             assert_eq!(
                 rows.len(),

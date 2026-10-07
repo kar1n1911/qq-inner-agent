@@ -1,7 +1,7 @@
 //! 不变量用设计推导的精确数量；分类只限定合理类别/方向，模糊置信度是硬约束。
 use qq_inner_core::{
     config::{defaults, merge, Agent},
-    conversation::{self, Relation, Stage},
+    persona::conversation::{self, Relation, Stage},
     engine::policy::{Hint, Message},
     media::{Collector, Config},
     store::Store,

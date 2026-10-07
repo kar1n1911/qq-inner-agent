@@ -905,7 +905,7 @@ pub struct Agent {
     pub topic_source: crate::topic_source::Settings,
     /// P6h：三个功能的入口均默认关闭。
     #[serde(default)]
-    pub affect: crate::affect::Settings,
+    pub affect: crate::persona::affect::Settings,
     #[serde(default)]
     pub memory_recall: bool,
     /// P6d：默认关闭，关闭时保持 JS 的触发顺序与模型输入。

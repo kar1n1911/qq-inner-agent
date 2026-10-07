@@ -1,5 +1,5 @@
 mod affect_support;
-use qq_inner_core::recall::{Budget, Request};
+use qq_inner_core::persona::recall::{Budget, Request};
 use serde_json::json;
 #[test]
 fn optional_request_budget_and_scoped_evidence() {

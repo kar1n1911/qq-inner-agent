@@ -1,6 +1,6 @@
 //! 设计不变量精确断言；估计值只验范围、单调性，不从实现生成期望。
 use qq_inner_core::{
-    conversation::{Classification, Evidence, Relation, Stage},
+    persona::conversation::{Classification, Evidence, Relation, Stage},
     media_select::{self as ms, Attention, Config, Drift, Feedback, GroupActivity, Outcome},
     media_source::Override,
     store::Store,

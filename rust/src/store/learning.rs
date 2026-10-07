@@ -2,7 +2,7 @@
 use super::*;
 use crate::{
     config::{Expression, Learning, Memory},
-    expression::ExpressionMemory,
+    persona::expression::ExpressionMemory,
     memory::{array, len, text, LayeredMemory},
     memory::ranking::rank_memories,
 };
