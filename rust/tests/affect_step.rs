@@ -1,4 +1,4 @@
-use qq_inner_core::affect::bounded_step;
+use qq_inner_core::persona::affect::bounded_step;
 #[test]
 fn asymmetric_confidence_bounded() {
     assert_eq!(bounded_step(-1., 1.), -0.15);

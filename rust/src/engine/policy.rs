@@ -7,7 +7,7 @@
 //! `chrono-tz`，两者的数据库版本不同。`tests/policy_parity.rs` 会用真实 Node 在多个
 //! 时区与时刻上比对。
 use crate::config::{Agent, QuietHours, Schedule};
-use crate::text::similarity;
+use crate::memory::text::similarity;
 use chrono::{DateTime, FixedOffset, Local, TimeZone, Timelike, Utc};
 use chrono_tz::Tz;
 use std::cmp::Ordering;
@@ -389,7 +389,7 @@ pub(crate) fn replace_cq(s: &str, mut replace: impl FnMut(&str) -> Option<String
 /// 安全闸门比“感兴趣”更靠前：先复用来源/时间校验，不递归读取附件或嵌套转发。
 pub async fn resolve_forwards(
     event: &serde_json::Value,
-    bot: &crate::onebot::OneBot,
+    bot: &crate::transport::OneBot,
     agent: &Agent,
     now: f64,
 ) -> serde_json::Value {
@@ -497,7 +497,7 @@ pub fn normalize(
         return None;
     }
     let ts = if truthy(&event["time"]) {
-        crate::onebot::js_number(&event["time"])
+        crate::transport::js_number(&event["time"])
     } else {
         now
     };

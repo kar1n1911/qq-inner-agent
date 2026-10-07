@@ -1,11 +1,11 @@
 //! 入群观察闸门。只采集实际返回的数据，失败/不支持/格式错误一律 unavailable，绝不编造。
 use crate::{
     config::{js_string, truthy, Agent, Observation},
+    engine::policy::{clip_chars, js_trim, replace_cq},
     memory::{array, text, valid_text},
-    onebot::{js_number, OneBot},
-    policy::{clip_chars, js_trim, replace_cq},
+    transport::{js_number, OneBot},
     prompts::ORIENTATION,
-    provider::Provider,
+    transport::provider::Provider,
     store::{OrientationRow, Store},
 };
 use anyhow::{ensure, Result};
@@ -290,7 +290,7 @@ impl GroupOrientation {
             return Ok(false);
         }
         let recent = self.db()?.history(chat,Some(c.history_limit as i64))?.into_iter().filter(|m| !truthy(&m["self"])).map(|m| json!({"id":m["id"],"sender":m["sender"],"name":m["name"],"time":m["ts"],"text":clip(&m["text"],800)})).collect::<Vec<_>>();
-        let payload = json!({"persona":crate::identity::persona(&*self.db()?, chat, &self.agent.persona.text, &self.agent.identity)?,"group":chat,"observedSeconds":(self.now)()-r.started,"observedMessages":r.message_count,"sources":r.sources,"recentMessages":recent});
+        let payload = json!({"persona":crate::persona::persona(&*self.db()?, chat, &self.agent.persona.text, &self.agent.identity)?,"group":chat,"observedSeconds":(self.now)()-r.started,"observedMessages":r.message_count,"sources":r.sources,"recentMessages":recent});
         let result = self.provider.json(ORIENTATION, payload).await;
         if !self.fresh(chat, epoch)? {
             return Ok(false);

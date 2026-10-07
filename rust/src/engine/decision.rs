@@ -1,10 +1,10 @@
 //! ①基于待处理消息；②基于群状态。初筛不调用模型，③仍由原有流水线处理。
 use crate::{
     config::Agent,
+    engine::policy::{self, Hint},
     engine::ChatState,
-    media_select,
+    media::media_select,
     memory::num,
-    policy::{self, Hint},
     store::Store,
 };
 use anyhow::Result;

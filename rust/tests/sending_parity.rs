@@ -4,7 +4,7 @@
 //! JSON 固化金标准覆盖完整参数矩阵，运行测试无需 Node。
 #[path = "golden/mod.rs"]
 mod golden;
-use qq_inner_core::sending::{
+use qq_inner_core::engine::sending::{
     forecast_result, sending_probability, Forecast, Outcomes, ResponseMode, SendingSettings,
     Timing, Veto,
 };
@@ -275,8 +275,8 @@ fn the_decimal_float_round_trip_is_why_the_matrix_transfers_bits() {
 #[test]
 fn affect_disabled_is_identical_and_enabled_factors_change_probability() {
     use qq_inner_core::{
-        affect::{Behavior, Disposition},
-        sending::sending_probability_with_affect,
+        persona::affect::{Behavior, Disposition},
+        engine::sending::sending_probability_with_affect,
     };
     let t = timing(true, 15., 300., 6., 5.);
     let f = forecast(true, 0.1, ResponseMode::Answer);

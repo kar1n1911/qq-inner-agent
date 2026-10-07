@@ -1,9 +1,9 @@
 //! 不变量用设计推导的精确数量；分类只限定合理类别/方向，模糊置信度是硬约束。
 use qq_inner_core::{
     config::{defaults, merge, Agent},
-    conversation::{self, Relation, Stage},
+    persona::conversation::{self, Relation, Stage},
+    engine::policy::{Hint, Message},
     media::{Collector, Config},
-    policy::{Hint, Message},
     store::Store,
 };
 use serde_json::{json, Value};
@@ -375,7 +375,7 @@ fn migration_reopen_and_context_lookup_use_original_messages() {
 
 #[test]
 fn source_classifier_defaults_overrides_and_cross_chat_gate_are_exact() {
-    use qq_inner_core::media_source::{can_use, classify, Evidence, Override, SourceTier};
+    use qq_inner_core::media::media_source::{can_use, classify, Evidence, Override, SourceTier};
     // 不变量：默认未知；无论使用者有多少都不能证明群友照片在网上公开。
     assert_eq!(SourceTier::default(), SourceTier::Unknown);
     assert_eq!(classify(Evidence::default(), 3).tier, SourceTier::Unknown);
@@ -483,7 +483,7 @@ fn unverified_segment_markers_and_popularity_never_publish_images() {
 
 #[test]
 fn local_corpus_matches_bytes_and_manual_override_survives_more_uses_and_reopen() {
-    use qq_inner_core::media_source::{corpus_hashes, Override};
+    use qq_inner_core::media::media_source::{corpus_hashes, Override};
     let t = Temp::new();
     let corpus = t.0.join("public");
     fs::create_dir_all(corpus.join("nested")).unwrap();

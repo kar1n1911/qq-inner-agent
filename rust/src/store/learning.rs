@@ -2,9 +2,9 @@
 use super::*;
 use crate::{
     config::{Expression, Learning, Memory},
-    expression::ExpressionMemory,
+    persona::expression::ExpressionMemory,
     memory::{array, len, text, LayeredMemory},
-    ranking::rank_memories,
+    memory::ranking::rank_memories,
 };
 use rusqlite::params;
 #[derive(Default)]

@@ -1,5 +1,5 @@
 mod affect_support;
-use qq_inner_core::affect::{self, Dimension::*};
+use qq_inner_core::persona::affect::{self, Dimension::*};
 #[test]
 #[should_panic(expected = "agreement must never aggregate")]
 fn agreement_never_becomes_affinity() {

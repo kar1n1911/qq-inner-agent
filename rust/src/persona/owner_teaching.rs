@@ -1,7 +1,7 @@
 //! 主人私聊教学：独立授权、形式校验与特殊来源，不构造虚假的人类证据。
 use crate::{
     config::Agent,
-    expression::ExpressionMemory,
+    persona::expression::ExpressionMemory,
     memory::{memory_subjects, valid_text, LayeredMemory},
     store::Store,
 };

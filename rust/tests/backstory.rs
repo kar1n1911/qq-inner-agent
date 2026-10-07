@@ -1,5 +1,5 @@
 use qq_inner_core::{
-    backstory,
+    persona::backstory,
     config::{defaults, merge, Config},
     store::Store,
 };

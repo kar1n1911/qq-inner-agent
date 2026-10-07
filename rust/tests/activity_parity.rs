@@ -6,8 +6,8 @@
 //! 比任何行为上有意义的差异都小好几个数量级。
 #[path = "golden/mod.rs"]
 mod golden;
-use qq_inner_core::activity::activity_probability;
 use qq_inner_core::config::{Rhythm, Schedule};
+use qq_inner_core::engine::activity::activity_probability;
 use serde_json::{json, Value};
 
 fn schedule(enabled: bool, active_start: &str, inactive_start: &str, timezone: &str) -> Schedule {

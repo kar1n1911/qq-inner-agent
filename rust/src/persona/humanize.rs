@@ -1,7 +1,7 @@
 //! P6c 门控新功能；长度分档属于 engine 中的 parity 接线，不在这里重新实现。
 use crate::{
+    engine::policy::Hint,
     memory::{num, text},
-    policy::Hint,
     store::Store,
 };
 use anyhow::Result;

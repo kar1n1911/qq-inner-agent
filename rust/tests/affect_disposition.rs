@@ -1,5 +1,5 @@
 mod affect_support;
-use qq_inner_core::affect::{self, disposition, Disposition::*};
+use qq_inner_core::persona::affect::{self, disposition, Disposition::*};
 #[test]
 fn quadrants_and_circuit() {
     assert_eq!(disposition(-1., -1.), Angry);

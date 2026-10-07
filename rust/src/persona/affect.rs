@@ -99,7 +99,7 @@ pub fn bounded_step(signal: f64, confidence: f64) -> f64 {
 pub fn enable(store: &Store) -> Result<()> {
     store
         .connection()
-        .execute_batch(include_str!("store/affect_schema.sql"))?;
+        .execute_batch(include_str!("../store/affect_schema.sql"))?;
     Ok(())
 }
 fn unit(v: f64) -> Result<()> {

@@ -1,10 +1,10 @@
 //! P6b：默认关闭的素材选择；群温度与自身 activity 完全独立。
 use crate::{
-    conversation::{self, Classification, Relation, Stage},
-    media_source::{self, SourceTier},
-    policy::Message,
+    persona::conversation::{self, Classification, Relation, Stage},
+    engine::policy::Message,
+    media::media_source::{self, SourceTier},
     store::Store,
-    text::{similarity, terms},
+    memory::text::{similarity, terms},
 };
 use anyhow::{ensure, Result};
 use rusqlite::params;
@@ -447,7 +447,7 @@ pub fn select(
     let a = group_activity(db, chat, now, c.silence_seconds)?;
     let stage = conversation::classify(&history, history.len() - 1, now, &c.classification);
     let waiting = db.expectation(chat, now)?.is_some()
-        || last.hint == crate::policy::Hint::SelfChat
+        || last.hint == crate::engine::policy::Hint::SelfChat
         || last.text.trim_end().ends_with(['?', '？']);
     let p = probability(&a, &stage, c, waiting);
     if p <= 0. {

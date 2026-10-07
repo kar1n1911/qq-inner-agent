@@ -2,7 +2,7 @@
 use futures_util::{SinkExt, StreamExt};
 use qq_inner_core::{
     config,
-    onebot::{Notification, OneBot},
+    transport::{Notification, OneBot},
 };
 use serde_json::{json, Value};
 use tokio::{
@@ -522,7 +522,7 @@ fn forward_event() -> Value {
 
 #[tokio::test]
 async fn forward_fetch_normalize_text_only_and_fallback() {
-    use qq_inner_core::policy::{normalize, resolve_forwards};
+    use qq_inner_core::engine::policy::{normalize, resolve_forwards};
     let mut m = mock(json!({"user_id":123}), json!(true), 0).await;
     let (b, mut rx) = forward_bot(&m);
     let (s, t) = running(&b, &mut rx).await;
@@ -562,7 +562,7 @@ async fn forward_fetch_normalize_text_only_and_fallback() {
         m.frames.send(response(&req, data, json!(0), "ok")).unwrap();
         let message = call.await.unwrap();
         assert_eq!(message.text, "before first node\nsecond node\n after");
-        assert_eq!(message.hint, qq_inner_core::policy::Hint::Open);
+        assert_eq!(message.hint, qq_inner_core::engine::policy::Hint::Open);
         assert!(m.requests.try_recv().is_err());
     }
     // 失败或响应结构异常时维持旧占位；无 ID 不请求，拒收来源也不请求。
@@ -598,7 +598,7 @@ async fn forward_fetch_normalize_text_only_and_fallback() {
 
 #[tokio::test]
 async fn forward_disabled_preserves_existing_behavior() {
-    use qq_inner_core::policy::{normalize, resolve_forwards};
+    use qq_inner_core::engine::policy::{normalize, resolve_forwards};
     let m = mock(json!({"user_id":123}), json!(true), 0).await;
     let (b, mut rx) = bot(&m, "a+b &?", "123", 10.0);
     let (s, t) = running(&b, &mut rx).await;

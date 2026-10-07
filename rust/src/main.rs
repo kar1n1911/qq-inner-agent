@@ -88,7 +88,7 @@ async fn main() -> Result<()> {
             } else {
                 String::new()
             };
-            let (bot, _notices) = qq_inner_core::onebot::OneBot::new(c.onebot, token);
+            let (bot, _notices) = qq_inner_core::transport::OneBot::new(c.onebot, token);
             match bot.check().await {
                 Ok(state) => {
                     println!(
@@ -142,13 +142,13 @@ async fn main() -> Result<()> {
 }
 
 use qq_inner_core::{
-    activity::ActivityRhythm,
     control::{Backend, Events, LiveRemote, Server},
+    engine::activity::ActivityRhythm,
     engine::{Clock, Engine, Logger, Options},
-    expression::ExpressionMemory,
+    persona::expression::ExpressionMemory,
     memory::LayeredMemory,
-    onebot::{Notification, OneBot},
-    provider::Provider,
+    transport::{Notification, OneBot},
+    transport::provider::Provider,
     settings,
     store::Store,
 };
@@ -301,7 +301,7 @@ impl Runtime {
                 if let Some(control) = &self.control {
                     control.observe(&event);
                 }
-                let event = qq_inner_core::policy::resolve_forwards(
+                let event = qq_inner_core::engine::policy::resolve_forwards(
                     &event,
                     &self.bot,
                     &self.config.agent,

@@ -7,7 +7,7 @@
 //! 注意 JS 用的本地时间含**秒**（`hour*60 + minute + second/60`），所以这里不能用
 //! 只看分钟的换算。
 use crate::config::{Rhythm, Schedule};
-use crate::policy::{active_at, local_minute_of_day, parse_hhmm};
+use crate::engine::policy::{active_at, local_minute_of_day, parse_hhmm};
 
 /// 复刻 `activityProbability(now, schedule, rhythm)`。
 pub fn activity_probability(now: f64, schedule: &Schedule, rhythm: &Rhythm) -> f64 {

@@ -1,7 +1,7 @@
 use qq_inner_core::{
     config::{defaults, merge, Config},
-    expression::ExpressionMemory,
-    owner_teaching::handle,
+    persona::expression::ExpressionMemory,
+    persona::owner_teaching::handle,
     store::Store,
 };
 use serde_json::{json, Value};

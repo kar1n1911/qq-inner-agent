@@ -2,8 +2,7 @@
 use crate::config::Memory;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
-#[path = "memory_unicode.rs"]
-mod unicode;
+use super::memory_unicode as unicode;
 pub type Token = Vec<u16>;
 fn contains(ranges: &[(u32, u32)], c: char) -> bool {
     ranges

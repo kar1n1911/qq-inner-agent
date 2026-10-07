@@ -1,4 +1,6 @@
 //! 外部话题：独立网络预算，短期共享来源缓存，群级滑动窗口限额。
+pub mod relay;
+
 use anyhow::{ensure, Result};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -118,7 +120,7 @@ fn tokens(s: &str) -> BTreeSet<String> {
             _ => c,
         })
         .collect();
-    crate::text::terms(&normalized)
+    crate::memory::text::terms(&normalized)
         .into_iter()
         .filter(|s| {
             ![

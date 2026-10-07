@@ -1,18 +1,24 @@
 //! P6a：按 SURVEY §2.2 的 48 步移植 Engine，不包含 main 运行时或素材发送。
 //! 同步段持有 core -> store 锁，等价 JS 两个 await 之间不可插入 ingest；网络等待不持锁。
+pub mod activity;
+pub mod decision;
+pub mod orientation;
+pub mod policy;
+pub mod sending;
+
 use crate::{
-    activity::{ActivityRhythm, ActivitySnapshot},
     config::{js_string, readiness, truthy, Config},
-    expression::{
+    engine::activity::{ActivityRhythm, ActivitySnapshot},
+    engine::orientation::{GroupOrientation, OrientationProvider, OrientationTransport},
+    engine::policy::{Allocation, Candidate, CandidateKind, Hint},
+    engine::sending::{forecast_result, sending_probability_with_affect, SendingSettings, Timing},
+    persona::expression::{
         decorate, decoration_choices, parse_expressions, personality_context, ExpressionMemory,
     },
-    media_select,
+    media::media_select,
     memory::{array, num, parse_memory_updates, text, LayeredMemory},
-    onebot::{OneBot, OneBotError, State as TransportState},
-    orientation::{GroupOrientation, OrientationProvider, OrientationTransport},
-    policy::{self, Allocation, Candidate, CandidateKind, Hint},
+    transport::{OneBot, OneBotError, State as TransportState},
     prompts,
-    sending::{forecast_result, sending_probability_with_affect, SendingSettings, Timing},
     store::{LayeredUpdate, ScopedOptions, Store},
 };
 use anyhow::{ensure, Result};
@@ -193,7 +199,7 @@ pub struct Engine {
     options: Options,
     media_config: media_select::Config,
     collector: Option<crate::media::Collector>,
-    topic_sources: Arc<Mutex<crate::topic_source::Sources>>,
+    topic_sources: Arc<Mutex<crate::topic::Sources>>,
     core: Mutex<Core>,
     aborted: watch::Sender<bool>,
     // 多个 stop/wait_idle 调用者不能各自拿走任务后提前报告空闲。
@@ -252,14 +258,14 @@ impl Engine {
         media_config.validate()?;
         config.agent.topic_source.validate()?;
         if config.agent.affect.enabled {
-            crate::affect::enable(
+            crate::persona::affect::enable(
                 &*store
                     .lock()
                     .map_err(|_| anyhow::anyhow!("store_poisoned"))?,
             )?;
         }
         if config.agent.emoji.learn_frequency || config.agent.emoji.face_only {
-            crate::humanize::enable(
+            crate::persona::humanize::enable(
                 &*store
                     .lock()
                     .map_err(|_| anyhow::anyhow!("store_poisoned"))?,
@@ -369,7 +375,7 @@ impl Engine {
         {
             let chat = format!("group:{}", js_string(&event["group_id"]));
             let previous = self.orientation.get(&chat)?.map(|r| r.epoch);
-            let ts = crate::onebot::js_number(&event["time"]);
+            let ts = crate::transport::js_number(&event["time"]);
             self.orientation
                 .joined(&chat, if ts == 0. || ts.is_nan() { now } else { ts })?;
             if previous != self.orientation.get(&chat)?.map(|r| r.epoch) {
@@ -405,7 +411,7 @@ impl Engine {
         };
         // 身份外显自动执行；回退命令仍严格限定主人本人私聊。
         if a.identity.enabled
-            && crate::owner_teaching::authorized(a, &m.chat, &m.sender)
+            && crate::persona::owner_teaching::authorized(a, &m.chat, &m.sender)
             && raw.trim() == "/还原"
         {
             let db = self.db()?;
@@ -422,7 +428,7 @@ impl Engine {
             return Ok(());
         }
         if a.owner_teaching.enabled
-            && crate::owner_teaching::authorized(a, &m.chat, &m.sender)
+            && crate::persona::owner_teaching::authorized(a, &m.chat, &m.sender)
             && ["/黑话", "/记住", "/忘记"]
                 .iter()
                 .any(|c| raw.trim().starts_with(c))
@@ -432,7 +438,7 @@ impl Engine {
                 return Ok(());
             }
             if let Some(reply) =
-                crate::owner_teaching::handle(&db, a, &m.chat, &m.sender, &raw, now)
+                crate::persona::owner_teaching::handle(&db, a, &m.chat, &m.sender, &raw, now)
             {
                 db.mark_handled(&m.chat, &m.id, true)?;
                 core.teaching_replies.push((m.chat, reply));
@@ -446,7 +452,7 @@ impl Engine {
             return Ok(());
         }
         if a.emoji.learn_frequency {
-            crate::humanize::capture(&*self.db()?, &m.chat, &m.id, event)?;
+            crate::persona::humanize::capture(&*self.db()?, &m.chat, &m.id, event)?;
         }
         if let Some(collector) = &self.collector {
             let report = collector.ingest(&*self.db()?, event, &self_id, a, now)?;
@@ -637,7 +643,7 @@ impl Engine {
                 core.identity_busy = true;
                 let engine = self.clone();
                 core.tasks.push(tokio::spawn(async move {
-                    let result = crate::identity::restore(
+                    let result = crate::persona::restore(
                         &engine.store,
                         &IdentityAdapter(&engine),
                         &engine.config.data_dir,
@@ -661,17 +667,17 @@ impl Engine {
                     for row in groups {
                         let chat = row["chat"].as_str().unwrap_or("");
                         if !policy::allowed(chat, a)
-                            || !crate::identity::enough(&db, chat, now, &a.identity)?
+                            || !crate::persona::enough(&db, chat, now, &a.identity)?
                         {
                             continue;
                         }
                         // 人格成长按群持久化，不受账号级外显冷却或其他群抢占影响。
-                        crate::identity::grow(&db, chat, now, &a.identity)?;
+                        crate::persona::grow(&db, chat, now, &a.identity)?;
                         if (a.identity.allow_nickname
                             || a.identity.allow_group_card
                             || a.identity.allow_avatar
                             || a.identity.allow_signature)
-                            && crate::identity::ready(&db, now, &a.identity)?
+                            && crate::persona::ready(&db, now, &a.identity)?
                         {
                             exterior.push(chat.to_owned());
                         }
@@ -684,7 +690,7 @@ impl Engine {
                         let mut result = Ok(());
                         for chat in exterior {
                             let nickname = engine.identity_nickname(&chat).await.unwrap_or(None);
-                            if let Err(e) = crate::identity::automate(
+                            if let Err(e) = crate::persona::automate(
                                 &engine.store,
                                 &IdentityAdapter(&engine),
                                 &engine.config.agent,
@@ -749,7 +755,7 @@ impl Engine {
             // 开关关闭整个新分支都不执行，不增加抽样、查询或改变 JS 状态。
             let trigger = if a.three_layer_decision {
                 let db = self.db()?;
-                let screened = crate::decision::screen(&db, chat, s, a, now)?;
+                let screened = crate::engine::decision::screen(&db, chat, s, a, now)?;
                 (self.options.log)(
                     "decision_screen",
                     json!({"chat":chat,"reply":screened.reply,"topic":screened.topic}),
@@ -853,12 +859,12 @@ impl Engine {
         }
         let persona = {
             let db = self.db()?;
-            if !crate::identity::enough(&db, chat, self.now(), &a.identity)?
-                || !crate::identity::ready(&db, self.now(), &a.identity)?
+            if !crate::persona::enough(&db, chat, self.now(), &a.identity)?
+                || !crate::persona::ready(&db, self.now(), &a.identity)?
             {
                 return Ok(None);
             }
-            crate::identity::persona(&db, chat, &a.persona.text, &a.identity)?
+            crate::persona::persona(&db, chat, &a.persona.text, &a.identity)?
         };
         let group_id = chat
             .strip_prefix("group:")
@@ -869,14 +875,14 @@ impl Engine {
                 json!({"group_id":group_id,"no_cache":true}),
             )
             .await?;
-        let samples = crate::identity::nickname_samples(&members, &self.transport.self_id())?;
+        let samples = crate::persona::nickname_samples(&members, &self.transport.self_id())?;
         let response = self
             .model(
-                crate::identity::NAME_PROMPT,
+                crate::persona::NAME_PROMPT,
                 json!({"persona":persona,"nicknameSamples":samples}),
             )
             .await?;
-        Ok(crate::identity::model_nickname(&response))
+        Ok(crate::persona::model_nickname(&response))
     }
     async fn model(&self, system: &str, payload: Value) -> Result<Value> {
         let mut signal = self.aborted.subscribe();
@@ -885,7 +891,7 @@ impl Engine {
         tokio::select! { biased;
             _ = signal.changed() => anyhow::bail!("aborted"),
             result = async {
-                if system==crate::identity::NAME_PROMPT {
+                if system==crate::persona::NAME_PROMPT {
                     self.provider.text(system,payload).await.map(Value::String)
                 } else {
                     self.provider.json(system,payload).await
@@ -989,7 +995,8 @@ impl Engine {
                 if state.version != version {
                     return Ok(());
                 }
-                let screened = crate::decision::screen(&*self.db()?, chat, state, a, self.now())?;
+                let screened =
+                    crate::engine::decision::screen(&*self.db()?, chat, state, a, self.now())?;
                 if (trigger == "topic" && screened.topic.is_some())
                     || (trigger == "message" && screened.reply.is_some())
                 {
@@ -1070,7 +1077,7 @@ impl Engine {
                 t.id = format!("topic:{version}:{now}");
             }
             t.counts = db.counts(chat, now)?;
-            let angry_burst = crate::affect::behavior(&db, &a.affect, chat, &t.last, now)?.burst;
+            let angry_burst = crate::persona::affect::behavior(&db, &a.affect, chat, &t.last, now)?.burst;
             if !angry_burst
                 && (num(&t.counts, "total") >= a.max_messages_per_hour
                     || (t.hint != Hint::SelfChat
@@ -1094,7 +1101,7 @@ impl Engine {
                 .collect::<Vec<_>>()
                 .join(" ");
             // 17–18：复用 memory/ranking/expression/store 的上下文实现。
-            let mut payload = json!({"personality":personality_context(a,|| (self.options.expression_random)()),"persona":crate::identity::persona(&db, chat, &a.persona.text, &a.identity)?,"name":a.name.text,"trigger":trigger,"addressedHint":t.hint,"groupOrientation":orientation_profile,
+            let mut payload = json!({"personality":personality_context(a,|| (self.options.expression_random)()),"persona":crate::persona::persona(&db, chat, &a.persona.text, &a.identity)?,"name":a.name.text,"trigger":trigger,"addressedHint":t.hint,"groupOrientation":orientation_profile,
                 "history":t.history.iter().map(|m|json!({"id":m["id"],"sender":m["sender"],"self":truthy(&m["self"]),"timestamp":m["ts"],"speaker":if truthy(&m["self"]) {a.name.text.as_str()} else {text(m,"name")},"text":m["text"]})).collect::<Vec<_>>(),
                 "retainedIdeas":self.reservoir(&db,&t)?,"priorExpectation":db.expectation(chat,now)?});
             self.context(&db, &t, &mut payload)?;
@@ -1123,7 +1130,7 @@ impl Engine {
                     .filter(|m| !truthy(&m["self"]))
                     .map(|m| text(m, "text").to_owned())
                     .collect::<Vec<_>>();
-                let interests = crate::topic_source::interests(&traits, &messages);
+                let interests = crate::topic::interests(&traits, &messages);
                 let cfg = a.topic_source.clone();
                 let sources = self.topic_sources.clone();
                 let group = chat.to_owned();
@@ -1133,7 +1140,7 @@ impl Engine {
                         &group,
                         now,
                         &interests,
-                        crate::topic_source::fetch,
+                        crate::topic::fetch,
                     )
                 })
                 .await?;
@@ -1175,7 +1182,7 @@ impl Engine {
         }
         // 19–20：形成候选；先校验再检查过期，保持 JS 错误/副作用顺序。
         if a.affect.enabled {
-            t.payload["affectInstructions"] = json!(crate::affect::CONTRACT);
+            t.payload["affectInstructions"] = json!(crate::persona::affect::CONTRACT);
         }
         let mut formation_system = prompts::compose_prompt(prompts::FORMATION, &[]);
         if t.payload.get("externalTopics").is_some() {
@@ -1183,14 +1190,14 @@ impl Engine {
         }
         if a.memory_recall {
             formation_system.push('\n');
-            formation_system.push_str(crate::recall::CONTRACT);
+            formation_system.push_str(crate::persona::recall::CONTRACT);
             formation_system.push('\n');
-            formation_system.push_str(crate::recall::RULE);
+            formation_system.push_str(crate::persona::recall::RULE);
         }
         let mut formed = self.model(&formation_system, t.payload.clone()).await?;
         // 每 cycle 一个预算，复查结果中的 recall 不再执行，防止无限回查。
         if a.memory_recall {
-            let request: crate::recall::Request = if formed["recall"].is_null() {
+            let request: crate::persona::recall::Request = if formed["recall"].is_null() {
                 Default::default()
             } else {
                 serde_json::from_value(formed["recall"].clone())?
@@ -1202,7 +1209,7 @@ impl Engine {
                     return Ok(());
                 }
                 let evidence =
-                    crate::recall::Budget::default().retrieve(&db, chat, &request, 20, 4000)?;
+                    crate::persona::recall::Budget::default().retrieve(&db, chat, &request, 20, 4000)?;
                 self.record_decision(
                     &db,
                     chat,
@@ -1231,9 +1238,9 @@ impl Engine {
                 return Ok(());
             }
             if a.affect.enabled {
-                crate::affect::apply(&db, chat, &t.last, &formed["affect"], now)?;
+                crate::persona::affect::apply(&db, chat, &t.last, &formed["affect"], now)?;
             }
-            crate::affect::behavior(&db, &a.affect, chat, &t.last, now)?
+            crate::persona::affect::behavior(&db, &a.affect, chat, &t.last, now)?
         };
         // Review outside the store/core locks and transaction. Both sides of the await
         // check turn freshness; a reset/new message cannot commit an obsolete review.
@@ -1525,7 +1532,7 @@ impl Engine {
         let length_target = behavior.disposition.map_or(length_target, |d| d.length());
         let face_only_allowed = a.emoji.face_only
             && length_target != "long"
-            && crate::humanize::face_only_allowed(
+            && crate::persona::humanize::face_only_allowed(
                 &*self.db()?,
                 chat,
                 t.hint,
@@ -1534,7 +1541,7 @@ impl Engine {
                 self.now(),
                 a.emoji.cooldown_seconds,
             )?;
-        let mut payload = json!({"lengthTarget":length_target,"decorations":decorations,"persona":crate::identity::persona(&*self.db()?, &t.chat, &a.persona.text, &a.identity)?,"name":a.name.text,"selectedIdea":selected.candidate.text,"responsePlan":prediction,"assertiveTone":a.proactive_tone,"maxCharacters":a.max_output_chars});
+        let mut payload = json!({"lengthTarget":length_target,"decorations":decorations,"persona":crate::persona::persona(&*self.db()?, &t.chat, &a.persona.text, &a.identity)?,"name":a.name.text,"selectedIdea":selected.candidate.text,"responsePlan":prediction,"assertiveTone":a.proactive_tone,"maxCharacters":a.max_output_chars});
         for key in [
             "personality",
             "expressions",
@@ -1552,12 +1559,12 @@ impl Engine {
         }
         // 门控运行时片段进入 user JSON；绝不修改生成产物 prompts.rs 或它的 parity 断言。
         if a.emoji.face_only {
-            payload["runtimeInstructions"] = json!(crate::humanize::FACE_ONLY_INSTRUCTIONS);
+            payload["runtimeInstructions"] = json!(crate::persona::humanize::FACE_ONLY_INSTRUCTIONS);
             payload["faceOnlyAllowed"] = json!(face_only_allowed);
         }
         if a.multi_bubble {
             payload["multiBubble"] = json!(true);
-            payload["bubbleInstructions"] = json!(crate::humanize::MULTI_BUBBLE_INSTRUCTIONS);
+            payload["bubbleInstructions"] = json!(crate::persona::humanize::MULTI_BUBBLE_INSTRUCTIONS);
         }
         let mut system =
             prompts::articulation_for(&a.reply_language).map_err(anyhow::Error::msg)?;
@@ -1567,7 +1574,7 @@ impl Engine {
         }
         if a.memory_recall {
             system.push('\n');
-            system.push_str(crate::recall::RULE);
+            system.push_str(crate::persona::recall::RULE);
         }
         if a.backstory.enabled {
             let core = self.core();
@@ -1577,13 +1584,13 @@ impl Engine {
             }
             // 仅直接回应当前人类消息时允许制造；主动话题只召回。
             let stories = if t.trigger != "topic" && t.hint != Hint::Other {
-                crate::backstory::prepare(&db, chat, text(&t.last, "text"), self.now())?
+                crate::persona::backstory::prepare(&db, chat, text(&t.last, "text"), self.now())?
             } else {
-                crate::backstory::recall(&db, chat, self.now(), 8)?
+                crate::persona::backstory::recall(&db, chat, self.now(), 8)?
             };
             payload["backstories"] = json!(stories);
             system.push('\n');
-            system.push_str(crate::backstory::RULE);
+            system.push_str(crate::persona::backstory::RULE);
         }
         let response = match self.model(&system, payload).await {
             Ok(value) => value,
@@ -1601,7 +1608,7 @@ impl Engine {
             let lower = raw.to_ascii_lowercase();
             let face_only = policy::js_trim(raw).is_empty();
             let decorated = decorate(&response, &decorations, a.max_output_chars as usize);
-            if (a.affect.enabled && !crate::affect::content_allowed(raw))
+            if (a.affect.enabled && !crate::persona::affect::content_allowed(raw))
                 || !response["text"].is_string()
                 || (face_only
                     && !(face_only_allowed
@@ -1659,7 +1666,7 @@ impl Engine {
             }
             // 44–45：先落库再发送；崩溃/超时留下 pending/uncertain，绝不重放。
             if behavior.burst {
-                crate::affect::reserve_burst(&db, chat, text(&t.last, "id"))?;
+                crate::persona::affect::reserve_burst(&db, chat, text(&t.last, "id"))?;
             }
             let delivery_id = db.delivery(chat, proactive, self.now())?;
             if a.emoji.face_only && face_only {
