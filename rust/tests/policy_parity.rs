@@ -4,7 +4,7 @@
 //! 两者数据库版本不同。因此测试不只比对 `quiet()` 的布尔结果，还直接逐点比对
 //! "本地分钟数"，避免布尔值把偏差掩盖掉。期望值来自已捕获的 JSON 固化金标准，缺失即失败。
 use qq_inner_core::config::{load_with_env, Config};
-use qq_inner_core::policy::{
+use qq_inner_core::engine::policy::{
     active_at, allowed, local_minutes_of_day, pick_length_target, quiet, repeated, Allocation,
     Candidate, CandidateKind,
 };
@@ -294,41 +294,57 @@ fn selection_honours_thresholds_and_allocation() {
 
     // 被点名时一定选最高分，不看阈值。
     let picked =
-        qq_inner_core::policy::select(&rated, Allocation::SelfChat, &agent, 0.0, || 0.0).unwrap();
+        qq_inner_core::engine::policy::select(&rated, Allocation::SelfChat, &agent, 0.0, || 0.0)
+            .unwrap();
     assert_eq!(picked.candidate.id, "a");
 
     // 开放轮次用 threshold。
     let picked =
-        qq_inner_core::policy::select(&rated, Allocation::Open, &agent, 0.0, || 1.0).unwrap();
+        qq_inner_core::engine::policy::select(&rated, Allocation::Open, &agent, 0.0, || 1.0)
+            .unwrap();
     assert_eq!(picked.candidate.id, "a");
 
     // 别人被点名时用更高的 interruptThreshold：a 仍达标。
     let picked =
-        qq_inner_core::policy::select(&rated, Allocation::Other, &agent, 0.0, || 1.0).unwrap();
+        qq_inner_core::engine::policy::select(&rated, Allocation::Other, &agent, 0.0, || 1.0)
+            .unwrap();
     assert_eq!(picked.candidate.id, "a");
 
     // 都不达标且不触发 system1 时应返回 None。
     let weak = vec![candidate("w", CandidateKind::System2, 2.0, 3.0, 3.0)];
-    assert!(qq_inner_core::policy::select(&weak, Allocation::Open, &agent, 0.0, || 1.0).is_none());
+    assert!(
+        qq_inner_core::engine::policy::select(&weak, Allocation::Open, &agent, 0.0, || 1.0)
+            .is_none()
+    );
 
     // 但 system1 概率命中时可以退化为 system1 候选。默认概率是 0，因此这里显式调高。
     let system1_agent =
         config_with(json!({ "agent": { "proactive": true, "system1Probability": 1 } })).agent;
     let system1 = vec![candidate("s", CandidateKind::System1, 1.0, 3.0, 3.0)];
-    let picked =
-        qq_inner_core::policy::select(&system1, Allocation::Open, &system1_agent, 0.0, || 0.0)
-            .unwrap();
+    let picked = qq_inner_core::engine::policy::select(
+        &system1,
+        Allocation::Open,
+        &system1_agent,
+        0.0,
+        || 0.0,
+    )
+    .unwrap();
     assert_eq!(picked.candidate.id, "s");
 
     // 非主动模式下，除了被点名都返回 None。
     let passive = config_with(json!({ "agent": { "proactive": false } })).agent;
     assert!(
-        qq_inner_core::policy::select(&rated, Allocation::Open, &passive, 0.0, || 0.0).is_none()
+        qq_inner_core::engine::policy::select(&rated, Allocation::Open, &passive, 0.0, || 0.0)
+            .is_none()
     );
-    assert!(
-        qq_inner_core::policy::select(&rated, Allocation::SelfChat, &passive, 0.0, || 0.0)
-            .is_some()
-    );
+    assert!(qq_inner_core::engine::policy::select(
+        &rated,
+        Allocation::SelfChat,
+        &passive,
+        0.0,
+        || 0.0
+    )
+    .is_some());
 }
 
 #[test]
@@ -336,9 +352,11 @@ fn turns_silent_raises_the_score_but_is_capped() {
     let agent = config_with(json!({ "agent": { "proactive": true } })).agent;
     let rated = vec![candidate("a", CandidateKind::System2, 4.0, 5.0, 5.0)];
     let none =
-        qq_inner_core::policy::select(&rated, Allocation::SelfChat, &agent, 0.0, || 0.0).unwrap();
+        qq_inner_core::engine::policy::select(&rated, Allocation::SelfChat, &agent, 0.0, || 0.0)
+            .unwrap();
     let many =
-        qq_inner_core::policy::select(&rated, Allocation::SelfChat, &agent, 500.0, || 0.0).unwrap();
+        qq_inner_core::engine::policy::select(&rated, Allocation::SelfChat, &agent, 500.0, || 0.0)
+            .unwrap();
     assert!(many.adjusted > none.adjusted);
     // 上限是 motivation × 1.2，再被 5.0 截断。
     assert!(many.adjusted <= 5.0);

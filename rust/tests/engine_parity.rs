@@ -6,9 +6,9 @@ use anyhow::Result;
 use futures_util::future::BoxFuture;
 use qq_inner_core::{
     config::{defaults, merge, Config},
+    engine::orientation::{OrientationProvider, OrientationTransport},
     engine::{Engine, EngineTransport, Options},
     onebot::{OneBotError, State},
-    orientation::{OrientationProvider, OrientationTransport},
     store::Store,
 };
 use serde_json::{json, Value};
@@ -1605,9 +1605,14 @@ async fn independent_topic_gates_and_probability() {
                 _ => {}
             }
             let state = e.chats()[0].1.clone();
-            let result =
-                qq_inner_core::decision::screen(&db, "group:10", &state, &e.config.agent, h.now())
-                    .unwrap();
+            let result = qq_inner_core::engine::decision::screen(
+                &db,
+                "group:10",
+                &state,
+                &e.config.agent,
+                h.now(),
+            )
+            .unwrap();
             assert_eq!(result.topic, Some(reason));
         }
         e.tick().unwrap();
@@ -1621,24 +1626,35 @@ async fn independent_topic_gates_and_probability() {
     {
         let db = h.store.lock().unwrap();
         let mut state = e.chats()[0].1.clone();
-        let result =
-            qq_inner_core::decision::screen(&db, "group:10", &state, &e.config.agent, h.now())
-                .unwrap();
+        let result = qq_inner_core::engine::decision::screen(
+            &db,
+            "group:10",
+            &state,
+            &e.config.agent,
+            h.now(),
+        )
+        .unwrap();
         assert_eq!(result.reply, Some("no_new_message"));
         assert_eq!(result.topic, None);
         assert!((0.01..0.3).contains(&result.probability));
         state.pending = true; // ②的资格不能由 pending 取反得到。
         assert_eq!(
-            qq_inner_core::decision::screen(&db, "group:10", &state, &e.config.agent, h.now())
-                .unwrap()
-                .topic,
+            qq_inner_core::engine::decision::screen(
+                &db,
+                "group:10",
+                &state,
+                &e.config.agent,
+                h.now()
+            )
+            .unwrap()
+            .topic,
             None
         );
         let mut g =
             qq_inner_core::media_select::group_activity(&db, "group:10", h.now(), 300.).unwrap();
-        let p = qq_inner_core::decision::topic_probability(&g, 1000., 300.);
+        let p = qq_inner_core::engine::decision::topic_probability(&g, 1000., 300.);
         g.since_human *= 2.;
-        assert!(qq_inner_core::decision::topic_probability(&g, 2000., 300.) >= p);
+        assert!(qq_inner_core::engine::decision::topic_probability(&g, 2000., 300.) >= p);
         // 用均匀抽样网格检查触发比例，避免随机测试抖动；启发式只断言区间。
         let accepted = (0..1000).filter(|i| (*i as f64 / 1000.) < p).count();
         assert!((10..300).contains(&accepted));

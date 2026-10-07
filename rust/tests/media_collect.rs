@@ -2,8 +2,8 @@
 use qq_inner_core::{
     config::{defaults, merge, Agent},
     conversation::{self, Relation, Stage},
+    engine::policy::{Hint, Message},
     media::{Collector, Config},
-    policy::{Hint, Message},
     store::Store,
 };
 use serde_json::{json, Value};

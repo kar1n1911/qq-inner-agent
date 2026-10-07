@@ -2,8 +2,8 @@
 use crate::{
     config::{js_string, Agent},
     conversation,
+    engine::policy,
     media_source::{self, Evidence, Override},
-    policy,
     settings::sha256,
     store::Store,
 };

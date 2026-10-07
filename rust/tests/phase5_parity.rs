@@ -4,12 +4,12 @@
 mod golden;
 use futures_util::future::BoxFuture;
 use qq_inner_core::{
-    activity::ActivityRhythm,
     config::{defaults, merge, Agent},
-    orientation::{
+    engine::activity::ActivityRhythm,
+    engine::orientation::{
         observation_satisfied, GroupOrientation, OrientationProvider, OrientationTransport,
     },
-    policy::{active_at, normalize},
+    engine::policy::{active_at, normalize},
     store::Store,
 };
 use serde_json::{json, Value};

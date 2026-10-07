@@ -2,10 +2,10 @@ use anyhow::Result;
 use futures_util::future::BoxFuture;
 use qq_inner_core::{
     config::{defaults, merge, Config, Identity},
+    engine::orientation::{OrientationProvider, OrientationTransport},
     engine::{Engine, EngineTransport, Options},
     identity,
     onebot::{OneBotError, State},
-    orientation::{OrientationProvider, OrientationTransport},
     store::Store,
 };
 use rusqlite::params;

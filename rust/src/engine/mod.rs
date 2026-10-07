@@ -1,18 +1,24 @@
 //! P6a：按 SURVEY §2.2 的 48 步移植 Engine，不包含 main 运行时或素材发送。
 //! 同步段持有 core -> store 锁，等价 JS 两个 await 之间不可插入 ingest；网络等待不持锁。
+pub mod activity;
+pub mod decision;
+pub mod orientation;
+pub mod policy;
+pub mod sending;
+
 use crate::{
-    activity::{ActivityRhythm, ActivitySnapshot},
     config::{js_string, readiness, truthy, Config},
+    engine::activity::{ActivityRhythm, ActivitySnapshot},
+    engine::orientation::{GroupOrientation, OrientationProvider, OrientationTransport},
+    engine::policy::{Allocation, Candidate, CandidateKind, Hint},
+    engine::sending::{forecast_result, sending_probability_with_affect, SendingSettings, Timing},
     expression::{
         decorate, decoration_choices, parse_expressions, personality_context, ExpressionMemory,
     },
     media_select,
     memory::{array, num, parse_memory_updates, text, LayeredMemory},
     onebot::{OneBot, OneBotError, State as TransportState},
-    orientation::{GroupOrientation, OrientationProvider, OrientationTransport},
-    policy::{self, Allocation, Candidate, CandidateKind, Hint},
     prompts,
-    sending::{forecast_result, sending_probability_with_affect, SendingSettings, Timing},
     store::{LayeredUpdate, ScopedOptions, Store},
 };
 use anyhow::{ensure, Result};
@@ -749,7 +755,7 @@ impl Engine {
             // 开关关闭整个新分支都不执行，不增加抽样、查询或改变 JS 状态。
             let trigger = if a.three_layer_decision {
                 let db = self.db()?;
-                let screened = crate::decision::screen(&db, chat, s, a, now)?;
+                let screened = crate::engine::decision::screen(&db, chat, s, a, now)?;
                 (self.options.log)(
                     "decision_screen",
                     json!({"chat":chat,"reply":screened.reply,"topic":screened.topic}),
@@ -989,7 +995,8 @@ impl Engine {
                 if state.version != version {
                     return Ok(());
                 }
-                let screened = crate::decision::screen(&*self.db()?, chat, state, a, self.now())?;
+                let screened =
+                    crate::engine::decision::screen(&*self.db()?, chat, state, a, self.now())?;
                 if (trigger == "topic" && screened.topic.is_some())
                     || (trigger == "message" && screened.reply.is_some())
                 {

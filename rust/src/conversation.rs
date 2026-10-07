@@ -1,5 +1,5 @@
 //! 只记录结构判断，不把沉默转换成学习信号。
-use crate::{policy::Message, text::similarity};
+use crate::{engine::policy::Message, text::similarity};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

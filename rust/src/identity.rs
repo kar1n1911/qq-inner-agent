@@ -1,7 +1,7 @@
 //! 身份自治 B：自动外显、先备份后执行、主人私聊回退；人格成长只追加安全风格描述。
 use crate::{
     config::{Agent, Identity},
-    orientation::OrientationTransport,
+    engine::orientation::OrientationTransport,
     store::Store,
 };
 use anyhow::{ensure, Context, Result};

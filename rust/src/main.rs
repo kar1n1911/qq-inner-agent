@@ -142,8 +142,8 @@ async fn main() -> Result<()> {
 }
 
 use qq_inner_core::{
-    activity::ActivityRhythm,
     control::{Backend, Events, LiveRemote, Server},
+    engine::activity::ActivityRhythm,
     engine::{Clock, Engine, Logger, Options},
     expression::ExpressionMemory,
     memory::LayeredMemory,
@@ -301,7 +301,7 @@ impl Runtime {
                 if let Some(control) = &self.control {
                     control.observe(&event);
                 }
-                let event = qq_inner_core::policy::resolve_forwards(
+                let event = qq_inner_core::engine::policy::resolve_forwards(
                     &event,
                     &self.bot,
                     &self.config.agent,
