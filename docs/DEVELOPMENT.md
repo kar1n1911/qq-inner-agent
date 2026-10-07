@@ -140,6 +140,7 @@ agent "是谁、怎么说话"这一整条链。
 | --- | --- |
 | 控制套接字服务端(方法表 + 事件) | `control.rs` |
 | 主循环(1s tick / status / revision 监视 / 信号) | `main.rs` |
+| 完整配置 schema(`config-defaults` 子命令,dashboard 动态白名单用) | `main.rs` — `Command::ConfigDefaults`(`config::Config::from_value(&defaults())` round-trip) |
 | 主人私聊教学(/记住 /黑话 /忘记 /还原) | `owner_teaching.rs` |
 | 模块注册 | `lib.rs` |
 
@@ -154,10 +155,10 @@ Node 只承载仪表盘与 CLI(旧 agent 实现已归档到 `js-legacy` 分支):
 | `src/dashboard.mjs` | Web 控制台(读控制套接字 + 双读回退) |
 | `src/cli.mjs` | 命令行(`core-status` 等) |
 | `src/control.mjs` | 控制套接字客户端 |
-| `src/config.mjs` `src/settings.mjs` `src/provider.mjs` `src/onebot.mjs` `src/store.mjs` | 仪表盘/CLI 的运维依赖(配置读写、状态、直连 SQLite 的少量操作) |
+| `src/config.mjs` `src/settings.mjs` `src/provider.mjs` `src/onebot.mjs` `src/store.mjs` | 仪表盘/CLI 的运维依赖(配置读写、状态、直连 SQLite 的少量操作)。`settings.mjs` 的键白名单**动态取自 Rust 的 `config-defaults`**(回退到 `config.mjs` 的静态 defaults),加新配置键无需手改 JS |
 | `src/prompts.mjs` | 提示词源(生成 `rust/src/prompts.rs`) |
 
-前端静态资源:`web/`(`index.html` + `app.js` + `i18n.mjs` + 样式)。
+前端静态资源:`web/`(`index.html` + `app.js` + `i18n.mjs` + 样式)。`index.html` 含三个页面(Overview / Configuration / Activity / **Advanced**);Advanced 页放所有功能开关与细粒度参数。
 
 ---
 
