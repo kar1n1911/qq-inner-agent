@@ -1061,8 +1061,8 @@ async fn rest_tick_invalidates_version_and_orientation_epoch_is_independent() {
     let version = e.chats()[0].1.version;
     e.tick().unwrap();
     assert_eq!(e.chats()[0].1.version, version + 1);
-    assert!(!e.chats()[0].1.pending);
-    assert!(e.chats()[0].1.pause_done);
+    assert!(e.chats()[0].1.pending);
+    assert!(!e.chats()[0].1.pause_done);
     h.release.add_permits(1);
     e.wait_idle().await;
     assert!(h.rows("SELECT * FROM thoughts").is_empty());
@@ -1933,4 +1933,81 @@ async fn orientation_collects_outside_schedule_only_when_online_and_enabled() {
         assert_eq!(*h.sends.lock().unwrap(), 0);
         e.stop().await;
     }
+}
+
+#[tokio::test]
+async fn off_duty_ingest_records_batch_and_resumes_backlog_after_active_window() {
+    for three_layer in [false, true] {
+        let (e, h) = setup(&base(
+            "off_duty_backlog",
+            json!({
+                "threeLayerDecision":three_layer,
+                "schedule":{"enabled":true,"activeStart":"14:00","inactiveStart":"01:00","timezone":"UTC"}
+            }),
+            vec![],
+        ));
+        assert!(!e.available(h.now()).unwrap());
+        for i in 0..26 {
+            let event = h.event(&json!({
+                "id":format!("backlog{i}"),
+                "text":if i == 0 { "[CQ:at,qq=99]你好" } else { "继续聊园艺" }
+            }));
+            e.ingest(&event).unwrap();
+            e.ingest(&event).unwrap(); // 重复投递不增加 version 或入库数量。
+        }
+        let state = e.chats()[0].1.clone();
+        assert_eq!(state.version, 26);
+        assert!(state.pending);
+        assert!(!state.pause_done);
+        assert_eq!(state.hint, qq_inner_core::engine::policy::Hint::SelfChat);
+        assert_eq!(state.last_id, "backlog25");
+        assert_eq!(state.last_human, h.now());
+        assert_eq!(state.due, h.now());
+        assert_eq!(h.rows("SELECT * FROM messages WHERE self=0").len(), 26);
+        e.tick().unwrap();
+        e.wait_idle().await;
+        assert!(e.chats()[0].1.pending);
+        assert!(h.rows("SELECT * FROM calls").is_empty());
+        assert!(h.rows("SELECT * FROM deliveries").is_empty());
+        assert_eq!(*h.sends.lock().unwrap(), 0);
+
+        // 离岗两小时已超过活跃窗口，回岗后仍需处理积压且保留批内 self 优先。
+        *h.now.lock().unwrap() = 14. * 3600.;
+        assert!(e.available(h.now()).unwrap());
+        e.tick().unwrap();
+        e.wait_idle().await;
+        assert_eq!(*h.sends.lock().unwrap(), 1, "{:?}", h.trace.lock().unwrap());
+        assert!(!e.chats()[0].1.pending);
+        assert!(h.trace.lock().unwrap().iter().any(|row| {
+            row[0] == "model" && row[1] == "FORM" && row[2] == "self"
+                && row[4].as_array().unwrap().contains(&json!("backlog25"))
+        }));
+        e.tick().unwrap();
+        e.wait_idle().await;
+        assert_eq!(*h.sends.lock().unwrap(), 1);
+        e.stop().await;
+    }
+}
+
+#[tokio::test]
+async fn off_duty_ingest_advances_observation_and_memory() {
+    let (e, h) = setup(&base(
+        "off_duty_perception",
+        json!({
+            "learning":{"enabled":true},
+            "observation":{"enabled":true},
+            "schedule":{"enabled":true,"activeStart":"14:00","inactiveStart":"01:00","timezone":"UTC"}
+        }),
+        vec![],
+    ));
+    assert!(!e.available(h.now()).unwrap());
+    e.ingest(&h.event(&json!({}))).unwrap();
+    assert_eq!(e.orientation.get("group:10").unwrap().unwrap().message_count, 1);
+    assert!(!h.rows("SELECT * FROM memory_layers WHERE layer='short_term'").is_empty());
+    assert!(e.chats()[0].1.pending);
+    e.tick().unwrap();
+    e.wait_idle().await;
+    assert!(h.rows("SELECT * FROM calls").is_empty());
+    assert_eq!(*h.sends.lock().unwrap(), 0);
+    e.stop().await;
 }

@@ -388,9 +388,7 @@ impl Engine {
             }
             return Ok(());
         }
-        if !self.available(now)? {
-            return Ok(());
-        }
+        // 感知与值班解耦：离岗仍记录、观察和学习，是否发言由回复路径检查。
         let Some(m) = policy::normalize(event, &self_id, a, now) else {
             return Ok(());
         };
@@ -521,6 +519,9 @@ impl Engine {
         let a = &self.config.agent;
         {
             let mut core = self.core();
+            if !self.available(self.now())? {
+                return Ok(());
+            }
             if let Some(s) = core.get_mut(chat) {
                 s.last_think = self.now();
                 s.due = self.now() + 60.;
@@ -661,13 +662,12 @@ impl Engine {
         if !self.available(now)? {
             for (_, s) in &mut core.chats {
                 s.version += 1;
-                s.pending = false;
-                s.pause_done = true;
             }
+            // 离岗只使在途回复失效，保留待处理消息和 Hint，回岗后补看。
             return Ok(());
         }
         core.chats
-            .retain(|(_, s)| s.busy || now - s.last_human <= a.active_window_seconds);
+            .retain(|(_, s)| s.busy || s.pending || now - s.last_human <= a.active_window_seconds);
         let transport = self.transport.state();
         if !transport.connected || !transport.online || *self.aborted.borrow() {
             return Ok(());
@@ -753,9 +753,25 @@ impl Engine {
             if a.dry_run {
                 continue;
             }
-            let delivery = self.db()?.delivery(&chat, false, now)?;
             let engine = self.clone();
             core.tasks.push(tokio::spawn(async move {
+                // 任务首次 poll 可能已经离岗；确认消息也需守卫，离岗则留待回岗发送。
+                let admission = (|| -> Result<Option<String>> {
+                    let mut core = engine.core();
+                    if !engine.available(engine.now())? {
+                        core.teaching_replies.push((chat.clone(), reply.clone()));
+                        return Ok(None);
+                    }
+                    Ok(Some(engine.db()?.delivery(&chat, false, engine.now())?))
+                })();
+                let delivery = match admission {
+                    Ok(Some(delivery)) => delivery,
+                    Ok(None) => return,
+                    Err(e) => {
+                        engine.core().last_error = Some(e.to_string());
+                        return;
+                    }
+                };
                 let result = engine.transport.send(&chat, &reply, None).await;
                 let finish = engine.db().and_then(|db| match result {
                     Ok(sent) => db.finish_delivery(&delivery, "sent", sent.get("message_id")),
@@ -781,7 +797,10 @@ impl Engine {
             if running as f64 >= a.max_concurrent_chats {
                 break;
             }
-            if s.busy || now - s.last_human > a.active_window_seconds || now < s.due {
+            if s.busy
+                || (!s.pending && now - s.last_human > a.active_window_seconds)
+                || now < s.due
+            {
                 continue;
             }
             if now - s.last_think < a.min_think_interval_seconds && s.hint != Hint::SelfChat {
@@ -1021,7 +1040,7 @@ impl Engine {
         // 1–2：入口守卫；版本取自 tick 准入时的快照，等价 JS 首个 await 之前。
         {
             let core = self.core();
-            if core.get(chat).is_none() || !policy::allowed(chat, a) || !self.available(now)? {
+            if core.get(chat).is_none() || !policy::allowed(chat, a) || !self.available(self.now())? {
                 return Ok(());
             }
             // await 观察模型之前复核，防止 tick 准入后新消息/配额变化穿透初筛。
@@ -1658,7 +1677,9 @@ impl Engine {
                 anyhow::bail!("invalid_articulation");
             }
             if self.obsolete(&core, &db, &t)?
-                || self.now() - core.get(chat).unwrap().last_human > a.active_window_seconds
+                // 补看从本轮开始计时，仍保留慢回复超时保护。
+                || self.now() - core.get(chat).unwrap().last_human.max(t.now)
+                    > a.active_window_seconds
                 || !self.snapshot(&db, self.now())?.active
             {
                 db.assessment_status(chat, &t.id, "cancelled")?;
@@ -1749,6 +1770,16 @@ impl Engine {
                 .await;
             }
             // face 只挂在最后一条（整体回复的结尾）。
+            // 气泡间有异步打字延迟，每条发出前重新检查值班状态。
+            if !self.available(self.now())? {
+                if sent.is_none() {
+                    sent = Some(Err(OneBotError {
+                        code: "agent_unavailable".into(),
+                        uncertain: false,
+                    }));
+                }
+                break;
+            }
             let bubble_face = if i == n - 1 { face } else { None };
             sent = Some(self.transport.send(chat, bubble, bubble_face).await);
         }
