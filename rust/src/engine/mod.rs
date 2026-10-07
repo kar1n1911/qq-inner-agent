@@ -624,23 +624,14 @@ impl Engine {
         let mut core = self.core();
         let now = self.now();
         let a = &self.config.agent;
-        if !self.available(now)? {
-            for (_, s) in &mut core.chats {
-                s.version += 1;
-                s.pending = false;
-                s.pause_done = true;
-            }
-            return Ok(());
-        }
-        core.chats
-            .retain(|(_, s)| s.busy || now - s.last_human <= a.active_window_seconds);
-        let transport = self.transport.state();
-        if !transport.connected || !transport.online || *self.aborted.borrow() {
-            return Ok(());
-        }
-        core.tasks.retain(|t| !t.is_finished());
         // 入群/定时立即采集，不再等首次发言；安静群也会在下一轮 tick 获取资料。
-        if a.observation.enabled {
+        // 被动数据采集不受作息影响，只要求连接在线且引擎未停止。
+        let transport = self.transport.state();
+        if a.observation.enabled
+            && transport.connected
+            && transport.online
+            && !*self.aborted.borrow()
+        {
             let pending = self.db()?.rows(
                 "SELECT chat,epoch FROM group_orientation WHERE chat LIKE 'group:%' AND status<>'ready' AND collected=0",
                 [],
@@ -667,6 +658,21 @@ impl Engine {
                 }));
             }
         }
+        if !self.available(now)? {
+            for (_, s) in &mut core.chats {
+                s.version += 1;
+                s.pending = false;
+                s.pause_done = true;
+            }
+            return Ok(());
+        }
+        core.chats
+            .retain(|(_, s)| s.busy || now - s.last_human <= a.active_window_seconds);
+        let transport = self.transport.state();
+        if !transport.connected || !transport.online || *self.aborted.borrow() {
+            return Ok(());
+        }
+        core.tasks.retain(|t| !t.is_finished());
         if a.identity.enabled && !a.dry_run && !core.identity_busy {
             if let Some(chat) = core.identity_commands.pop() {
                 core.identity_busy = true;

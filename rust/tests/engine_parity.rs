@@ -1887,3 +1887,50 @@ async fn disabled_orientation_never_collects_existing_rows() {
     assert_eq!(e.orientation.get("group:10").unwrap().unwrap().collected, 0);
     e.stop().await;
 }
+
+#[tokio::test]
+async fn orientation_collects_outside_schedule_only_when_online_and_enabled() {
+    for (enabled, connected, online) in [
+        (true, true, true),
+        (false, true, true),
+        (true, false, true),
+        (true, true, false),
+    ] {
+        let (e, h) = setup(&base(
+            "orientation_outside_schedule",
+            json!({
+                "allowedGroups":["10"],
+                "observation":{"enabled":enabled},
+                "schedule":{
+                    "enabled":true,
+                    "activeStart":"14:00",
+                    "inactiveStart":"01:00",
+                    "timezone":"UTC"
+                }
+            }),
+            vec![],
+        ));
+        // 固定时钟为 UTC 12:00，位于 14:00–01:00 作息表外。
+        assert!(!e.available(h.now()).unwrap());
+        e.orientation.ensure("group:10").unwrap();
+        {
+            let mut transport = h.transport.lock().unwrap();
+            transport.connected = connected;
+            transport.online = online;
+        }
+        e.tick().unwrap();
+        e.wait_idle().await;
+        let expected = enabled && connected && online;
+        assert_eq!(
+            h.orientation_reads.lock().unwrap().len(),
+            if expected { 3 } else { 0 }
+        );
+        assert_eq!(
+            e.orientation.get("group:10").unwrap().unwrap().collected,
+            i64::from(expected)
+        );
+        assert!(h.payloads.lock().unwrap().is_empty());
+        assert_eq!(*h.sends.lock().unwrap(), 0);
+        e.stop().await;
+    }
+}
