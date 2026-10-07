@@ -9,12 +9,16 @@ unit.parent.mkdir(parents=True, exist_ok=True)
 def quote(s): return '"' + str(s).replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%') + '"'
 unit.write_text(f'''[Unit]
 Description=QQ Inner Thoughts conversational agent
-After=network.target
+After=network.target napcat.service
+Wants=napcat.service
 StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 WorkingDirectory={str(root).replace('%', '%%')}
+# 等 NapCat 的 OneBot WebSocket(默认 3001)就绪再启动,避免开机时 agent 先起、
+# 连接被拒造成一串 websocket_error 重试;脚本最多等 120s,超时也照常启动。
+ExecStartPre={quote(root / 'scripts/wait-onebot.sh')}
 ExecStart={quote(root / 'agent')} start
 Restart=always
 RestartSec=5
