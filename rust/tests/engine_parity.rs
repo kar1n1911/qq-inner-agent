@@ -20,6 +20,7 @@ struct Harness {
     model: Mutex<Value>,
     trace: Mutex<Vec<Value>>,
     payloads: Mutex<Vec<Value>>,
+    model_inputs: Mutex<Vec<(String, Value)>>,
     store: Arc<Mutex<Store>>,
     engine: Mutex<Weak<Engine>>,
     transport: Mutex<State>,
@@ -131,6 +132,7 @@ impl OrientationProvider for Harness {
                 .split_whitespace()
                 .next()
                 .unwrap();
+            self.model_inputs.lock().unwrap().push((stage.into(), payload.clone()));
             if matches!(stage, "FORM" | "ARTICULATE") {
                 if let Some(expected) = self.model.lock().unwrap()["expectPersona"].as_str() {
                     assert!(payload["persona"].as_str().unwrap().contains(expected));
@@ -238,6 +240,7 @@ fn setup(case: &Value) -> (Arc<Engine>, Arc<Harness>) {
         model: Mutex::new(json!({})),
         trace: Mutex::new(vec![]),
         payloads: Mutex::new(vec![]),
+        model_inputs: Mutex::new(vec![]),
         store: store.clone(),
         engine: Mutex::new(Weak::new()),
         transport: Mutex::new(State {
@@ -2001,13 +2004,120 @@ async fn off_duty_ingest_advances_observation_and_memory() {
         vec![],
     ));
     assert!(!e.available(h.now()).unwrap());
+    h.store.lock().unwrap().expect("group:10", h.now(), 60., &json!({})).unwrap();
     e.ingest(&h.event(&json!({}))).unwrap();
     assert_eq!(e.orientation.get("group:10").unwrap().unwrap().message_count, 1);
     assert!(!h.rows("SELECT * FROM memory_layers WHERE layer='short_term'").is_empty());
+    assert_eq!(
+        h.store.lock().unwrap().expectation("group:10", h.now()).unwrap().unwrap()["observation"]["event"],
+        "human_message"
+    );
     assert!(e.chats()[0].1.pending);
     e.tick().unwrap();
     e.wait_idle().await;
     assert!(h.rows("SELECT * FROM calls").is_empty());
     assert_eq!(*h.sends.lock().unwrap(), 0);
     e.stop().await;
+}
+
+#[tokio::test]
+async fn replies_recheck_duty_before_first_task_poll_and_resume() {
+    for teaching in [false, true] {
+        let (e, h) = setup(&base(
+            "duty_changed_before_poll",
+            json!({
+                "ownerTeaching":{"enabled":teaching,"ownerUin":"20"},
+                "schedule":{"enabled":true,"activeStart":"14:00","inactiveStart":"01:00","timezone":"UTC"}
+            }),
+            vec![],
+        ));
+        *h.now.lock().unwrap() = 23. * 3600.;
+        let event = if teaching {
+            json!({"post_type":"message","message_type":"private","self_id":99,"user_id":20,"message_id":"command","time":h.now(),"message":"/记住 喜欢Rust"})
+        } else {
+            h.event(&json!({}))
+        };
+        e.ingest(&event).unwrap();
+        e.tick().unwrap();
+        // tick 已准入，但异步任务尚未 poll 时进入休息时间。
+        *h.now.lock().unwrap() = 26. * 3600.;
+        assert!(!e.available(h.now()).unwrap());
+        e.wait_idle().await;
+        assert!(h.rows("SELECT * FROM calls").is_empty());
+        assert!(h.rows("SELECT * FROM deliveries").is_empty());
+        assert_eq!(*h.sends.lock().unwrap(), 0);
+        *h.now.lock().unwrap() = 38. * 3600.;
+        e.tick().unwrap();
+        e.wait_idle().await;
+        assert_eq!(*h.sends.lock().unwrap(), 1);
+        e.stop().await;
+    }
+}
+
+#[tokio::test]
+async fn backlog_digest_reaches_cycle_stages_and_can_withhold() {
+    for empty in [false, true] {
+        let (e, h) = setup(&base(
+            "digest_resume",
+            json!({
+                "schedule":{"enabled":true,"activeStart":"14:00","inactiveStart":"01:00","timezone":"UTC"},
+                "observation":{"backlogDigest":{"enabled":true,"threshold":80,"headCount":2,"tailCount":3,"sampleMax":20,"samplePercent":10}}
+            }),
+            vec![],
+        ));
+        *h.model.lock().unwrap() = json!({"empty":empty});
+        for i in 0..300 {
+            e.ingest(&h.event(&json!({"id":format!("digest{i}")}))).unwrap();
+        }
+        e.tick().unwrap();
+        e.wait_idle().await;
+        assert!(h.model_inputs.lock().unwrap().is_empty());
+        *h.now.lock().unwrap() = 14. * 3600.;
+        e.tick().unwrap();
+        e.wait_idle().await;
+        assert!(e.last_error().is_none(), "{:?}", e.last_error());
+        assert_eq!(*h.sends.lock().unwrap(), usize::from(!empty));
+        assert!(!e.chats()[0].1.pending);
+        let inputs = h.model_inputs.lock().unwrap().clone();
+        assert_eq!(inputs.len(), if empty { 1 } else { 4 });
+        for (stage, payload) in inputs {
+            let digest = &payload["backlogDigest"];
+            assert_eq!(digest["totalMessages"], 300, "{stage}");
+            assert_eq!(digest["sampleIds"].as_array().unwrap().len(), 20);
+            assert_eq!(digest["omittedMessages"], 275);
+            let history = payload["history"].as_array().unwrap();
+            assert_eq!(history.len(), 25, "{stage}");
+            assert_eq!(history.first().unwrap()["id"], "digest0");
+            assert_eq!(history.last().unwrap()["id"], "digest299");
+            assert!(history.iter().all(|m| m["text"].is_string()
+                && m["timestamp"].is_number() && m["self"] == false));
+        }
+        e.stop().await;
+    }
+}
+
+#[tokio::test]
+async fn backlog_digest_disabled_or_at_threshold_preserves_prompt_contract() {
+    let mut payloads = Vec::new();
+    for (enabled, threshold) in [(false, 1), (true, 30)] {
+        let (e, h) = setup(&base(
+            "digest_compatibility",
+            json!({"observation":{"backlogDigest":{"enabled":enabled,"threshold":threshold}}}),
+            vec![],
+        ));
+        *h.model.lock().unwrap() = json!({"empty":true});
+        for i in 0..30 {
+            e.ingest(&h.event(&json!({"id":format!("digest{i}")}))).unwrap();
+        }
+        e.tick().unwrap();
+        e.wait_idle().await;
+        let inputs = h.model_inputs.lock().unwrap().clone();
+        assert_eq!(inputs.len(), 1);
+        let payload = inputs[0].1.clone();
+        assert!(payload.get("backlogDigest").is_none());
+        assert_eq!(payload["history"].as_array().unwrap().len(), 24);
+        payloads.push(payload);
+        e.stop().await;
+    }
+    assert_eq!(payloads[0], payloads[1]);
 }

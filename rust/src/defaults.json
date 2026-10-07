@@ -67,7 +67,15 @@
       "minSeconds": 300,
       "minMessages": 20,
       "thresholdMode": "both",
-      "historyLimit": 30
+      "historyLimit": 30,
+      "backlogDigest": {
+        "enabled": false,
+        "threshold": 80,
+        "headCount": 4,
+        "tailCount": 8,
+        "sampleMax": 20,
+        "samplePercent": 10
+      }
     },
     "memory": {
       "recallChars": 2400,

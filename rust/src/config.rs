@@ -360,6 +360,11 @@ pub fn validate(c: &Value) -> std::result::Result<(), ConfigError> {
         )?;
     }
     let o = &a["observation"];
+    if let Some(digest) = o.get("backlogDigest") {
+        let settings: crate::engine::backlog::Settings = serde_json::from_value(digest.clone())
+            .map_err(|_| ConfigError("Invalid observation.backlogDigest settings".into()))?;
+        settings.validate().map_err(|e| ConfigError(e.to_string()))?;
+    }
     check(
         o["enabled"].is_boolean() && [json!("both"), json!("either")].contains(&o["thresholdMode"]),
         "Invalid observation settings",
@@ -727,6 +732,9 @@ pub struct Observation {
     pub threshold_mode: String,
     /// 配置键 `agent.observation.historyLimit`。
     pub history_limit: f64,
+    /// 独立于入群观察开关：仅在大量积压时压缩本轮模型上下文。
+    #[serde(default)]
+    pub backlog_digest: crate::engine::backlog::Settings,
 }
 
 fn default_partial_evidence() -> usize {

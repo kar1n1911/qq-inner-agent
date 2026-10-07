@@ -41,10 +41,16 @@ fn expected(f: &Fixture, env: &[(&str, &str)], mode: &str) -> Value {
     serde_json::from_str(&value.to_string().replace("<ROOT>", &f.0.to_string_lossy())).unwrap()
 }
 
+// Rust 新增的可选扩展单独测试，旧 JS 金标准继续逐字段覆盖原有协议。
+fn legacy_config(mut value: Value) -> Value {
+    value["agent"]["observation"].as_object_mut().unwrap().remove("backlogDigest");
+    value
+}
+
 #[test]
 fn load_and_revision_golden() {
     let f = Fixture::new();
-    assert_eq!(defaults(), expected(&f, &[], "defaults"));
+    assert_eq!(legacy_config(defaults()), expected(&f, &[], "defaults"));
     let mut fixtures = vec![
         json!({}),
         json!({"provider":{"model":"测试模型","baseUrl":"https://api.deepseek.com/v1"},"agent":{"allowedGroups":[123,"456"],"quietHours":null},"unknown":{"kept":true}}),
@@ -79,7 +85,7 @@ fn load_and_revision_golden() {
     // 两个文件都缺失也必须与 JS 一致。
     let n = expected(&f, &[], "load");
     let r = load_with_env(&f.0, |_| None).unwrap();
-    assert_eq!(r.raw, n["value"]);
+    assert_eq!(legacy_config(r.raw), n["value"]);
     assert_eq!(revision(&f.0).unwrap(), n["revision"]);
     for fixture in fixtures {
         f.write("config.json", &fixture);
@@ -96,7 +102,7 @@ fn load_and_revision_golden() {
             })
             .unwrap();
             assert_eq!(n["ok"], true, "{n}");
-            assert_eq!(r.raw, n["value"]);
+            assert_eq!(legacy_config(r.raw), n["value"]);
             assert_eq!(revision(&f.0).unwrap(), n["revision"]);
             assert_eq!(json!(readiness(&r.config)), n["missing"]);
             assert!(!r.config.data_dir.exists());
@@ -279,6 +285,7 @@ fn cli_defaults_are_complete_editable_and_secret_free() {
         "/agent/memoryRecall",
         "/agent/threeLayerDecision",
         "/agent/ownerTeaching",
+        "/agent/observation/backlogDigest",
         "/agent/emoji/learnFrequency",
         "/agent/emoji/faceOnly",
         "/agent/memory/partialEvidence",
