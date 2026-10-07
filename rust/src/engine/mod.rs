@@ -2,6 +2,7 @@
 //! 同步段持有 core -> store 锁，等价 JS 两个 await 之间不可插入 ingest；网络等待不持锁。
 pub mod activity;
 pub mod backlog;
+mod backfill;
 pub mod decision;
 pub mod orientation;
 pub mod policy;
@@ -364,6 +365,13 @@ impl Engine {
         self.core().last_cycle
     }
     pub fn ingest(&self, event: &Value) -> Result<()> {
+        self.ingest_with_source(event, false)
+    }
+    /// History contributes to perception without changing live reply scheduling.
+    pub fn ingest_backfill(&self, event: &Value) -> Result<()> {
+        self.ingest_with_source(event, true)
+    }
+    fn ingest_with_source(&self, event: &Value, backfill: bool) -> Result<()> {
         let mut core = self.core();
         let a = &self.config.agent;
         let now = self.now();
@@ -410,7 +418,8 @@ impl Engine {
                 .unwrap_or_default()
         };
         // 身份外显自动执行；回退命令仍严格限定主人本人私聊。
-        if a.identity.enabled
+        if !backfill
+            && a.identity.enabled
             && crate::persona::owner_teaching::authorized(a, &m.chat, &m.sender)
             && raw.trim() == "/还原"
         {
@@ -427,7 +436,8 @@ impl Engine {
             }
             return Ok(());
         }
-        if a.owner_teaching.enabled
+        if !backfill
+            && a.owner_teaching.enabled
             && crate::persona::owner_teaching::authorized(a, &m.chat, &m.sender)
             && ["/黑话", "/记住", "/忘记"]
                 .iter()
@@ -445,8 +455,14 @@ impl Engine {
                 return Ok(());
             }
         }
-        let Some(s) = core.state(&m.chat, a.max_active_chats) else {
-            return Ok(());
+        // History must not create active chats (including media/proactive cycles).
+        let state = if backfill {
+            None
+        } else {
+            let Some(s) = core.state(&m.chat, a.max_active_chats) else {
+                return Ok(());
+            };
+            Some(s)
         };
         if !self.db()?.message(&value)? {
             return Ok(());
@@ -469,6 +485,9 @@ impl Engine {
             LayeredMemory::new(&db).capture(&value, now, &a.memory)?;
         }
         db.observe(&value, now)?;
+        let Some(s) = state else {
+            return Ok(());
+        };
         // 只有去重成功的新消息递增 version；批内 self 优先于后续开放消息。
         s.version += 1;
         s.last_human = now;

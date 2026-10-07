@@ -77,6 +77,12 @@ impl OrientationTransport for Harness {
                 self.entered.notify_one();
                 self.release.acquire().await.unwrap().forget();
             }
+            if action == "get_group_msg_history"
+                && self.hold.lock().unwrap().as_deref() == Some("HISTORY")
+            {
+                self.entered.notify_one();
+                self.release.acquire().await.unwrap().forget();
+            }
             anyhow::bail!("unsupported")
         })
     }
@@ -2130,4 +2136,65 @@ async fn backlog_digest_disabled_reads_all_and_enabled_at_threshold_keeps_recent
     }
     payloads[0]["history"] = payloads[1]["history"].clone();
     assert_eq!(payloads[0], payloads[1], "除 history 容量外，payload 协议不变");
+}
+
+#[tokio::test]
+async fn backfill_perceives_once_without_scheduling_and_preserves_live_priority() {
+    let (e, h) = setup(&base(
+        "backfill",
+        json!({"learning":{"enabled":true},"observation":{"enabled":true}}),
+        vec![],
+    ));
+    let old = h.event(&json!({"id":"old","text":"[CQ:at,qq=99]历史问题"}));
+    e.ingest_backfill(&old).unwrap();
+    e.ingest_backfill(&old).unwrap();
+    e.ingest(&old).unwrap(); // A later live duplicate must not reply either.
+    assert_eq!(h.rows("SELECT * FROM messages").len(), 1);
+    assert_eq!(e.orientation.get("group:10").unwrap().unwrap().message_count, 1);
+    assert!(!h.rows("SELECT * FROM memory_layers WHERE layer='short_term'").is_empty());
+    assert!(e.chats().iter().all(|(_, s)| !s.pending && s.pause_done && s.version == 0));
+    e.tick().unwrap();
+    e.wait_idle().await;
+    assert_eq!(*h.sends.lock().unwrap(), 0);
+    assert!(h.rows("SELECT * FROM calls").is_empty());
+
+    e.ingest(&h.event(&json!({"id":"live"}))).unwrap();
+    let before = serde_json::to_value(e.chats()).unwrap();
+    e.ingest_backfill(&h.event(&json!({"id":"old2","text":"普通历史消息"}))).unwrap();
+    assert_eq!(serde_json::to_value(e.chats()).unwrap(), before);
+    e.ingest(&h.event(&json!({"id":"live2","text":"普通实时消息"}))).unwrap();
+    assert_eq!(e.chats()[0].1.hint, qq_inner_core::engine::policy::Hint::SelfChat);
+    assert!(e.chats()[0].1.pending);
+    assert_eq!(e.orientation.get("group:10").unwrap().unwrap().message_count, 4);
+    e.stop().await;
+}
+
+#[tokio::test]
+async fn backfill_fetches_allowed_groups_and_is_disabled_or_cancelled() {
+    let (e, h) = setup(&base("backfill_fetch", json!({"backfill":{"count":7}}), vec![]));
+    // Harness errors on unsupported calls: both groups must still be attempted.
+    e.backfill_once().await;
+    assert_eq!(*h.orientation_reads.lock().unwrap(), vec!["get_group_msg_history"; 2]);
+    h.orientation_reads.lock().unwrap().clear();
+    e.stop().await;
+    e.backfill_once().await;
+    assert!(h.orientation_reads.lock().unwrap().is_empty());
+
+    let (e, h) = setup(&base("backfill_disabled", json!({"backfill":{"enabled":false}}), vec![]));
+    e.backfill_once().await;
+    assert!(h.orientation_reads.lock().unwrap().is_empty());
+    e.stop().await;
+}
+
+#[tokio::test]
+async fn stopping_cancels_in_flight_backfill() {
+    let (e, h) = setup(&base("backfill_cancel", json!({}), vec![]));
+    *h.hold.lock().unwrap() = Some("HISTORY".into());
+    let engine = e.clone();
+    let task = tokio::spawn(async move { engine.backfill_once().await });
+    h.entered.notified().await;
+    e.stop().await;
+    tokio::time::timeout(std::time::Duration::from_secs(1), task).await.unwrap().unwrap();
+    assert_eq!(*h.orientation_reads.lock().unwrap(), vec!["get_group_msg_history"]);
+    assert!(h.rows("SELECT * FROM messages").is_empty());
 }
