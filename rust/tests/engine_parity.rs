@@ -2056,12 +2056,12 @@ async fn replies_recheck_duty_before_first_task_poll_and_resume() {
 
 #[tokio::test]
 async fn backlog_digest_reaches_cycle_stages_and_can_withhold() {
-    for empty in [false, true] {
+    for (enabled, empty) in [(false, false), (false, true), (true, false), (true, true)] {
         let (e, h) = setup(&base(
             "digest_resume",
             json!({
                 "schedule":{"enabled":true,"activeStart":"14:00","inactiveStart":"01:00","timezone":"UTC"},
-                "observation":{"backlogDigest":{"enabled":true,"threshold":80,"headCount":2,"tailCount":3,"sampleMax":20,"samplePercent":10}}
+                "observation":{"backlogDigest":{"enabled":enabled,"threshold":80,"headCount":2,"tailCount":3,"sampleMax":20,"samplePercent":10}}
             }),
             vec![],
         ));
@@ -2081,12 +2081,21 @@ async fn backlog_digest_reaches_cycle_stages_and_can_withhold() {
         let inputs = h.model_inputs.lock().unwrap().clone();
         assert_eq!(inputs.len(), if empty { 1 } else { 4 });
         for (stage, payload) in inputs {
-            let digest = &payload["backlogDigest"];
-            assert_eq!(digest["totalMessages"], 300, "{stage}");
-            assert_eq!(digest["sampleIds"].as_array().unwrap().len(), 20);
-            assert_eq!(digest["omittedMessages"], 275);
+            if enabled {
+                let digest = &payload["backlogDigest"];
+                assert_eq!(digest["totalMessages"], 300, "{stage}");
+                assert_eq!(digest["sampleIds"].as_array().unwrap().len(), 20);
+                assert_eq!(digest["omittedMessages"], 275);
+            } else {
+                assert!(payload.get("backlogDigest").is_none());
+            }
             let history = payload["history"].as_array().unwrap();
-            assert_eq!(history.len(), 25, "{stage}");
+            assert_eq!(history.len(), if enabled { 25 } else { 300 }, "{stage}");
+            if !enabled {
+                for (i, message) in history.iter().enumerate() {
+                    assert_eq!(message["id"], format!("digest{i}"));
+                }
+            }
             assert_eq!(history.first().unwrap()["id"], "digest0");
             assert_eq!(history.last().unwrap()["id"], "digest299");
             assert!(history.iter().all(|m| m["text"].is_string()
@@ -2097,7 +2106,7 @@ async fn backlog_digest_reaches_cycle_stages_and_can_withhold() {
 }
 
 #[tokio::test]
-async fn backlog_digest_disabled_or_at_threshold_preserves_prompt_contract() {
+async fn backlog_digest_disabled_reads_all_and_enabled_at_threshold_keeps_recent_history() {
     let mut payloads = Vec::new();
     for (enabled, threshold) in [(false, 1), (true, 30)] {
         let (e, h) = setup(&base(
@@ -2115,9 +2124,10 @@ async fn backlog_digest_disabled_or_at_threshold_preserves_prompt_contract() {
         assert_eq!(inputs.len(), 1);
         let payload = inputs[0].1.clone();
         assert!(payload.get("backlogDigest").is_none());
-        assert_eq!(payload["history"].as_array().unwrap().len(), 24);
+        assert_eq!(payload["history"].as_array().unwrap().len(), if enabled { 24 } else { 30 });
         payloads.push(payload);
         e.stop().await;
     }
-    assert_eq!(payloads[0], payloads[1]);
+    payloads[0]["history"] = payloads[1]["history"].clone();
+    assert_eq!(payloads[0], payloads[1], "除 history 容量外，payload 协议不变");
 }

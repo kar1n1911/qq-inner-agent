@@ -4,7 +4,7 @@ use anyhow::{ensure, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct Settings {
     pub enabled: bool,
@@ -29,6 +29,10 @@ impl Default for Settings {
 }
 
 impl Settings {
+    pub fn is_default(&self) -> bool {
+        self == &Self::default()
+    }
+
     pub fn validate(&self) -> Result<()> {
         ensure!(
             (1..=1_000_000).contains(&self.threshold)
@@ -48,6 +52,33 @@ pub const INSTRUCTIONS: &str = "当前 history 是积压简读，不是连续完
 pub struct Digest {
     pub messages: Vec<Value>,
     pub context: Value,
+}
+
+// 计数、全读与采样共享同一边界；不以 timestamp 或 handled 状态替代自身发言。
+const UNREAD: &str = "chat=?1 AND self=0 AND rowid > \
+    COALESCE((SELECT MAX(rowid) FROM messages WHERE chat=?1 AND self=1),0)";
+
+pub fn unread_count(db: &Store, chat: &str) -> Result<i64> {
+    let rows = db.rows(
+        &format!("SELECT COUNT(*) AS n FROM messages WHERE {UNREAD}"),
+        [chat],
+    )?;
+    Ok(rows[0]["n"].as_i64().unwrap_or_default())
+}
+
+/// 保留 history 的时间戳/rowid 排序及最近上下文，同时完整包含入库边界后的积压。
+pub fn full_history(db: &Store, chat: &str, minimum: i64) -> Result<Vec<Value>> {
+    let limit = minimum.max(unread_count(db, chat)?);
+    // db.history 取时间上最后 N 条；晚到的旧时间戳消息可能落在 N 条之外。
+    // 并入未读区间以保证不漏，通常仍是 limit 条，仅乱序时可能多于该下限。
+    db.rows(
+        &format!(
+            "SELECT * FROM messages WHERE rowid IN \
+             (SELECT rowid FROM messages WHERE chat=?1 ORDER BY ts DESC,rowid DESC LIMIT ?2) \
+             OR ({UNREAD}) ORDER BY ts,rowid"
+        ),
+        rusqlite::params![chat, limit],
+    )
 }
 
 // 固定 FNV-1a 加 avalanche，避免运行时随机种子或顺序消息 id 的局部聚集。
@@ -70,8 +101,7 @@ pub fn build(db: &Store, chat: &str, settings: &Settings) -> Result<Option<Diges
     }
     // 只扫描 id，未选中的正文不载入；不会把几百条完整正文送给模型。
     let ids = db.rows(
-        "SELECT id FROM messages WHERE chat=?1 AND self=0 AND rowid > \
-         COALESCE((SELECT MAX(rowid) FROM messages WHERE chat=?1 AND self=1),0) ORDER BY rowid",
+        &format!("SELECT id FROM messages WHERE {UNREAD} ORDER BY rowid"),
         [chat],
     )?;
     let total = ids.len();

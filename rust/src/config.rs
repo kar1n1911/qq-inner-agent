@@ -733,7 +733,7 @@ pub struct Observation {
     /// 配置键 `agent.observation.historyLimit`。
     pub history_limit: f64,
     /// 独立于入群观察开关：仅在大量积压时压缩本轮模型上下文。
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "crate::engine::backlog::Settings::is_default")]
     pub backlog_digest: crate::engine::backlog::Settings,
 }
 

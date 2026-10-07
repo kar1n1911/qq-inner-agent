@@ -1115,14 +1115,19 @@ impl Engine {
             core.last_cycle = now;
             t.profile = db.learning_state(chat)?;
             // 11–16：历史、最后人类消息、小时配额、学习门控、检索 query。
-            t.history = db.history(
-                chat,
-                Some(if a.learning.enabled {
-                    a.history_limit.max(a.learning.min_messages)
-                } else {
-                    a.history_limit
-                } as i64),
-            )?;
+            t.history = if a.observation.backlog_digest.enabled {
+                db.history(
+                    chat,
+                    Some(if a.learning.enabled {
+                        a.history_limit.max(a.learning.min_messages)
+                    } else {
+                        a.history_limit
+                    } as i64),
+                )?
+            } else {
+                // 默认完整了解积压；只有显式开启 digest 才允许简读省略。
+                backlog::full_history(&db, chat, a.history_limit.max(a.learning.min_messages) as i64)?
+            };
             let humans: Vec<_> = t.history.iter().filter(|m| !truthy(&m["self"])).collect();
             let Some(last) = humans.last() else {
                 return Ok(());

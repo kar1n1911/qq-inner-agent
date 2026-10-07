@@ -1,6 +1,6 @@
 use qq_inner_core::{
     config::{defaults, merge, validate, Config},
-    engine::backlog::{build, Settings},
+    engine::backlog::{build, full_history, unread_count, Settings},
     store::Store,
 };
 use serde_json::{json, Value};
@@ -198,4 +198,52 @@ fn percentage_rounding_cap_and_zero_percent_fallback() {
         assert_eq!(digest.messages.len(), 2 + expected);
         assert_eq!(digest.context["omittedMessages"], 25 - expected);
     }
+}
+
+#[test]
+fn full_history_covers_unread_and_keeps_recent_context_with_tied_or_late_timestamps() {
+    let db = Store::in_memory().unwrap();
+    let chat = "group:10";
+    assert_eq!(unread_count(&db, chat).unwrap(), 0);
+    assert!(full_history(&db, chat, 24).unwrap().is_empty());
+    for i in 0..40 {
+        insert(&db, chat, &format!("old{i}"), false);
+    }
+    assert_eq!(full_history(&db, chat, 24).unwrap().len(), 40);
+    insert(&db, chat, "own", true);
+    for i in 0..30 {
+        insert(&db, chat, &format!("new{i}"), false);
+    }
+    insert(&db, "group:11", "other", false);
+    assert_eq!(unread_count(&db, chat).unwrap(), 30);
+    let history = full_history(&db, chat, 24).unwrap();
+    assert_eq!(history.len(), 30);
+    assert_eq!(history.first().unwrap()["id"], "new0");
+    assert_eq!(history.last().unwrap()["id"], "new29");
+    let history = full_history(&db, chat, 32).unwrap();
+    assert_eq!(history.len(), 32);
+    assert_eq!(history[1]["id"], "own");
+    assert_eq!(history[1]["self"], 1);
+
+    // 晚到消息的 timestamp 比已回复历史还老；只扩大 db.history 的 LIMIT 会漏掉它。
+    db.message(&json!({"chat":chat,"id":"late","sender":"20","name":"Human","text":"晚到但未读","ts":1.,"self":false})).unwrap();
+    assert_eq!(unread_count(&db, chat).unwrap(), 31);
+    assert!(!db
+        .history(chat, Some(31))
+        .unwrap()
+        .iter()
+        .any(|m| m["id"] == "late"));
+    let history = full_history(&db, chat, 24).unwrap();
+    assert_eq!(history.first().unwrap()["id"], "late");
+    assert_eq!(history.last().unwrap()["id"], "new29");
+    assert!(history.iter().all(|m| m["chat"] == chat));
+    for i in 0..30 {
+        assert!(history.iter().any(|m| m["id"] == format!("new{i}")));
+    }
+    insert(&db, chat, "new-own", true);
+    assert_eq!(unread_count(&db, chat).unwrap(), 0);
+    assert_eq!(
+        full_history(&db, chat, 24).unwrap(),
+        db.history(chat, Some(24)).unwrap()
+    );
 }
