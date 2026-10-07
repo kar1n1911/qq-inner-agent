@@ -215,6 +215,19 @@ pub const LEGACY_PERSONAS: [&str;2]=[
 
 pub fn validate(c: &Value) -> std::result::Result<(), ConfigError> {
     let a = &c["agent"];
+    if let Some(v) = a.get("backfill") {
+        let settings: Backfill = serde_json::from_value(v.clone())
+            .map_err(|e| ConfigError(format!("agent.backfill: {e}")))?;
+        check(
+            settings.interval_seconds.is_finite()
+                && (1.0..=86400.0).contains(&settings.interval_seconds),
+            "agent.backfill.intervalSeconds must be between 1 and 86400",
+        )?;
+        check(
+            settings.count > 0,
+            "agent.backfill.count must be a positive integer",
+        )?;
+    }
     if let Some(v) = a.get("backstory") {
         serde_json::from_value::<Backstory>(v.clone()).map_err(|e| ConfigError(e.to_string()))?;
     }
@@ -900,9 +913,29 @@ pub struct Backstory {
     pub enabled: bool,
 }
 
+/// History recovery is enabled even when older configurations omit the section.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Backfill {
+    pub enabled: bool,
+    pub interval_seconds: f64,
+    pub count: u32,
+}
+impl Default for Backfill {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            interval_seconds: 60.,
+            count: 50,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Agent {
+    #[serde(default)]
+    pub backfill: Backfill,
     #[serde(default)]
     pub backstory: Backstory,
     #[serde(default)]

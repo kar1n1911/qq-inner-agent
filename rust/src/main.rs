@@ -222,6 +222,8 @@ struct Runtime {
     notices: mpsc::UnboundedReceiver<Notification>,
     engine: Arc<Engine>,
     connection: Option<JoinHandle<()>>,
+    backfill: Option<JoinHandle<()>>,
+    next_backfill: Instant,
     abort: watch::Sender<bool>,
     applied: String,
     reloading: bool,
@@ -281,6 +283,8 @@ impl Runtime {
             notices,
             engine,
             connection: None,
+            backfill: None,
+            next_backfill: Instant::now(),
             abort,
             applied,
             reloading: false,
@@ -294,9 +298,37 @@ impl Runtime {
         let signal = self.abort.subscribe();
         self.connection = Some(tokio::spawn(async move { bot.run(signal).await }));
     }
-    async fn notice(&self, notice: Notification) {
+    fn schedule_backfill(&mut self, connected: bool) {
+        if connected {
+            self.next_backfill = Instant::now();
+        }
+        if !self.config.agent.backfill.enabled
+            || !self.bot.state().connected
+            || *self.abort.borrow()
+            || self.backfill.as_ref().is_some_and(|task| !task.is_finished())
+            || Instant::now() < self.next_backfill
+        {
+            return;
+        }
+        self.next_backfill = Instant::now()
+            + Duration::from_secs_f64(self.config.agent.backfill.interval_seconds);
+        let engine = self.engine.clone();
+        self.backfill = Some(tokio::spawn(async move { engine.backfill_once().await }));
+    }
+    async fn drain_backfill(&mut self) {
+        if let Some(task) = self.backfill.take() {
+            let _ = task.await;
+        }
+    }
+    async fn notice(&mut self, notice: Notification) {
         match notice {
-            Notification::Status(state) => (self.log)("onebot", json!({"state":state})),
+            Notification::Status(state) => {
+                (self.log)("onebot", json!({"state":state}));
+                // Both statuses are emitted by a successful handshake, including reconnects.
+                if matches!(state.as_str(), "connected" | "qq_offline") {
+                    self.schedule_backfill(true);
+                }
+            }
             Notification::Event(event) => {
                 if let Some(control) = &self.control {
                     control.observe(&event);
@@ -399,6 +431,7 @@ impl Runtime {
                 Some(notice) = self.notices.recv() => self.notice(notice).await,
             }
         }
+        self.drain_backfill().await;
         if *shutdown.borrow() {
             return Ok(());
         }
@@ -446,6 +479,7 @@ impl Runtime {
     async fn shutdown(mut self) -> Result<()> {
         self.abort.send_replace(true);
         self.engine.stop().await;
+        self.drain_backfill().await;
         self.disconnect().await;
         let result = self.report();
         let store = self.store.clone();
@@ -540,7 +574,10 @@ async fn run(root: PathBuf) -> Result<()> {
             tokio::select! {
                 biased;
                 _ = shutdown.changed() => break,
-                _ = tick.tick() => rt.engine.tick()?,
+                _ = tick.tick() => {
+                    rt.schedule_backfill(false);
+                    rt.engine.tick()?;
+                },
                 _ = report.tick() => rt.report()?,
                 _ = prune.tick() => rt.maintain(true)?,
                 _ = watcher.tick() => {
@@ -810,6 +847,91 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(weak.upgrade().is_none());
+    }
+
+    #[tokio::test]
+    async fn backfill_runs_on_connect_timer_and_reconnect() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::{accept_async, tungstenite::Message};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let dir = Temp::new();
+        dir.config(json!({
+            "onebot":{"url":format!("ws://{}/", listener.local_addr().unwrap()),"reconnectMaxSeconds":1},
+            "agent":{"allowedGroups":["10","11"],"backfill":{"intervalSeconds":1,"count":7}}
+        }));
+        let (requests, mut received) = mpsc::unbounded_channel();
+        let (close, mut closing) = mpsc::unbounded_channel::<()>();
+        let server = tokio::spawn(async move {
+            loop {
+                let (socket, _) = listener.accept().await.unwrap();
+                let mut ws = accept_async(socket).await.unwrap();
+                loop {
+                    let frame = tokio::select! {
+                        frame = ws.next() => frame,
+                        _ = closing.recv() => { let _ = ws.close(None).await; break; }
+                    };
+                    let Some(Ok(Message::Text(frame))) = frame else { break; };
+                    let req: Value = serde_json::from_str(&frame).unwrap();
+                    let (status, code, data) = match req["action"].as_str().unwrap() {
+                        "get_login_info" => ("ok", 0, json!({"user_id":99})),
+                        "get_status" => ("ok", 0, json!({"online":true})),
+                        "get_group_msg_history" => {
+                            requests.send(req["params"].clone()).unwrap();
+                            if req["params"]["group_id"] == "10" {
+                                // One group failing does not starve the next group.
+                                ("failed", 1, Value::Null)
+                            } else {
+                                ("ok", 0, json!({"messages":[null, {
+                                    "message_id":123,"user_id":20,"time":1700000000,
+                                    "sender":{"nickname":"Human"},"message":"[CQ:at,qq=99]历史消息"
+                                }]}))
+                            }
+                        }
+                        other => panic!("unexpected action: {other}"),
+                    };
+                    if ws.send(Message::Text(json!({"echo":req["echo"],"status":status,"retcode":code,"data":data}).to_string())).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+        async fn pass(rt: &mut Runtime, received: &mut mpsc::UnboundedReceiver<Value>) {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                for group in ["10", "11"] {
+                    loop {
+                        tokio::select! {
+                            Some(params) = received.recv() => {
+                                assert_eq!(params, json!({"group_id":group,"count":7}));
+                                break;
+                            }
+                            Some(notice) = rt.notices.recv() => rt.notice(notice).await,
+                            _ = tokio::time::sleep(Duration::from_millis(10)) => rt.schedule_backfill(false),
+                        }
+                    }
+                }
+                rt.drain_backfill().await;
+            }).await.unwrap();
+        }
+        let mut rt = dir.runtime();
+        rt.connect();
+        pass(&mut rt, &mut received).await;
+        let first_due = rt.next_backfill;
+        pass(&mut rt, &mut received).await;
+        assert!(rt.next_backfill > first_due);
+        assert_eq!(rt.store.lock().unwrap().history("group:11", None).unwrap().len(), 1);
+        assert!(rt.engine.chats().is_empty());
+        // Move the timer far away: only a fresh connection may trigger this pass.
+        rt.next_backfill = Instant::now() + Duration::from_secs(3600);
+        close.send(()).unwrap();
+        pass(&mut rt, &mut received).await;
+        assert_eq!(rt.store.lock().unwrap().history("group:11", None).unwrap().len(), 1);
+        assert!(rt.engine.chats().is_empty());
+        rt.config.agent.backfill.enabled = false;
+        rt.schedule_backfill(true);
+        assert!(rt.backfill.is_none());
+        rt.shutdown().await.unwrap();
+        server.abort();
+        let _ = server.await;
     }
 
     #[tokio::test]

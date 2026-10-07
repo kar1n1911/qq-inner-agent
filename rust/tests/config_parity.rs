@@ -43,6 +43,7 @@ fn expected(f: &Fixture, env: &[(&str, &str)], mode: &str) -> Value {
 
 // Rust 新增的可选扩展单独测试，旧 JS 金标准继续逐字段覆盖原有协议。
 fn legacy_config(mut value: Value) -> Value {
+    value["agent"].as_object_mut().unwrap().remove("backfill");
     value["agent"]["observation"].as_object_mut().unwrap().remove("backlogDigest");
     value
 }
@@ -330,4 +331,27 @@ fn cli_redaction_and_selftest() {
         assert!(!text.contains("secret-bot-456"));
     }
     assert!(!f.0.join("data").exists());
+}
+
+#[test]
+fn backfill_defaults_and_validation() {
+    let original = defaults();
+    assert_eq!(original["agent"]["backfill"], json!({"enabled":true,"intervalSeconds":60,"count":50}));
+    for patch in [json!({}), json!({"enabled":false}), json!({"intervalSeconds":1.5,"count":1})] {
+        let value = merge(&original, &json!({"agent":{"backfill":patch}}));
+        validate(&value).unwrap();
+    }
+    for patch in [json!(null), json!(false), json!({"enabled":"true"}), json!({"count":0}), json!({"count":-1}), json!({"count":1.5}), json!({"intervalSeconds":0}), json!({"intervalSeconds":-1}), json!({"intervalSeconds":1e100})] {
+        let value = merge(&original, &json!({"agent":{"backfill":patch}}));
+        assert!(validate(&value).is_err(), "{value}");
+    }
+    let mut legacy = original;
+    legacy["agent"].as_object_mut().unwrap().remove("backfill");
+    legacy["apiKey"] = json!("");
+    legacy["onebotToken"] = json!("");
+    legacy["dataDir"] = json!("unused");
+    let settings = Config::from_value(&legacy).unwrap().agent.backfill;
+    assert!(settings.enabled);
+    assert_eq!(settings.interval_seconds, 60.);
+    assert_eq!(settings.count, 50);
 }
