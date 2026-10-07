@@ -6,12 +6,12 @@
 
 新功能,**只做 Rust**(控制协议没有 JS 实现,是 Rust 内核与 Node 仪表盘之间的新接口)。
 
-协议权威定义见 `docs/rust-port/ARCHITECTURE.md` **第 5 节**,不可变更契约见第 6.1 节。
+协议权威定义见 `docs/working/rust-port/ARCHITECTURE.md` **第 5 节**,不可变更契约见第 6.1 节。
 
 ## 必读
 
-- `docs/rust-port/ARCHITECTURE.md` 第 5、6.1 节;
-- `docs/rust-port/SURVEY.md` 第 5 节(仪表盘全部路由与 `snapshot()` 字段);
+- `docs/working/rust-port/ARCHITECTURE.md` 第 5、6.1 节;
+- `docs/working/rust-port/SURVEY.md` 第 5 节(仪表盘全部路由与 `snapshot()` 字段);
 - `src/dashboard.mjs`(Node 侧要读的数据形状);
 - 已合并的 `rust/src/engine.rs`(它产出 `status.json` 与各类日志)。
 
@@ -45,7 +45,7 @@
    - 多客户端并发;
    - 慢客户端不阻塞其他客户端;
    - socket 文件在启动前清理、停止时移除;
-3. 测试强度按 `docs/prompt-and-learning-design.md` 第十八节:不变量精确,启发式用区间/方向。
+3. 测试强度按 `docs/working/prompt-and-learning-design.md` 第十八节:不变量精确,启发式用区间/方向。
 
 ## 交付
 

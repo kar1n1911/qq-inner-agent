@@ -6,12 +6,12 @@
 
 - **长度分档接线是 parity 项**:JS 的 `src/engine.mjs` 已经调用 `pickLengthTarget` 并把 `lengthTarget` 传进
   articulation payload;Rust 引擎(P6a)当时有意没做,**现在要补上对齐 JS**。它不是新功能,不要加开关。
-- 其余三项是**新功能,只做 Rust,且必须开关化默认关闭**(见 `docs/prompt-and-learning-design.md` 状态总表)。
+- 其余三项是**新功能,只做 Rust,且必须开关化默认关闭**(见 `docs/working/prompt-and-learning-design.md` 状态总表)。
 
 ## 必读
 
-- `docs/prompt-and-learning-design.md` 第九节(三层决策里"说什么"这一层的现状)、状态总表;
-- `docs/human-like-replies.md`(改动 1~8);
+- `docs/working/prompt-and-learning-design.md` 第九节(三层决策里"说什么"这一层的现状)、状态总表;
+- `docs/working/human-like-replies.md`(改动 1~8);
 - `src/engine.mjs`(看 JS 怎么接 `lengthTarget`)、`src/policy.mjs` 的 `pickLengthTarget`;
 - 已合并的 `rust/src/engine.rs`、`rust/src/policy.rs`(已有 `pick_length_target`)、`rust/src/prompts.rs`(生成器产物,勿手改)。
 

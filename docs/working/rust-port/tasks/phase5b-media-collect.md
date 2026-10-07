@@ -19,8 +19,8 @@
 
 ## 必读
 
-- `docs/prompt-and-learning-design.md` —— **第十三节(群内表情包采集与学习)** 是唯一权威设计,另有第十一节(交流阶段分类);
-- `docs/rust-port/SURVEY.md` —— 消息形状与 `messages` 表;
+- `docs/working/prompt-and-learning-design.md` —— **第十三节(群内表情包采集与学习)** 是唯一权威设计,另有第十一节(交流阶段分类);
+- `docs/working/rust-port/SURVEY.md` —— 消息形状与 `messages` 表;
 - `src/store.mjs`、`src/engine.mjs`、`src/onebot.mjs`、`src/text.mjs`(或等价分词模块)。
 
 ## 任务
@@ -57,7 +57,7 @@
 
 ### 3. 交流阶段分类(共享基础件)
 
-`docs/prompt-and-learning-design.md` 第十一节定义了**两轴**:生命周期(展开中/收束/自然终止/单发)× 与上文关系(接续/转向/无关单发)。
+`docs/working/prompt-and-learning-design.md` 第十一节定义了**两轴**:生命周期(展开中/收束/自然终止/单发)× 与上文关系(接续/转向/无关单发)。
 
 本阶段只做**纯函数 + 记录**,不做任何学习:
 
@@ -95,7 +95,7 @@
 
 ## 📌 测试强度:不变量精确,启发式用区间与趋势
 
-见 `docs/prompt-and-learning-design.md` **第十八节**。前面"把设计规则逐条变成断言"的要求要按此**分级**:
+见 `docs/working/prompt-and-learning-design.md` **第十八节**。前面"把设计规则逐条变成断言"的要求要按此**分级**:
 
 - **不变量**(去重、只采人类、不外溢、失败不写记录、沉默不计负面)**必须精确断言** —— 放宽它们等于没有验证;
 - **启发式**(阶段分类、适配度、漂移档位、相关度)**用区间、方向与相对比较**,

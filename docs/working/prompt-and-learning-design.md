@@ -83,7 +83,7 @@
 | 长度分档、反 AI 腔、表情/face 指引 | ✅ 已实现 | ✅ **已同步** | 提示词由 `rust/tools/gen-prompts.mjs` 从 JS 生成,有逐字比对 |
 | 两步时区(先 UTC±X,再区域名) | ✅ 已实现 | ✅ **已迁移** | ICU 对照测试在两个平台通过 |
 | provider(端点/解析/重试退避/小时预算) | ✅ 已实现 | ✅ **已迁移**(P3) | 10 个传输层测试 |
-| OneBot 传输 / SQLite store / config / settings | ✅ 已实现 | ✅ **已迁移**(P1b、P2) | 见 `docs/rust-port/ARCHITECTURE.md` |
+| OneBot 传输 / SQLite store / config / settings | ✅ 已实现 | ✅ **已迁移**(P1b、P2) | 见 `docs/working/rust-port/ARCHITECTURE.md` |
 
 ### ⚠️ 两条硬规则
 

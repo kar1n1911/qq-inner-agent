@@ -15,8 +15,8 @@
 
 ## 必读
 
-- `docs/rust-port/ARCHITECTURE.md`(不可变更契约)
-- `docs/rust-port/SURVEY.md` —— provider 那一节
+- `docs/working/rust-port/ARCHITECTURE.md`(不可变更契约)
+- `docs/working/rust-port/SURVEY.md` —— provider 那一节
 - `src/provider.mjs`(约 99 行,**逐行读完**)
 
 ## 任务:P3 收尾 —— HTTP 传输、重试退避与小时预算

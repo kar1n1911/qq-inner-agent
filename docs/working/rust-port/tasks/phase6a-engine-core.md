@@ -22,7 +22,7 @@
   跳过 busy / 过期 / 未到 `due` / 未到 `minThinkIntervalSeconds`;
   `trigger = pending ? "message" : (!pauseDone && now-lastHuman >= pauseSeconds ? "pause" : null)`;
   非点名且(`!proactive || quiet`)时清 pending 并跳过;`busy = true` 后起任务
-- `cycle()`:**严格按 `docs/rust-port/SURVEY.md` 第 2 节的 48 步顺序,不要重排**
+- `cycle()`:**严格按 `docs/working/rust-port/SURVEY.md` 第 2 节的 48 步顺序,不要重排**
 - `restore()`:保留记忆,但**不重放旧回复、不因旧历史主动发起**
 
 ## 必须保住的关键点
@@ -52,7 +52,7 @@ JS 是单线程事件循环 + `AbortController`;Rust 是 tokio 多任务。
   —— 那是 **P6c**,且属新功能,要**开关化默认关闭**;
 - **不要**实现三层决策拆分与零模型初筛 —— 那是 **P6d**;
 - **不要**实现素材选择与发送 —— 那是 **P6b-media**;
-- **不要**实现 `docs/prompt-and-learning-design.md` 里其他未落地的设计
+- **不要**实现 `docs/working/prompt-and-learning-design.md` 里其他未落地的设计
   (提示词分层、学习分诊、affect、召回下钻、跨群共享、自我审核、注意力漂移);
 - **不要**改提示词。
 
@@ -74,7 +74,7 @@ JS 是单线程事件循环 + `AbortController`;Rust 是 tokio 多任务。
 3. 单测覆盖:turn allocation、`interruptThreshold`、withhold、保留候选、静默时段、冷却、
    chat 隔离、过期响应、dry-run、非法模型输出、API 预算、模糊送达。
 4. **不访问真实 `data/`、不发真实网络请求**;时间与随机必须可注入。
-5. 测试强度按 `docs/prompt-and-learning-design.md` 第十八节:不变量精确,启发式用区间/方向。
+5. 测试强度按 `docs/working/prompt-and-learning-design.md` 第十八节:不变量精确,启发式用区间/方向。
 
 ## 交付
 

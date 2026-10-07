@@ -7,12 +7,12 @@
 **唯一允许改 Node 侧(`src/`)的阶段**。P7a 已把 Rust 控制服务端(`control.rs`,Unix socket + NDJSON)合并,
 本阶段写 Node 客户端,并让仪表盘在"控制通道可用/不可用"之间**双读**。
 
-协议权威定义:`docs/rust-port/ARCHITECTURE.md` 第 5 节。
+协议权威定义:`docs/working/rust-port/ARCHITECTURE.md` 第 5 节。
 
 ## 必读
 
-- `docs/rust-port/ARCHITECTURE.md` 第 5、6.1 节;
-- `docs/rust-port/SURVEY.md` 第 5 节(仪表盘全部路由与 `snapshot()` 字段);
+- `docs/working/rust-port/ARCHITECTURE.md` 第 5、6.1 节;
+- `docs/working/rust-port/SURVEY.md` 第 5 节(仪表盘全部路由与 `snapshot()` 字段);
 - `src/dashboard.mjs`、`src/settings.mjs`、`src/cli.mjs`、`src/store.mjs`;
 - 已合并的 `rust/src/control.rs`(服务端行为)。
 

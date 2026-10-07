@@ -8,8 +8,8 @@ Phase 1(配置层)已经完成:`rust/src/settings.rs` 与 `rust/src/config.rs` �
 
 ## 必读
 
-- `docs/rust-port/ARCHITECTURE.md` —— 架构与不可变更的契约
-- `docs/rust-port/SURVEY.md` —— **第 6 节是 OneBot 层的完整规格**(逐条,含全部错误码与状态串)
+- `docs/working/rust-port/ARCHITECTURE.md` —— 架构与不可变更的契约
+- `docs/working/rust-port/SURVEY.md` —— **第 6 节是 OneBot 层的完整规格**(逐条,含全部错误码与状态串)
 - `src/onebot.mjs`(119 行,务请逐行读完)—— 要移植的唯一真源
 
 ## 任务:Phase 2 —— OneBot v11 传输层

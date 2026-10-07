@@ -8,8 +8,8 @@ Phase 1(配置层 `settings.rs` / `config.rs`)与 Phase 2(OneBot 传输 `onebot.
 
 ## 必读
 
-- `docs/rust-port/ARCHITECTURE.md` —— 架构与不可变更的契约
-- `docs/rust-port/SURVEY.md` —— **第 7 节是 provider 层的完整规格**(逐条,含全部错误码与重试规则)
+- `docs/working/rust-port/ARCHITECTURE.md` —— 架构与不可变更的契约
+- `docs/working/rust-port/SURVEY.md` —— **第 7 节是 provider 层的完整规格**(逐条,含全部错误码与重试规则)
 - `src/provider.mjs`(99 行,务请逐行读完)—— 唯一真源
 
 ## 任务:Phase 3 —— provider 适配层

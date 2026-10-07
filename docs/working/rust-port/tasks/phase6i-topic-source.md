@@ -1,6 +1,6 @@
 # P6i 新话题来源(§21)
 
-设计权威:`docs/prompt-and-learning-design.md` **第二十一节**。
+设计权威:`docs/working/prompt-and-learning-design.md` **第二十一节**。
 
 ## 定位
 

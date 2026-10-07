@@ -1,6 +1,6 @@
 # P6f 剩余设计实现(提示词类:分层 + 责任线)
 
-设计权威:`docs/prompt-and-learning-design.md` **第二、十四节**。
+设计权威:`docs/working/prompt-and-learning-design.md` **第二、十四节**。
 
 ## 定位
 

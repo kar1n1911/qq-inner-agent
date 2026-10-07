@@ -9,8 +9,8 @@ Node 侧只保留仪表盘与前端。Rust crate 位于 `rust/`,目前只有 Pha
 
 ## 必读(动手前请全部读完)
 
-- `docs/rust-port/ARCHITECTURE.md` —— 架构、进程边界、控制协议、不可变更的契约
-- `docs/rust-port/SURVEY.md` —— 19 个模块的逐行勘察报告;其中**第 4 节是完整的配置 schema**
+- `docs/working/rust-port/ARCHITECTURE.md` —— 架构、进程边界、控制协议、不可变更的契约
+- `docs/working/rust-port/SURVEY.md` —— 19 个模块的逐行勘察报告;其中**第 4 节是完整的配置 schema**
   (全部键、默认值、区间、校验规则)。注意:`config.example.json` 已过期,不要当 schema 用。
 - `src/settings.mjs` —— 要移植的 `revision` / `atomicJson`
 - `src/config.mjs` —— 要移植的 `defaults` / `merge` / `validate` / `loadConfig` / `readiness`

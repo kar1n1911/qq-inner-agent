@@ -10,13 +10,13 @@
 
 | 文档 | 内容 |
 | --- | --- |
-| `docs/rust-port/SURVEY.md` | 逐模块代码勘察(调用链、表结构、性能热点) |
-| `docs/rust-port/tasks/phase*.md` | 各阶段的可派发规格(含「本阶段不要实现的设计」禁令) |
+| `docs/working/rust-port/SURVEY.md` | 逐模块代码勘察(调用链、表结构、性能热点) |
+| `docs/working/rust-port/tasks/phase*.md` | 各阶段的可派发规格(含「本阶段不要实现的设计」禁令) |
 | `rust/README.md` | Rust 内核模块表、构建方式、**交叉验证测试必须先让 `node` 进 PATH** 的提醒 |
 | `rust/PROVIDER.md` | provider 传输契约,含与 JS `AbortSignal` 的取消语义差异 |
 | `rust/ONEBOT.md` | OneBot 传输契约与已知差异 |
-| `docs/prompt-and-learning-design.md` | 提示词分层、学习分诊、affect 指标、记忆召回下钻等设计;**部分已实施**(主人教学 P6e、三层决策 P6d、groupActivity/注意力漂移 P6b),其余为待实施的 Rust-only 设计。派活时须遵守其中的禁令 |
-| `docs/human-like-replies.md` | "更像真人"的设计与改动清单 |
+| `docs/working/prompt-and-learning-design.md` | 提示词分层、学习分诊、affect 指标、记忆召回下钻等设计;**部分已实施**(主人教学 P6e、三层决策 P6d、groupActivity/注意力漂移 P6b),其余为待实施的 Rust-only 设计。派活时须遵守其中的禁令 |
+| `docs/working/human-like-replies.md` | "更像真人"的设计与改动清单 |
 
 ## 1. 目标与范围
 

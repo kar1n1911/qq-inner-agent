@@ -20,7 +20,7 @@
 
 ## 必读
 
-`docs/prompt-and-learning-design.md` 的 **九、十、十一、十二、十三节**。本阶段实现的是第十~十三节与第九节的 ②③ 层。
+`docs/working/prompt-and-learning-design.md` 的 **九、十、十一、十二、十三节**。本阶段实现的是第十~十三节与第九节的 ②③ 层。
 
 ## 任务
 
@@ -110,7 +110,7 @@
 
 ## 📌 补充:**注意力漂移**取代二值化的"高/低相关度"
 
-`docs/prompt-and-learning-design.md` **第 10.4 节**(与 MaiBot 的 `attention_drift` 同构)。
+`docs/working/prompt-and-learning-design.md` **第 10.4 节**(与 MaiBot 的 `attention_drift` 同构)。
 前面第 3 节写的"目标相关度高/低"是**意图**,实现要用这三个参数:
 
 | 参数 | 作用 | 取值 |
@@ -137,7 +137,7 @@
 
 ## 📌 测试强度:不变量精确,启发式用区间与趋势
 
-见 `docs/prompt-and-learning-design.md` **第十八节**。前面"把设计规则逐条变成断言"的要求要按此**分级**:
+见 `docs/working/prompt-and-learning-design.md` **第十八节**。前面"把设计规则逐条变成断言"的要求要按此**分级**:
 
 - **不变量**(去重、只采人类、不外溢、失败不写记录、沉默不计负面)**必须精确断言** —— 放宽它们等于没有验证;
 - **启发式**(阶段分类、适配度、漂移档位、相关度)**用区间、方向与相对比较**,
@@ -149,7 +149,7 @@
 
 ## 📌 补充:跨群共享与来源可公开性闸门
 
-选择与发送阶段要落实两条设计,见 `docs/prompt-and-learning-design.md` 第十五、13.8 节。
+选择与发送阶段要落实两条设计,见 `docs/working/prompt-and-learning-design.md` 第十五、13.8 节。
 
 ### A. 来源可公开性(13.8)—— 决定能否出群
 

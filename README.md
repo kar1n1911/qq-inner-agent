@@ -25,7 +25,7 @@ dashboard and the CLI, talking to the Rust core over a local NDJSON control sock
 prompt JSON contract are unchanged. The old Node core is archived on the `js-legacy`
 branch (marked "no longer updated"); the Rust core is the only implementation in development.
 
-See [`docs/rust-port/ARCHITECTURE.md`](docs/rust-port/ARCHITECTURE.md) for the module map
+See [`docs/working/rust-port/ARCHITECTURE.md`](docs/working/rust-port/ARCHITECTURE.md) for the module map
 and phase history, and [`CHANGELOG.md`](CHANGELOG.md) for the release notes.
 
 ## Contents

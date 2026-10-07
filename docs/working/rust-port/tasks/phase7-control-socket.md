@@ -3,8 +3,8 @@
 
 ## 必读
 
-- `docs/rust-port/ARCHITECTURE.md` —— **第 5 节是控制协议 v1 的权威定义**,第 6.1 节是不可变更契约
-- `docs/rust-port/SURVEY.md` —— 第 5 节是仪表盘全部路由与 `snapshot()` 字段
+- `docs/working/rust-port/ARCHITECTURE.md` —— **第 5 节是控制协议 v1 的权威定义**,第 6.1 节是不可变更契约
+- `docs/working/rust-port/SURVEY.md` —— 第 5 节是仪表盘全部路由与 `snapshot()` 字段
 - `src/dashboard.mjs`、`src/settings.mjs`、`src/cli.mjs`
 
 ## 任务:P7 —— 控制套接字 + 仪表盘瘦客户端化
@@ -68,7 +68,7 @@ Rust 只做 1 秒 revision 轮询。不要新增 `config.set`。
 
 ## ⛔ 本阶段**不要**实现的设计(重要)
 
-`docs/prompt-and-learning-design.md` 里记录了几项**已设计但尚未实施**的改动。
+`docs/working/prompt-and-learning-design.md` 里记录了几项**已设计但尚未实施**的改动。
 本项目的铁律是**与现行 JS 行为逐字对齐**,所以在本阶段:
 
 - **不要**实现提示词分层重构(把身份/背景与任务契约、行为准则拆开);

@@ -12,8 +12,8 @@
 
 ## 必读
 
-- `docs/rust-port/ARCHITECTURE.md`(不可变更的契约)
-- `docs/rust-port/SURVEY.md` —— **第 8.5、8.6 节**(活动节奏与入群观察),第 3 节(表结构)
+- `docs/working/rust-port/ARCHITECTURE.md`(不可变更的契约)
+- `docs/working/rust-port/SURVEY.md` —— **第 8.5、8.6 节**(活动节奏与入群观察),第 3 节(表结构)
 - `src/activity.mjs`(44 行)、`src/orientation.mjs`、`src/policy.mjs` 的 `normalize`
 
 ## 任务:P5 —— 事件解析、活动节奏、入群观察
@@ -90,7 +90,7 @@
 
 ## ⛔ 本阶段**不要**实现的设计(重要)
 
-`docs/prompt-and-learning-design.md` 里记录了几项**已设计但尚未实施**的改动。
+`docs/working/prompt-and-learning-design.md` 里记录了几项**已设计但尚未实施**的改动。
 本项目的铁律是**与现行 JS 行为逐字对齐**,所以在本阶段:
 
 - **不要**实现提示词分层重构(把身份/背景与任务契约、行为准则拆开);

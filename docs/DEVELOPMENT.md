@@ -2,7 +2,7 @@
 
 > 本文件是给**开发者**看的系统地图:按系统拆分,标注每个功能实现在哪个文件。
 > 它是"在哪改"的索引,不是设计讨论。设计与阶段的临时工作文档见
-> [`docs/prompt-and-learning-design.md`](prompt-and-learning-design.md) 与 [`docs/rust-port/`](rust-port/)。
+> [`docs/working/prompt-and-learning-design.md`](prompt-and-learning-design.md) 与 [`docs/working/rust-port/`](rust-port/)。
 
 ## 系统总览
 

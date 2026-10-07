@@ -14,7 +14,7 @@ P6a 已把 `Engine` 核心实现好,本阶段把它**接成可运行进程**:
 1. **接线**:`Config`/`Settings` 加载 → `Store::open` → `Provider` → `OneBot` → `Engine`,
    用 `config.dataDir` 下的真实路径(不是临时目录);
 2. **`status()` 原子写**:每 5 秒原子写 `data/status.json`,**字段与语义逐字对齐现有实现**
-   (见 `docs/rust-port/ARCHITECTURE.md` 第 6.1 节的回归红线、`docs/rust-port/SURVEY.md` 第 5 节);
+   (见 `docs/working/rust-port/ARCHITECTURE.md` 第 6.1 节的回归红线、`docs/working/rust-port/SURVEY.md` 第 5 节);
 3. **revision 监视器**:每 1 秒比较 revision,检测到 `.settings-write` 时**暂停重载**,
    存在该标记时不得在写入中途读取;
 4. **配置热重载语义**:停止引擎 → 保留仍被允许的 chat 状态(重置 `busy`/`lastThink`)

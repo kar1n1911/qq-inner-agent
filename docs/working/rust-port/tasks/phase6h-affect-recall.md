@@ -1,6 +1,6 @@
 # P6h 剩余设计实现(状态指标 + 二维心情 + 记忆召回)
 
-设计权威:`docs/prompt-and-learning-design.md` **第六、七、八节**。
+设计权威:`docs/working/prompt-and-learning-design.md` **第六、七、八节**。
 
 ## 定位
 

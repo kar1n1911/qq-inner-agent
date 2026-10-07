@@ -4,7 +4,7 @@
 
 ## 定位
 
-`docs/prompt-and-learning-design.md` **第九节**。"要不要说话"是三件事,输入不同,必须拆开:
+`docs/working/prompt-and-learning-design.md` **第九节**。"要不要说话"是三件事,输入不同,必须拆开:
 
 | 层 | 决策 | 主要输入 |
 | --- | --- | --- |

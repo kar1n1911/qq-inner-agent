@@ -52,9 +52,9 @@ NDJSON 控制套接字(`data/control.sock`)通信。配置、数据库 schema、
 ### 已知遗留(非阻塞)
 
 - **P11 测试重写**(把 parity 测试固化为 Rust 金标准、移除 `node` 依赖)因 codex 额度暂停,
-  规格见 `docs/rust-port/tasks/phase11-test-rewrite.md`,留有 WIP 检查点于分支 `pebrel/rust-testrewrite`。
+  规格见 `docs/working/rust-port/tasks/phase11-test-rewrite.md`,留有 WIP 检查点于分支 `pebrel/rust-testrewrite`。
 - **性能对比**(内存 / CPU / 延迟)留待后续。
-- `docs/prompt-and-learning-design.md` 中的**提示词分层、学习分诊、affect 指标、记忆召回
+- `docs/working/prompt-and-learning-design.md` 中的**提示词分层、学习分诊、affect 指标、记忆召回
   下钻**等设计已记录,尚未实施。
 
 ## 1.1.0 —— 剩余设计落地 + 测试重写 + 话题来源

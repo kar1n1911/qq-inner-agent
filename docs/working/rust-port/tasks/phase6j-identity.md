@@ -1,6 +1,6 @@
 # P6j 身份自治(§22)
 
-设计权威:`docs/prompt-and-learning-design.md` 第二十二节。
+设计权威:`docs/working/prompt-and-learning-design.md` 第二十二节。
 
 ## 定位
 全新功能,只做 Rust、开关化默认关闭。改账号身份(昵称/群名片/头像)属高风险,需 `ownerUin` 确认。

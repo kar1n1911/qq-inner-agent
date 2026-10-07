@@ -8,8 +8,8 @@
 
 ## 必读
 
-- `docs/rust-port/ARCHITECTURE.md`(第 6.1 节列出本阶段必须落地的两项性能优化)
-- `docs/rust-port/SURVEY.md` —— **第 8.7、8.8 节**是记忆与表达的算法要点,第 3 节是相关表结构
+- `docs/working/rust-port/ARCHITECTURE.md`(第 6.1 节列出本阶段必须落地的两项性能优化)
+- `docs/working/rust-port/SURVEY.md` —— **第 8.7、8.8 节**是记忆与表达的算法要点,第 3 节是相关表结构
 - `src/memory.mjs`、`src/memory-ranking.mjs`、`src/expression.mjs`(逐行读完,唯一真源)
 
 ## 任务:P4 —— 记忆 / 排序 / 表达
@@ -117,7 +117,7 @@ P1b(store)因为 5 小时额度限制,**有意只做了 schema 与核心查询**
 
 ## ⛔ 本阶段**不要**实现的设计(重要)
 
-`docs/prompt-and-learning-design.md` 里记录了几项**已设计但尚未实施**的改动。
+`docs/working/prompt-and-learning-design.md` 里记录了几项**已设计但尚未实施**的改动。
 本项目的铁律是**与现行 JS 行为逐字对齐**,所以在本阶段:
 
 - **不要**实现提示词分层重构(把身份/背景与任务契约、行为准则拆开);
@@ -135,7 +135,7 @@ P1b(store)因为 5 小时额度限制,**有意只做了 schema 与核心查询**
 
 ## 📌 补充(后加的设计,优先级高于本文前面的部分)
 
-`docs/prompt-and-learning-design.md` 后来补了第十六节(落库前自我审核)与第十五节(近似群自动跨群共享)。
+`docs/working/prompt-and-learning-design.md` 后来补了第十六节(落库前自我审核)与第十五节(近似群自动跨群共享)。
 
 **⚠️ 这两项都改动了已经迁移完成的行为,因此必须做成可开关且默认关闭** ——
 默认路径要与 JS 逐字一致,既有的 `memory_parity` 等交叉验证才能继续通过;
@@ -186,7 +186,7 @@ P1b(store)因为 5 小时额度限制,**有意只做了 schema 与核心查询**
 
 ## 📌 测试强度:不变量精确,启发式用区间与趋势
 
-见 `docs/prompt-and-learning-design.md` **第十八节**。前面"把设计规则逐条变成断言"的要求要按此**分级**:
+见 `docs/working/prompt-and-learning-design.md` **第十八节**。前面"把设计规则逐条变成断言"的要求要按此**分级**:
 
 - **不变量**(去重、只采人类、不外溢、失败不写记录、沉默不计负面)**必须精确断言** —— 放宽它们等于没有验证;
 - **启发式**(阶段分类、适配度、漂移档位、相关度)**用区间、方向与相对比较**,

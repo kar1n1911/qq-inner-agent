@@ -23,7 +23,7 @@
 schema、`status.json` 与模型提示词 JSON 契约保持不变。旧 Node 内核已归档到 `js-legacy`
 分支（标记"不再更新"），Rust 内核是唯一在更新的实现。
 
-模块映射与阶段历史见 [`docs/rust-port/ARCHITECTURE.md`](docs/rust-port/ARCHITECTURE.md)，
+模块映射与阶段历史见 [`docs/working/rust-port/ARCHITECTURE.md`](docs/working/rust-port/ARCHITECTURE.md)，
 发布说明见 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## 目录

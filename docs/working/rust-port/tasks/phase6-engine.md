@@ -12,8 +12,8 @@
 
 ## 必读
 
-- `docs/rust-port/ARCHITECTURE.md`(不可变更契约)
-- `docs/rust-port/SURVEY.md` —— **第 2 节是 48 步 cycle 调用链**,**第 8.2 节是引擎要点**,
+- `docs/working/rust-port/ARCHITECTURE.md`(不可变更契约)
+- `docs/working/rust-port/SURVEY.md` —— **第 2 节是 48 步 cycle 调用链**,**第 8.2 节是引擎要点**,
   第 9 节是性能热点
 - `src/engine.mjs`(259 行,**逐行读完**)与 `src/main.mjs`(97 行)
 
@@ -86,7 +86,7 @@ JS 是单线程事件循环 + `AbortController`;Rust 是 tokio 多任务。请:
 
 ## ⚠️ 补充:引擎必须包含的"更像真人"行为
 
-`docs/human-like-replies.md` 里设计了四项行为改进。**提示词部分已经在 JS 侧实现,并经生成器
+`docs/working/human-like-replies.md` 里设计了四项行为改进。**提示词部分已经在 JS 侧实现,并经生成器
 同步到了 `prompts.rs`**(长度分档 `lengthTarget` 与 `policy::pick_length_target` 也已就位)。
 但下面这些**是引擎行为**,不是提示词,必须在 P6 落地 —— 否则移植后这些设计就丢了:
 
@@ -111,7 +111,7 @@ JS 是单线程事件循环 + `AbortController`;Rust 是 tokio 多任务。请:
 
 ## ⛔ 本阶段**不要**实现的设计(重要)
 
-`docs/prompt-and-learning-design.md` 里记录了几项**已设计但尚未实施**的改动。
+`docs/working/prompt-and-learning-design.md` 里记录了几项**已设计但尚未实施**的改动。
 本项目的铁律是**与现行 JS 行为逐字对齐**,所以在本阶段:
 
 - **不要**实现提示词分层重构(把身份/背景与任务契约、行为准则拆开);
@@ -129,7 +129,7 @@ JS 是单线程事件循环 + `AbortController`;Rust 是 tokio 多任务。请:
 
 ## 📌 补充:三层决策架构与零模型初筛
 
-见 `docs/prompt-and-learning-design.md` **第九节**。"要不要说话"是三件事,输入完全不同:
+见 `docs/working/prompt-and-learning-design.md` **第九节**。"要不要说话"是三件事,输入完全不同:
 
 | 层 | 决策 | 主要输入 |
 | --- | --- | --- |
@@ -147,7 +147,7 @@ JS 是单线程事件循环 + `AbortController`;Rust 是 tokio 多任务。请:
 
 ## 📌 补充:虚构的界线(需要同时改提示词)
 
-见 `docs/prompt-and-learning-design.md` **第十四节**。`boundary` 里"不得编造亲身经历"要改为**责任线**:
+见 `docs/working/prompt-and-learning-design.md` **第十四节**。`boundary` 里"不得编造亲身经历"要改为**责任线**:
 
 - **放开**:无害的经历虚构、情绪/状态表达;
 - **仍然禁止**:涉及对方决策或利益的说法、被直接问时冒充人类、涉及第三方的具体事实。

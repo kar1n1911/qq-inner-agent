@@ -7,8 +7,8 @@
 
 ## 必读
 
-- `docs/rust-port/ARCHITECTURE.md`(第 4/6 节:不可变更契约与模块映射)
-- `docs/rust-port/SURVEY.md` —— **第 3 节是 17 张表的完整 schema 与保留期规则**,第 9 节有性能热点结论
+- `docs/working/rust-port/ARCHITECTURE.md`(第 4/6 节:不可变更契约与模块映射)
+- `docs/working/rust-port/SURVEY.md` —— **第 3 节是 17 张表的完整 schema 与保留期规则**,第 9 节有性能热点结论
 - `src/store.mjs`(唯一真源,**逐行读完**)
 
 ## 任务:P1b —— SQLite 存储层

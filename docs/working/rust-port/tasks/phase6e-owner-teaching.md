@@ -4,7 +4,7 @@
 
 ## 定位
 
-新功能,**只做 Rust、开关化默认关闭**。见 `docs/prompt-and-learning-design.md` **第二十节**(唯一权威设计)。
+新功能,**只做 Rust、开关化默认关闭**。见 `docs/working/prompt-and-learning-design.md` **第二十节**(唯一权威设计)。
 
 ## 需求
 

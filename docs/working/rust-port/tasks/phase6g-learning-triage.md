@@ -1,6 +1,6 @@
 # P6g 剩余设计实现(学习管线:分诊 + 自我审核)
 
-设计权威:`docs/prompt-and-learning-design.md` **第四、十六节**。
+设计权威:`docs/working/prompt-and-learning-design.md` **第四、十六节**。
 
 ## 定位
 
