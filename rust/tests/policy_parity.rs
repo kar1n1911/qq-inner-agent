@@ -8,7 +8,7 @@ use qq_inner_core::engine::policy::{
     active_at, allowed, local_minutes_of_day, pick_length_target, quiet, repeated, Allocation,
     Candidate, CandidateKind,
 };
-use qq_inner_core::text::{similarity, terms};
+use qq_inner_core::memory::text::{similarity, terms};
 use serde_json::{json, Value};
 use std::fs;
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};

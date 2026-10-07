@@ -1,7 +1,11 @@
 //! 三层记忆。连接由 Store 统一拥有，不创建新 schema、不读取真实 data/。
+pub mod ranking;
+pub mod text;
+pub mod memory_unicode;
+
 use crate::{
     config::{js_string, truthy, Memory},
-    ranking::rank_memories,
+    memory::ranking::rank_memories,
     store::{decode, uuid, Store},
 };
 use anyhow::{ensure, Result};

@@ -11,10 +11,8 @@ pub mod memory;
 pub mod onebot;
 pub mod prompts;
 pub mod provider;
-pub mod ranking;
 pub mod settings;
 pub mod store;
-pub mod text;
 
 pub mod humanize;
 

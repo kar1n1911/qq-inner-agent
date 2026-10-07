@@ -4,7 +4,7 @@ use qq_inner_core::{
     config::{self, Agent, Emoji, Expression, Memory},
     expression::{self, ExpressionMemory},
     memory::{self, LayeredMemory},
-    ranking,
+    memory::ranking,
     store::{LayeredUpdate, ScopedOptions, Store},
 };
 use serde_json::{json, Value};

@@ -9,7 +9,7 @@
 | 系统 | 职责 | 核心文件 |
 | --- | --- | --- |
 | [人格系统](#1-人格系统) | persona / 身份自治 / 过往情景 / 人类化 | `config.rs` `expression.rs` `identity.rs` `backstory.rs` `humanize.rs` `prompts.rs` |
-| [记忆系统](#2-记忆系统) | 三层记忆 / 召回排序 / 学习 / 词元 | `memory.rs` `ranking.rs` `store/learning.rs` `conversation.rs` `text.rs` |
+| [记忆系统](#2-记忆系统) | 三层记忆 / 召回排序 / 学习 / 词元 | `memory/mod.rs` `memory/ranking.rs` `store/learning.rs` `conversation.rs` `memory/text.rs` |
 | [情绪系统](#3-情绪系统) | 心情/认同/好感 + 二维 disposition | `affect.rs` |
 | [记忆召回](#4-记忆召回) | recall 下钻 | `recall.rs` |
 | [决策系统](#5-决策系统) | 引擎 48 步 / 三层决策 / 策略 / 发送 / 活跃 / 观察 | `engine/mod.rs` `engine/decision.rs` `engine/policy.rs` `engine/sending.rs` `engine/activity.rs` `engine/orientation.rs` |
@@ -50,12 +50,12 @@ agent "是谁、怎么说话"这一整条链。
 
 | 功能 | 实现位置 |
 | --- | --- |
-| 三层记忆(short/long/notebook + traits) | `memory.rs` — `LayeredMemory` 等;表结构在 `store.rs` 的建表 |
-| 召回排序(词汇重叠 + 中文双字 + 时效) | `ranking.rs` — 稀疏召回,调用方先限 chat/subject |
+| 三层记忆(short/long/notebook + traits) | `memory/mod.rs` — `LayeredMemory` 等;表结构在 `store.rs` 的建表 |
+| 召回排序(词汇重叠 + 中文双字 + 时效) | `memory/ranking.rs` — 稀疏召回,调用方先限 chat/subject |
 | 学习事务(落库前 self-review) | `store/learning.rs`;引擎调用在 `engine/mod.rs` |
 | 结构判断(沉默不转学习信号) | `conversation.rs` |
-| 词元化 / 相似度 | `text.rs` — `terms()`/`similarity()`(对应旧 `store.mjs`) |
-| 中文检索(unicode 归一) | `memory_unicode.rs` |
+| 词元化 / 相似度 | `memory/text.rs` — `terms()`/`similarity()`(对应旧 `store.mjs`) |
+| 中文检索(unicode 归一) | `memory/memory_unicode.rs` |
 
 ---
 

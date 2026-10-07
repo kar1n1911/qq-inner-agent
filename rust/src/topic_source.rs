@@ -118,7 +118,7 @@ fn tokens(s: &str) -> BTreeSet<String> {
             _ => c,
         })
         .collect();
-    crate::text::terms(&normalized)
+    crate::memory::text::terms(&normalized)
         .into_iter()
         .filter(|s| {
             ![

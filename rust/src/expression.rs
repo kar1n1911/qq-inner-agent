@@ -5,7 +5,7 @@ use crate::{
         array, memory_subjects, merge_sources, newest, num, same_source, text, trim, unit,
         valid_text,
     },
-    ranking::rank_memories,
+    memory::ranking::rank_memories,
     store::{decode, Store},
 };
 use anyhow::{ensure, Result};

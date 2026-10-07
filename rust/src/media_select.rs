@@ -4,7 +4,7 @@ use crate::{
     engine::policy::Message,
     media_source::{self, SourceTier},
     store::Store,
-    text::{similarity, terms},
+    memory::text::{similarity, terms},
 };
 use anyhow::{ensure, Result};
 use rusqlite::params;

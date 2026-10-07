@@ -7,7 +7,7 @@
 //! `chrono-tz`，两者的数据库版本不同。`tests/policy_parity.rs` 会用真实 Node 在多个
 //! 时区与时刻上比对。
 use crate::config::{Agent, QuietHours, Schedule};
-use crate::text::similarity;
+use crate::memory::text::similarity;
 use chrono::{DateTime, FixedOffset, Local, TimeZone, Timelike, Utc};
 use chrono_tz::Tz;
 use std::cmp::Ordering;
