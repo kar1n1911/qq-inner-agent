@@ -1,6 +1,45 @@
 // Only application-owned UI text is translated. Chat contents, model IDs, logs,
 // configuration editors and other user-provided values remain untouched.
 const pairs = `
+Advanced|高级
+Owner private teaching commands /记住 /黑话 /还原|主人私聊教学指令 /记住 /黑话 /还原
+Owner QQ ID|主人 QQ 号
+Feature switches|功能开关
+Emotions (mood / affinity)|情绪（心情/好感）
+Deeper memory recall|记忆召回下钻
+Three-layer decisions|三层决策
+Learn emoji frequency|表情频率学习
+Emoji-only replies|只发表情
+Multiple message bubbles|多气泡
+Cross-group forwarding|群间转发
+Send and receive merged forwards|合并转发收发
+Autonomous identity|身份自治
+Persona growth|人格成长
+Allow nickname changes|允许修改昵称
+Allow group card changes|允许修改群名片
+Allow avatar changes|允许修改头像
+Allow signature changes|允许修改签名
+Past scenarios|过往情景
+Advanced parameters|高级参数
+Identity|身份自治
+Minimum identity traits|身份自治最少特征数
+Minimum identity age (days)|身份自治最短积累天数
+Identity cooldown (days)|身份修改冷却天数
+Relay|群间转发
+Relay relevance threshold|转发相关度阈值
+High-risk relay threshold|高风险转发阈值
+Maximum merged messages|合并消息数上限
+Allow high-risk forwarding|允许高风险转发
+External topic sources|外部话题来源
+Topic relevance threshold|话题相关度阈值
+Topic fetch interval (hours)|话题抓取间隔（小时）
+Topics per hour|每小时话题上限
+Topic request budget|话题请求次数上限
+Topic item budget|话题条目上限
+Total topic character budget|话题总字符上限
+Topic cache lifetime (hours)|话题缓存时长（小时）
+GitHub queries (one per line)|GitHub 查询（每行一项）
+RSS feed URLs (one per line)|RSS 订阅地址（每行一项）
 Good morning|早上好
 Good afternoon|下午好
 Good evening|晚上好

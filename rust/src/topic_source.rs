@@ -10,6 +10,8 @@ use std::{
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct Settings {
+    #[serde(default)]
+    pub enabled: bool,
     pub github: Vec<String>,
     /// RSS/论坛须提供 RSS 订阅地址，不解析任意 HTML 页面。
     pub feeds: Vec<String>,
@@ -25,6 +27,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            enabled: false,
             github: vec![],
             feeds: vec![],
             interval_hours: 1.,
@@ -40,7 +43,7 @@ impl Default for Settings {
 }
 impl Settings {
     pub fn enabled(&self) -> bool {
-        !self.github.is_empty() || !self.feeds.is_empty()
+        self.enabled && (!self.github.is_empty() || !self.feeds.is_empty())
     }
     pub fn validate(&self) -> Result<()> {
         ensure!(
@@ -367,6 +370,7 @@ mod tests {
     use super::*;
     fn settings() -> Settings {
         Settings {
+            enabled: true,
             feeds: vec!["https://example.org/rss".into()],
             ..Default::default()
         }
@@ -541,15 +545,31 @@ mod tests {
         server.join().unwrap();
     }
     #[test]
+    fn master_switch_requires_sources_and_skips_fetch_when_disabled() {
+        let legacy: Settings = serde_json::from_value(
+            serde_json::json!({"feeds": ["https://example.org/rss"]}),
+        ).unwrap();
+        assert!(!legacy.enabled);
+        assert!(!legacy.enabled());
+        assert!(!Settings { enabled: true, ..Default::default() }.enabled());
+        assert!(settings().enabled());
+        assert!(Settings { enabled: true, github: vec!["esp32".into()], ..Default::default() }.enabled());
+        let disabled = Settings { enabled: false, ..settings() };
+        assert!(Sources::default().collect(&disabled, "g", 0., &interests("esp32", &[]), |_, _| {
+            panic!("disabled source must not fetch")
+        }).is_empty());
+    }
+    #[test]
     fn config_defaults_and_validation() {
         let default = Settings::default();
         assert!(!default.enabled());
         assert!(default.validate().is_ok());
         let mut config = crate::config::defaults();
         config["agent"]["topicSource"] =
-            serde_json::json!({"github":["esp32","topic:sdr"],"maxItems":2});
+            serde_json::json!({"enabled":true,"github":["esp32","topic:sdr"],"maxItems":2});
         assert!(crate::config::validate(&config).is_ok());
         for bad in [
+            serde_json::json!({"enabled":"true"}),
             serde_json::json!({"maxItems":0}),
             serde_json::json!({"threshold":0}),
             serde_json::json!({"feeds":["file:///etc/passwd"]}),

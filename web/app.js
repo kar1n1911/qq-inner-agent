@@ -15,7 +15,7 @@ startI18n();
 let csrf = '', saved = null, dirty = false, polling = false, logs = [], online = false;
 let learningView = '';
 const get = (obj, key) => key.split('.').reduce((o, k) => o?.[k], obj);
-const set = (obj, key, value) => { const parts = key.split('.'); const end = parts.pop(); parts.reduce((o,k) => o[k], obj)[end] = value; };
+const set = (obj, key, value) => { const parts = key.split('.'); const end = parts.pop(); parts.reduce((o,k) => o[k] ??= {}, obj)[end] = value; };
 const ids = value => [...new Set(value.split(/[\s,]+/).filter(Boolean))];
 function notice(text, error = false) { $('notice').textContent = text; $('notice').classList.toggle('error', error); $('notice').hidden = !text; }
 function signedOut() { dirty = false; csrf = ''; online = false; $('console').hidden = true; $('login').hidden = false; }
@@ -26,19 +26,20 @@ async function api(url, options = {}) {
   if (!response.ok) { if (response.status === 401) signedOut(); throw Error(data.error || 'Request failed'); }
   return data;
 }
-function changed() { dirty = true; $('dirty-dot').hidden = false; $('apply-status').textContent = 'Unsaved changes'; }
+function applyStatus(text) { for (const id of ['apply-status', 'advanced-apply-status']) $(id).textContent = text; }
+function changed() { dirty = true; $('dirty-dot').hidden = false; applyStatus('Unsaved changes'); }
 function page(name) {
   for (const p of document.querySelectorAll('.page')) p.hidden = p.id !== name;
   for (const b of document.querySelectorAll('.nav')) b.classList.toggle('active', b.dataset.page === name);
-  $('page-title').textContent = { overview: 'Overview', config: 'Configuration', activity: 'Activity & logs' }[name];
+  $('page-title').textContent = { overview: 'Overview', config: 'Configuration', activity: 'Activity & logs', advanced: 'Advanced' }[name];
 }
 function populate(data) {
   saved = data;
   setLanguage(data.config.ui.language);
   $('interface-language').value = data.config.ui.language;
   for (const input of document.querySelectorAll('[data-config]')) {
-    const value = get(data.config, input.dataset.config);
-    if (input.type === 'checkbox') input.checked = value;
+    const value = get(data.config, input.dataset.config) ?? (input.dataset.type ? [] : input.dataset.default ?? '');
+    if (input.type === 'checkbox') input.checked = Boolean(value);
     else input.value = input.dataset.type === 'ids' ? value.join(', ') : input.dataset.type === 'lines' ? value.join('\n') : value;
   }
   const q = data.config.agent.quietHours;
@@ -48,7 +49,7 @@ function populate(data) {
   $('api-key').value = ''; $('onebot-token').value = ''; $('clear-api-key').checked = false;
   $('advanced-json').value = JSON.stringify(data.config, null, 2);
   $('use-advanced').checked = false; $('threshold-output').textContent = data.config.agent.threshold.toFixed(2);
-  dirty = false; $('dirty-dot').hidden = true;
+  dirty = false; $('dirty-dot').hidden = true; applyStatus('No pending changes');
 }
 function formConfig() {
   if ($('use-advanced').checked) return JSON.parse($('advanced-json').value);
@@ -91,7 +92,7 @@ async function refresh() {
     $('activity-rhythm-status').textContent = fresh && rhythm?.enabled ? `${translate(rhythm.active ? 'Active block' : 'Rest block')} · ${translate('Next block selection')}: ${time(rhythm.until)} · ${translate('Activity probability at selection')}: ${(rhythm.probability * 100).toFixed(1)}% · ${translate('Current curve probability')}: ${(rhythm.currentProbability * 100).toFixed(1)}%` : '';
     const applied = fresh && s.appliedRevision === state.savedRevision && !s.reloading;
     $('applied-indicator').textContent = applied ? 'SETTINGS APPLIED' : state.serviceState !== 'active' ? 'SERVICE STOPPED' : 'APPLYING SETTINGS';
-    if (!dirty) $('apply-status').textContent = s?.reloadError || (applied ? 'Saved settings are active' : state.serviceState !== 'active' ? 'Saved. Start the service to apply.' : 'Waiting for the agent to apply settings…');
+    if (!dirty) applyStatus(s?.reloadError || (applied ? 'Saved settings are active' : state.serviceState !== 'active' ? 'Saved. Start the service to apply.' : 'Waiting for the agent to apply settings…'));
     $('threshold-preview').textContent = saved?.config.agent.threshold.toFixed(2) ?? '—';
     $('cooldown-preview').textContent = `${saved?.config.agent.proactiveCooldownSeconds ?? '—'}s`;
     $('api-calls').textContent = s?.apiCallsThisRun ?? '—';
@@ -197,14 +198,16 @@ $('logout').addEventListener('click', async () => { try { await api('/api/logout
 $('refresh').addEventListener('click', refresh);
 $('config-form').addEventListener('input', () => { changed(); $('threshold-output').textContent = Number(document.querySelector('[data-config="agent.threshold"]').value).toFixed(2); });
 $('config-form').addEventListener('submit', async e => {
-  e.preventDefault(); $('save').disabled = true;
+  e.preventDefault(); document.querySelectorAll('[data-save]').forEach(b => b.disabled = true);
   try {
     const result = await api('/api/config', { method: 'PUT', body: JSON.stringify({ revision: saved.revision, config: formConfig(), apiKey: $('api-key').value, onebotToken: $('onebot-token').value, clearApiKey: $('clear-api-key').checked }) });
     populate(result); notice('Settings saved. The agent is applying them now.'); await refresh();
   } catch (e) { notice(e.message, true); }
-  finally { $('save').disabled = false; }
+  finally { document.querySelectorAll('[data-save]').forEach(b => b.disabled = false); }
 });
-$('discard').addEventListener('click', async () => { try { populate(await api('/api/config')); notice('Loaded saved settings.'); } catch(e) { notice(e.message, true); } });
+document.querySelectorAll('[data-discard]').forEach(b => b.addEventListener('click', async () => { try { populate(await api('/api/config')); notice('Loaded saved settings.'); } catch(e) { notice(e.message, true); } }));
+// Reveal invalid controls even when they belong to the other configuration page.
+$('config-form').addEventListener('invalid', e => page(e.target.closest('.page').id), true);
 $('load-json').addEventListener('click', () => { const use = $('use-advanced').checked; $('use-advanced').checked = false; $('advanced-json').value = JSON.stringify(formConfig(), null, 2); $('use-advanced').checked = use; });
 $('deepseek-preset').addEventListener('click', () => {
   const kind = document.querySelector('[data-config="provider.kind"]').value;
