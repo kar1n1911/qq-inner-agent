@@ -2198,3 +2198,30 @@ async fn stopping_cancels_in_flight_backfill() {
     assert_eq!(*h.orientation_reads.lock().unwrap(), vec!["get_group_msg_history"]);
     assert!(h.rows("SELECT * FROM messages").is_empty());
 }
+
+#[tokio::test]
+async fn backfill_ingests_expired_history_without_replying() {
+    let (e, h) = setup(&base(
+        "expired_backfill",
+        json!({"learning":{"enabled":true},"observation":{"enabled":true}}),
+        vec![],
+    ));
+    let mut old = h.event(&json!({"id":"expired"}));
+    let ts = h.now() - e.config.agent.active_window_seconds - 3600.;
+    old["time"] = json!(ts);
+    e.ingest(&old).unwrap();
+    assert!(h.rows("SELECT * FROM messages").is_empty());
+    e.ingest_backfill(&old).unwrap();
+    e.ingest_backfill(&old).unwrap();
+    let messages = h.rows("SELECT * FROM messages");
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0]["ts"], ts);
+    assert_eq!(e.orientation.get("group:10").unwrap().unwrap().message_count, 1);
+    assert!(!h.rows("SELECT * FROM memory_layers WHERE layer='short_term'").is_empty());
+    assert!(e.chats().is_empty());
+    e.tick().unwrap();
+    e.wait_idle().await;
+    assert_eq!(*h.sends.lock().unwrap(), 0);
+    assert!(h.rows("SELECT * FROM calls").is_empty());
+    e.stop().await;
+}

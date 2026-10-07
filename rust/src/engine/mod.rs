@@ -398,7 +398,12 @@ impl Engine {
             return Ok(());
         }
         // 感知与值班解耦：离岗仍记录、观察和学习，是否发言由回复路径检查。
-        let Some(m) = policy::normalize(event, &self_id, a, now) else {
+        let message = if backfill {
+            policy::normalize_backfill(event, &self_id, a, now)
+        } else {
+            policy::normalize(event, &self_id, a, now)
+        };
+        let Some(m) = message else {
             return Ok(());
         };
         let value = serde_json::to_value(&m)?;
