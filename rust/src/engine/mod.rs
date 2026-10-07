@@ -17,7 +17,7 @@ use crate::{
     },
     media::media_select,
     memory::{array, num, parse_memory_updates, text, LayeredMemory},
-    onebot::{OneBot, OneBotError, State as TransportState},
+    transport::{OneBot, OneBotError, State as TransportState},
     prompts,
     store::{LayeredUpdate, ScopedOptions, Store},
 };
@@ -375,7 +375,7 @@ impl Engine {
         {
             let chat = format!("group:{}", js_string(&event["group_id"]));
             let previous = self.orientation.get(&chat)?.map(|r| r.epoch);
-            let ts = crate::onebot::js_number(&event["time"]);
+            let ts = crate::transport::js_number(&event["time"]);
             self.orientation
                 .joined(&chat, if ts == 0. || ts.is_nan() { now } else { ts })?;
             if previous != self.orientation.get(&chat)?.map(|r| r.epoch) {

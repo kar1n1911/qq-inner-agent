@@ -203,6 +203,4 @@ pub fn extract_text(kind: ProviderKind, data: &Value) -> Result<String, Provider
     Ok(content)
 }
 
-#[path = "provider_transport.rs"]
-mod transport;
-pub use transport::Provider;
+pub use super::provider_transport::Provider;

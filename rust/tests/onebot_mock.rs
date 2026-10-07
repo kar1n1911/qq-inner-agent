@@ -2,7 +2,7 @@
 use futures_util::{SinkExt, StreamExt};
 use qq_inner_core::{
     config,
-    onebot::{Notification, OneBot},
+    transport::{Notification, OneBot},
 };
 use serde_json::{json, Value};
 use tokio::{

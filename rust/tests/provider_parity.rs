@@ -4,7 +4,7 @@
 //! 状态码分类与响应正文提取。HTTP 传输与预算计数留到接入 store 的阶段。
 #[path = "golden/mod.rs"]
 mod golden;
-use qq_inner_core::provider::{
+use qq_inner_core::transport::provider::{
     classify_status, endpoint, extract_text, models_endpoint, parse_object, status_error,
     ProviderError, ProviderKind, StatusClass,
 };

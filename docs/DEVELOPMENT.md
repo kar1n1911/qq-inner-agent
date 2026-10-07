@@ -15,7 +15,7 @@
 | [决策系统](#5-决策系统) | 引擎 48 步 / 三层决策 / 策略 / 发送 / 活跃 / 观察 | `engine/mod.rs` `engine/decision.rs` `engine/policy.rs` `engine/sending.rs` `engine/activity.rs` `engine/orientation.rs` |
 | [素材系统](#6-素材系统) | 表情包采集 / 选择 / 来源可公开性 | `media/mod.rs` `media/media_select.rs` `media/media_source.rs` |
 | [话题来源](#7-话题来源-21) | 外部内容抓取 + 群间转发 | `topic/mod.rs` `topic/relay.rs` |
-| [传输系统](#8-传输系统) | OneBot v11 + LLM provider | `onebot.rs` `provider.rs` `provider_transport.rs` |
+| [传输系统](#8-传输系统) | OneBot v11 + LLM provider | `transport/mod.rs` `transport/provider.rs` `transport/provider_transport.rs` |
 | [存储与配置](#9-存储与配置) | SQLite / 观察期持久化 / 配置协议 / 文件协议 | `store.rs` `store/*.rs` `config.rs` `settings.rs` |
 | [控制与运行时](#10-控制与运行时) | 控制套接字 / 主循环 / 主人教学 | `control.rs` `main.rs` `persona/owner_teaching.rs` |
 
@@ -32,7 +32,7 @@ agent "是谁、怎么说话"这一整条链。
 | 基座人格 `agent.persona`(种子文本) | `config.rs` — `Agent.persona`(`RuntimeText`) |
 | 行为/回复风格/兴趣/变体 `agent.personality` | `config.rs` — `Agent.personality`;`persona/expression.rs` — `personality_context()` 组装成 payload |
 | 提示词里的 persona 注入 | `prompts.rs`(生成物,勿手改,见[提示词](#提示词));`engine/mod.rs` — formation/articulation payload 的 `persona` 字段 |
-| **身份自治**(§22:昵称/群名片/头像/签名自动外显 + 人格成长) | `persona/mod.rs` — `enough`/`propose`/`automate`/`grow`/`persona`/`backup`/`restore`;`onebot.rs` — `set_group_card`/`set_qq_profile`/`set_qq_avatar`/`set_signature` |
+| **身份自治**(§22:昵称/群名片/头像/签名自动外显 + 人格成长) | `persona/mod.rs` — `enough`/`propose`/`automate`/`grow`/`persona`/`backup`/`restore`;`transport/mod.rs` — `set_group_card`/`set_qq_profile`/`set_qq_avatar`/`set_signature` |
 | **模型自拟昵称**(贴吧式) | `persona/mod.rs` — `NAME_PROMPT`/`member_names`/`model_nickname`;引擎 tick 里调模型生成 |
 | **过往情景**(§23:不可变虚构自身过往) | `persona/backstory.rs` — `create`(只 INSERT)/`add_detail`(只追加)/`recall`;`engine/mod.rs` — articulation 前的 prepare/recall |
 | 人类化运行时片段(只发表情 / 多气泡指令) | `persona/humanize.rs` — `FACE_ONLY_INSTRUCTIONS`/`MULTI_BUBBLE_INSTRUCTIONS` |
@@ -90,7 +90,7 @@ agent "是谁、怎么说话"这一整条链。
 | 发送概率(六因子乘积 + 预测校验) | `engine/sending.rs` — `sending_probability`/`forecast_result` |
 | 活跃概率(高斯曲线) | `engine/activity.rs` — `activity_probability` |
 | 入群观察闸门 | `engine/orientation.rs`(纯逻辑);持久化在 `store/orientation.rs` |
-| forward 段收发(接收侧拉取合并聊天记录) | `engine/policy.rs` — `resolve_forwards`;`onebot.rs` — `get_forward_msg`/`send_forward` |
+| forward 段收发(接收侧拉取合并聊天记录) | `engine/policy.rs` — `resolve_forwards`;`transport/mod.rs` — `get_forward_msg`/`send_forward` |
 
 ---
 
@@ -117,8 +117,8 @@ agent "是谁、怎么说话"这一整条链。
 
 | 功能 | 实现位置 |
 | --- | --- |
-| OneBot v11 正向 WS(鉴权/心跳/重连/early 缓冲/echo 关联) | `onebot.rs` — `OneBot`/`send`/`send_media`/`send_forward`/`get_forward_msg`/`set_*` |
-| LLM provider(两种 API 格式 + 重试退避 + 预算) | `provider.rs`(纯逻辑 + HTTP);`provider_transport.rs`(阻塞传输在 blocking 池) |
+| OneBot v11 正向 WS(鉴权/心跳/重连/early 缓冲/echo 关联) | `transport/mod.rs` — `OneBot`/`send`/`send_media`/`send_forward`/`get_forward_msg`/`set_*` |
+| LLM provider(两种 API 格式 + 重试退避 + 预算) | `transport/provider.rs`(纯逻辑 + HTTP);`transport/provider_transport.rs`(阻塞传输在 blocking 池) |
 
 ---
 

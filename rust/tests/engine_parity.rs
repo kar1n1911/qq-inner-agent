@@ -8,7 +8,7 @@ use qq_inner_core::{
     config::{defaults, merge, Config},
     engine::orientation::{OrientationProvider, OrientationTransport},
     engine::{Engine, EngineTransport, Options},
-    onebot::{OneBotError, State},
+    transport::{OneBotError, State},
     store::Store,
 };
 use serde_json::{json, Value};

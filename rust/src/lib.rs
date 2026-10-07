@@ -4,12 +4,9 @@ pub mod control;
 pub mod engine;
 pub mod media;
 pub mod memory;
-pub mod onebot;
+pub mod persona;
 pub mod prompts;
-pub mod provider;
 pub mod settings;
 pub mod store;
-
 pub mod topic;
-
-pub mod persona;
+pub mod transport;

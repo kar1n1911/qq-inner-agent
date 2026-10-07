@@ -3,9 +3,9 @@ use crate::{
     config::{js_string, truthy, Agent, Observation},
     engine::policy::{clip_chars, js_trim, replace_cq},
     memory::{array, text, valid_text},
-    onebot::{js_number, OneBot},
+    transport::{js_number, OneBot},
     prompts::ORIENTATION,
-    provider::Provider,
+    transport::provider::Provider,
     store::{OrientationRow, Store},
 };
 use anyhow::{ensure, Result};

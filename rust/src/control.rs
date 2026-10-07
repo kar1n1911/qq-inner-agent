@@ -7,8 +7,8 @@
 //! 无换行的 EOF 不执行请求。输出也限制为 1 MiB；过大事件丢弃，响应返回错误。
 use crate::{
     config::{self, Config},
-    onebot::OneBot,
-    provider::Provider,
+    transport::OneBot,
+    transport::provider::Provider,
     store::Store,
 };
 use anyhow::{ensure, Result};
@@ -269,7 +269,7 @@ async fn dispatch(handler: &dyn Handler, line: &[u8]) -> Value {
 
 /// 网络边界可注入，行为测试不访问真实 QQ 或模型服务。
 pub trait Remote: Send + Sync {
-    fn state(&self) -> crate::onebot::State;
+    fn state(&self) -> crate::transport::State;
     fn request<'a>(&'a self, method: &'a str) -> BoxFuture<'a, Result<Value>>;
 }
 pub struct LiveRemote {
@@ -278,7 +278,7 @@ pub struct LiveRemote {
     pub config: Config,
 }
 impl Remote for LiveRemote {
-    fn state(&self) -> crate::onebot::State {
+    fn state(&self) -> crate::transport::State {
         self.bot.state()
     }
     fn request<'a>(&'a self, method: &'a str) -> BoxFuture<'a, Result<Value>> {
@@ -844,8 +844,8 @@ mod tests {
     }
     struct OfflineRemote;
     impl Remote for OfflineRemote {
-        fn state(&self) -> crate::onebot::State {
-            crate::onebot::State {
+        fn state(&self) -> crate::transport::State {
+            crate::transport::State {
                 connected: true,
                 online: true,
                 self_id: "42".into(),

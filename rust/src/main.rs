@@ -88,7 +88,7 @@ async fn main() -> Result<()> {
             } else {
                 String::new()
             };
-            let (bot, _notices) = qq_inner_core::onebot::OneBot::new(c.onebot, token);
+            let (bot, _notices) = qq_inner_core::transport::OneBot::new(c.onebot, token);
             match bot.check().await {
                 Ok(state) => {
                     println!(
@@ -147,8 +147,8 @@ use qq_inner_core::{
     engine::{Clock, Engine, Logger, Options},
     persona::expression::ExpressionMemory,
     memory::LayeredMemory,
-    onebot::{Notification, OneBot},
-    provider::Provider,
+    transport::{Notification, OneBot},
+    transport::provider::Provider,
     settings,
     store::Store,
 };

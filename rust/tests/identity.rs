@@ -5,7 +5,7 @@ use qq_inner_core::{
     engine::orientation::{OrientationProvider, OrientationTransport},
     engine::{Engine, EngineTransport, Options},
     persona as identity,
-    onebot::{OneBotError, State},
+    transport::{OneBotError, State},
     store::Store,
 };
 use rusqlite::params;
