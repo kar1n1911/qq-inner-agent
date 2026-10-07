@@ -11,7 +11,10 @@ use crate::{
 use anyhow::{ensure, Result};
 use futures_util::future::BoxFuture;
 use serde_json::{json, Value};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex, MutexGuard},
+};
 use tokio::sync::watch;
 
 fn clip(v: &Value, max: usize) -> String {
@@ -157,6 +160,7 @@ pub struct GroupOrientation {
     transport: Arc<dyn OrientationTransport>,
     now: Arc<dyn Fn() -> f64 + Send + Sync>,
     signal: watch::Receiver<bool>,
+    collection_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 impl GroupOrientation {
     pub fn new(
@@ -174,6 +178,7 @@ impl GroupOrientation {
             transport,
             now,
             signal,
+            collection_locks: Mutex::default(),
         };
         if this.agent.observation.enabled {
             for id in &this.agent.allowed_groups {
@@ -217,6 +222,82 @@ impl GroupOrientation {
         // 重新入群递增 epoch 后，采集和 provider 的在途结果都失效；取消也不得提交。
         Ok(!*self.signal.borrow() && self.get(chat)?.is_some_and(|r| r.epoch == epoch))
     }
+    /// 入群/定时立即采集，不再等首次发言；before_speak 共用此入口兜底。
+    pub async fn collect(&self, chat: &str, epoch: i64) -> Result<bool> {
+        let c = &self.agent.observation;
+        if !c.enabled || !chat.starts_with("group:") {
+            return Ok(false);
+        }
+        let lock = self
+            .collection_locks
+            .lock()
+            .map_err(|_| anyhow::anyhow!("collection_locks_poisoned"))?
+            .entry(chat.to_owned())
+            .or_default()
+            .clone();
+        // 仅持有异步的按群采集锁；Store 锁在任何 await 前已释放。
+        let _guard = lock.lock().await;
+        if !self.fresh(chat, epoch)? {
+            return Ok(false);
+        }
+        let Some(row) = self.get(chat)? else {
+            return Ok(false);
+        };
+        if row.collected != 0 || row.status == "ready" {
+            return Ok(true);
+        }
+        let group_id = &chat[6..];
+        let id = group_id.parse::<f64>().unwrap_or(f64::NAN);
+        let methods = [
+            (
+                "info",
+                "get_group_info",
+                json!({"group_id":id,"no_cache":true}),
+            ),
+            ("notices", "_get_group_notice", json!({"group_id":id})),
+            (
+                "history",
+                "get_group_msg_history",
+                json!({"group_id":id,"count":c.history_limit}),
+            ),
+        ];
+        // join_all 保留各项 Result，等价 allSettled：单项失败不阻止另两项采集。
+        let results = futures_util::future::join_all(methods.into_iter().map(
+            |(kind, action, params)| async move {
+                let result = match self.transport.call(action, params).await {
+                    Ok(value) => clean_orientation_source(
+                        kind,
+                        &value,
+                        group_id,
+                        c,
+                        &self.transport.self_id(),
+                        &self.agent.ignored_users,
+                    ),
+                    Err(e) => Err(e),
+                };
+                (kind, result)
+            },
+        ))
+        .await;
+        if !self.fresh(chat, epoch)? {
+            return Ok(false);
+        }
+        let mut sources = json!({"availability":{}});
+        for (kind, result) in results {
+            sources["availability"][kind] = json!(if result.is_ok() {
+                "available"
+            } else {
+                "unavailable"
+            });
+            if let Ok(value) = result {
+                sources[kind] = value;
+            }
+        }
+        if !self.db()?.orientation_sources(chat, epoch, &sources)? {
+            return Ok(false);
+        }
+        Ok(true)
+    }
     pub async fn before_speak(&self, chat: &str) -> Result<bool> {
         let c = &self.agent.observation;
         if !c.enabled || !chat.starts_with("group:") {
@@ -231,54 +312,7 @@ impl GroupOrientation {
         }
         let epoch = r.epoch;
         if r.collected == 0 {
-            let group_id = &chat[6..];
-            let id = group_id.parse::<f64>().unwrap_or(f64::NAN);
-            let methods = [
-                (
-                    "info",
-                    "get_group_info",
-                    json!({"group_id":id,"no_cache":true}),
-                ),
-                ("notices", "_get_group_notice", json!({"group_id":id})),
-                (
-                    "history",
-                    "get_group_msg_history",
-                    json!({"group_id":id,"count":c.history_limit}),
-                ),
-            ];
-            // join_all 保留各项 Result，等价 allSettled：单项失败不阻止另两项采集。
-            let results = futures_util::future::join_all(methods.into_iter().map(
-                |(kind, action, params)| async move {
-                    let result = match self.transport.call(action, params).await {
-                        Ok(value) => clean_orientation_source(
-                            kind,
-                            &value,
-                            group_id,
-                            c,
-                            &self.transport.self_id(),
-                            &self.agent.ignored_users,
-                        ),
-                        Err(e) => Err(e),
-                    };
-                    (kind, result)
-                },
-            ))
-            .await;
-            if !self.fresh(chat, epoch)? {
-                return Ok(false);
-            }
-            let mut sources = json!({"availability":{}});
-            for (kind, result) in results {
-                sources["availability"][kind] = json!(if result.is_ok() {
-                    "available"
-                } else {
-                    "unavailable"
-                });
-                if let Ok(value) = result {
-                    sources[kind] = value;
-                }
-            }
-            if !self.db()?.orientation_sources(chat, epoch, &sources)? {
+            if !self.collect(chat, epoch).await? {
                 return Ok(false);
             }
             r = self.ensure(chat)?;

@@ -168,6 +168,7 @@ struct Core {
     last_cycle: f64,
     identity_checked: Option<f64>,
     identity_busy: bool,
+    orientation_collecting: HashSet<String>,
     identity_commands: Vec<String>,
 }
 impl Core {
@@ -638,6 +639,34 @@ impl Engine {
             return Ok(());
         }
         core.tasks.retain(|t| !t.is_finished());
+        // 入群/定时立即采集，不再等首次发言；安静群也会在下一轮 tick 获取资料。
+        if a.observation.enabled {
+            let pending = self.db()?.rows(
+                "SELECT chat,epoch FROM group_orientation WHERE chat LIKE 'group:%' AND status<>'ready' AND collected=0",
+                [],
+            )?;
+            for row in pending {
+                let chat = row["chat"].as_str().unwrap_or("").to_owned();
+                let epoch = row["epoch"].as_i64().unwrap_or_default();
+                if !policy::allowed(&chat, a) || !core.orientation_collecting.insert(chat.clone()) {
+                    continue;
+                }
+                let engine = self.clone();
+                let mut abort = self.aborted.subscribe();
+                core.tasks.push(tokio::spawn(async move {
+                    let result = tokio::select! {
+                        biased;
+                        _ = abort.changed() => Ok(false),
+                        result = engine.orientation.collect(&chat, epoch) => result,
+                    };
+                    let mut core = engine.core();
+                    core.orientation_collecting.remove(&chat);
+                    if let Err(e) = result {
+                        core.last_error = Some(e.to_string());
+                    }
+                }));
+            }
+        }
         if a.identity.enabled && !a.dry_run && !core.identity_busy {
             if let Some(chat) = core.identity_commands.pop() {
                 core.identity_busy = true;

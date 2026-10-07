@@ -24,6 +24,7 @@ struct Harness {
     engine: Mutex<Weak<Engine>>,
     transport: Mutex<State>,
     sends: Mutex<usize>,
+    orientation_reads: Mutex<Vec<String>>,
     budget: f64,
     hold: Mutex<Option<String>>,
     entered: Notify,
@@ -67,8 +68,16 @@ impl OrientationTransport for Harness {
     fn self_id(&self) -> String {
         "99".into()
     }
-    fn call<'a>(&'a self, _: &'a str, _: Value) -> BoxFuture<'a, Result<Value>> {
-        Box::pin(async { anyhow::bail!("unsupported") })
+    fn call<'a>(&'a self, action: &'a str, _: Value) -> BoxFuture<'a, Result<Value>> {
+        Box::pin(async move {
+            self.orientation_reads.lock().unwrap().push(action.into());
+            let hold = self.hold.lock().unwrap().as_deref() == Some("COLLECT");
+            if hold && action == "get_group_info" {
+                self.entered.notify_one();
+                self.release.acquire().await.unwrap().forget();
+            }
+            anyhow::bail!("unsupported")
+        })
     }
 }
 impl EngineTransport for Harness {
@@ -238,6 +247,7 @@ fn setup(case: &Value) -> (Arc<Engine>, Arc<Harness>) {
             reconnects: 0,
         }),
         sends: Mutex::new(0),
+        orientation_reads: Mutex::new(Vec::new()),
         budget: case["budget"].as_f64().unwrap_or(1000.),
         hold: Mutex::new(None),
         entered: Notify::new(),
@@ -1806,4 +1816,74 @@ async fn backstory_engine_rejects_unsafe_requests_and_stored_evidence() {
         assert_eq!(h.payloads.lock().unwrap()[0]["backstories"], json!([]));
         assert!(h.rows("SELECT * FROM persona_backstory").is_empty());
     }
+}
+
+#[tokio::test]
+async fn quiet_group_collects_on_tick_and_rejoin_without_speaking() {
+    let (e, h) = setup(&base(
+        "eager_orientation",
+        json!({"allowedGroups":["10"],"observation":{"enabled":true}}),
+        vec![],
+    ));
+    assert!(e.chats().is_empty());
+    e.tick().unwrap();
+    e.wait_idle().await;
+    let row = e.orientation.get("group:10").unwrap().unwrap();
+    assert_eq!(row.collected, 1);
+    assert_eq!(row.status, "observing");
+    assert_eq!(row.sources["availability"]["info"], "unavailable");
+    e.tick().unwrap();
+    e.wait_idle().await;
+    assert_eq!(h.orientation_reads.lock().unwrap().len(), 3);
+    e.ingest(&json!({"post_type":"notice","notice_type":"group_increase","self_id":99,"user_id":99,"group_id":10,"time":h.now()})).unwrap();
+    e.tick().unwrap();
+    e.wait_idle().await;
+    assert_eq!(h.orientation_reads.lock().unwrap().len(), 6);
+    assert_eq!(e.orientation.get("group:10").unwrap().unwrap().collected, 1);
+    assert!(h.payloads.lock().unwrap().is_empty());
+    e.stop().await;
+}
+
+#[tokio::test]
+async fn orientation_tick_and_speak_share_collection_and_reject_stale_epoch() {
+    let (e, h) = setup(&base(
+        "concurrent_orientation",
+        json!({"allowedGroups":["10"],"observation":{"enabled":true,"minSeconds":600,"minMessages":100}}),
+        vec![],
+    ));
+    *h.hold.lock().unwrap() = Some("COLLECT".into());
+    e.tick().unwrap();
+    entered(&h).await;
+    for _ in 0..3 {
+        e.tick().unwrap();
+    }
+    let speak = e.orientation.before_speak("group:10");
+    tokio::pin!(speak);
+    assert!(futures_util::poll!(&mut speak).is_pending());
+    assert_eq!(h.orientation_reads.lock().unwrap().len(), 3);
+    // 采集期间仍能访问 Store；重新入群使旧 epoch 的结果失效。
+    e.orientation.joined("group:10", h.now()).unwrap();
+    h.release.add_permits(1);
+    e.wait_idle().await;
+    assert!(!speak.await.unwrap());
+    assert_eq!(e.orientation.get("group:10").unwrap().unwrap().collected, 0);
+    *h.hold.lock().unwrap() = None;
+    e.tick().unwrap();
+    e.wait_idle().await;
+    assert_eq!(e.orientation.get("group:10").unwrap().unwrap().collected, 1);
+    assert_eq!(h.orientation_reads.lock().unwrap().len(), 6);
+    e.stop().await;
+}
+
+#[tokio::test]
+async fn disabled_orientation_never_collects_existing_rows() {
+    let (e, h) = setup(&base("disabled_orientation", json!({}), vec![]));
+    let row = e.orientation.ensure("group:10").unwrap();
+    e.tick().unwrap();
+    e.wait_idle().await;
+    assert!(!e.orientation.collect("group:10", row.epoch).await.unwrap());
+    assert!(e.orientation.before_speak("group:10").await.unwrap());
+    assert!(h.orientation_reads.lock().unwrap().is_empty());
+    assert_eq!(e.orientation.get("group:10").unwrap().unwrap().collected, 0);
+    e.stop().await;
 }
