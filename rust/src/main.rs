@@ -882,7 +882,7 @@ mod tests {
                                 ("failed", 1, Value::Null)
                             } else {
                                 ("ok", 0, json!({"messages":[null, {
-                                    "message_id":123,"user_id":20,"time":1700000000,
+                                    "message_id":123,"user_id":20,"time":1699990000,
                                     "sender":{"nickname":"Human"},"message":"[CQ:at,qq=99]历史消息"
                                 }]}))
                             }

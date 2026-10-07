@@ -469,6 +469,38 @@ pub fn normalize(
     agent: &Agent,
     now: f64,
 ) -> Option<Message> {
+    let mut message = normalize_core(event, self_id, agent, now)?;
+    let ts = message.ts;
+    if !ts.is_finite() || now - ts > agent.active_window_seconds || ts > now + 60.0 {
+        return None;
+    }
+    message.ts = ts.min(now);
+    Some(message)
+}
+
+/// History may predate the active window, but invalid/future timestamps remain rejected.
+pub fn normalize_backfill(
+    event: &serde_json::Value,
+    self_id: &str,
+    agent: &Agent,
+    now: f64,
+) -> Option<Message> {
+    let mut message = normalize_core(event, self_id, agent, now)?;
+    if message.id.is_empty() || !message.ts.is_finite() || message.ts > now + 60.0 {
+        return None;
+    }
+    message.ts = message.ts.min(now);
+    Some(message)
+}
+
+// Keep the original timestamp until the caller has checked it; clamping first
+// would hide future timestamps (and can turn NaN into a valid timestamp).
+fn normalize_core(
+    event: &serde_json::Value,
+    self_id: &str,
+    agent: &Agent,
+    now: f64,
+) -> Option<Message> {
     use crate::config::{js_string, truthy};
     use serde_json::Value;
     let kind = event["message_type"].as_str()?;
@@ -501,9 +533,6 @@ pub fn normalize(
     } else {
         now
     };
-    if !ts.is_finite() || now - ts > agent.active_window_seconds || ts > now + 60.0 {
-        return None;
-    }
     let mut at_self = false;
     let mut at_other = false;
     let mut mention = |id: &str| {
@@ -602,7 +631,7 @@ pub fn normalize(
         sender,
         name: clip_chars(&js_string(name), 80),
         text,
-        ts: ts.min(now),
+        ts,
         is_self: false,
         hint: if kind == "private" || at_self || named {
             Hint::SelfChat
