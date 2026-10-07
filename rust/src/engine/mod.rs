@@ -199,7 +199,7 @@ pub struct Engine {
     options: Options,
     media_config: media_select::Config,
     collector: Option<crate::media::Collector>,
-    topic_sources: Arc<Mutex<crate::topic_source::Sources>>,
+    topic_sources: Arc<Mutex<crate::topic::Sources>>,
     core: Mutex<Core>,
     aborted: watch::Sender<bool>,
     // 多个 stop/wait_idle 调用者不能各自拿走任务后提前报告空闲。
@@ -1130,7 +1130,7 @@ impl Engine {
                     .filter(|m| !truthy(&m["self"]))
                     .map(|m| text(m, "text").to_owned())
                     .collect::<Vec<_>>();
-                let interests = crate::topic_source::interests(&traits, &messages);
+                let interests = crate::topic::interests(&traits, &messages);
                 let cfg = a.topic_source.clone();
                 let sources = self.topic_sources.clone();
                 let group = chat.to_owned();
@@ -1140,7 +1140,7 @@ impl Engine {
                         &group,
                         now,
                         &interests,
-                        crate::topic_source::fetch,
+                        crate::topic::fetch,
                     )
                 })
                 .await?;

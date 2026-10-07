@@ -1,6 +1,6 @@
 //! 群外话题的纯决策模块；调用方负责提供本群未过期 short_term 与可信审核结果。
 //! 不负责抓取、审核模型调用或发送；来源正文始终是不可信引用数据。
-use crate::topic_source::{self, Item};
+use crate::topic::{self, Item};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -120,7 +120,7 @@ pub fn classify(
     if !cfg.enabled || cfg.validate().is_err() {
         return None;
     }
-    let score = topic_source::relevance(&origin.item, interests).0;
+    let score = topic::relevance(&origin.item, interests).0;
     if origin.kind != OriginKind::AgentMerged {
         return (score >= cfg.threshold).then_some(RelayKind::LowRisk);
     }
@@ -259,7 +259,7 @@ mod tests {
         }
     }
     fn interests() -> BTreeSet<String> {
-        topic_source::interests("esp32", &[])
+        topic::interests("esp32", &[])
     }
     fn origin(kind: OriginKind) -> Origin {
         Origin {
@@ -343,7 +343,7 @@ mod tests {
         assert!(decide(&c, &o, &interests(), &[]).is_none());
         o = origin(OriginKind::AgentMerged);
         o.item.title = "esp32 cats dogs birds fish trees".into();
-        assert!(topic_source::relevance(&o.item, &interests()).0 >= c.threshold);
+        assert!(topic::relevance(&o.item, &interests()).0 >= c.threshold);
         assert!(decide(&c, &o, &interests(), &[]).is_none());
         o = origin(OriginKind::AgentMerged);
         o.command_sender = Some("42".into());

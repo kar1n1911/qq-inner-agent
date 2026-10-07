@@ -231,14 +231,14 @@ pub fn validate(c: &Value) -> std::result::Result<(), ConfigError> {
         )?;
     }
     if let Some(v) = a.get("relay") {
-        let settings: crate::relay::RelaySettings =
+        let settings: crate::topic::relay::RelaySettings =
             serde_json::from_value(v.clone()).map_err(|e| ConfigError(e.to_string()))?;
         settings
             .validate()
             .map_err(|e| ConfigError(e.to_string()))?;
     }
     if let Some(v) = a.get("topicSource") {
-        let settings: crate::topic_source::Settings =
+        let settings: crate::topic::Settings =
             serde_json::from_value(v.clone()).map_err(|e| ConfigError(e.to_string()))?;
         settings
             .validate()
@@ -900,9 +900,9 @@ pub struct Agent {
     #[serde(default)]
     pub identity: Identity,
     #[serde(default)]
-    pub relay: crate::relay::RelaySettings,
+    pub relay: crate::topic::relay::RelaySettings,
     #[serde(default)]
-    pub topic_source: crate::topic_source::Settings,
+    pub topic_source: crate::topic::Settings,
     /// P6h：三个功能的入口均默认关闭。
     #[serde(default)]
     pub affect: crate::persona::affect::Settings,

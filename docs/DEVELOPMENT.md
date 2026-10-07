@@ -14,7 +14,7 @@
 | [记忆召回](#4-记忆召回) | recall 下钻 | `persona/recall.rs` |
 | [决策系统](#5-决策系统) | 引擎 48 步 / 三层决策 / 策略 / 发送 / 活跃 / 观察 | `engine/mod.rs` `engine/decision.rs` `engine/policy.rs` `engine/sending.rs` `engine/activity.rs` `engine/orientation.rs` |
 | [素材系统](#6-素材系统) | 表情包采集 / 选择 / 来源可公开性 | `media/mod.rs` `media/media_select.rs` `media/media_source.rs` |
-| [话题来源](#7-话题来源-21) | 外部内容抓取 + 群间转发 | `topic_source.rs` `relay.rs` |
+| [话题来源](#7-话题来源-21) | 外部内容抓取 + 群间转发 | `topic/mod.rs` `topic/relay.rs` |
 | [传输系统](#8-传输系统) | OneBot v11 + LLM provider | `onebot.rs` `provider.rs` `provider_transport.rs` |
 | [存储与配置](#9-存储与配置) | SQLite / 观察期持久化 / 配置协议 / 文件协议 | `store.rs` `store/*.rs` `config.rs` `settings.rs` |
 | [控制与运行时](#10-控制与运行时) | 控制套接字 / 主循环 / 主人教学 | `control.rs` `main.rs` `persona/owner_teaching.rs` |
@@ -108,8 +108,8 @@ agent "是谁、怎么说话"这一整条链。
 
 | 功能 | 实现位置 |
 | --- | --- |
-| 外部新鲜内容(GitHub/RSS 抓取 + 相关度 + 节流/预算/缓存) | `topic_source.rs` — `fetch`/`parse`/`relevance`/`collect`;配置 `agent.topicSource` |
-| 群间转发(低风险转手 / 高风险门控 + 去重 + 责任线/自审) | `relay.rs` — `classify`/`duplicate`/`gate`/`collect`;配置 `agent.relay` |
+| 外部新鲜内容(GitHub/RSS 抓取 + 相关度 + 节流/预算/缓存) | `topic/mod.rs` — `fetch`/`parse`/`relevance`/`collect`;配置 `agent.topicSource` |
+| 群间转发(低风险转手 / 高风险门控 + 去重 + 责任线/自审) | `topic/relay.rs` — `classify`/`duplicate`/`gate`/`collect`;配置 `agent.relay` |
 
 ---
 

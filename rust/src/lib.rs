@@ -10,8 +10,6 @@ pub mod provider;
 pub mod settings;
 pub mod store;
 
-pub mod topic_source;
-
-pub mod relay;
+pub mod topic;
 
 pub mod persona;
