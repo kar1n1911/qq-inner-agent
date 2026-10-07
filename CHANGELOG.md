@@ -90,3 +90,19 @@ NDJSON 控制套接字(`data/control.sock`)通信。配置、数据库 schema、
 ### 测试
 
 - Rust **192 项**,本机(macOS)与远端 Linux 双平台全部通过,clippy 零警告。
+
+## 1.2.0 —— 身份自治、过往情景与代码重组
+
+日期:2026-10-07
+
+### 新功能
+- **§22 身份自治**:学够后自动外显昵称 / 群名片 / 头像 / 签名,昵称由模型按群内命名文化自拟(贴吧式,不露 AI),人格成长蒸馏成"成长人格"追加到 prompt;
+- **§23 过往情景**:被要求"基于经历评价"时可制造"无法查验"的自身过往,一旦创建**不可改/删、只能加细节**,高危高阈值、默认关;
+- **多气泡 + 打字延迟**:ARTICULATE 返回多条时依次发送,条间延迟随心情强度抖动;
+- **动态配置键白名单**:dashboard 从 Rust `config-defaults` 取 schema,新增配置键无需再手改 JS;
+- Web 控制台新增 **Advanced 页**(全部功能开关 + 细粒度参数)+ 聊天范围加主人教学开关。
+
+### 工程
+- Rust 源码按系统重组为子目录(engine / memory / persona / media / topic / transport);
+- 开发文档 `docs/DEVELOPMENT.md`(系统地图),工作文档移入 `docs/working/`;
+- 桥由 SnowLuma 切换为 NapCat(独立 QQ 进程,systemd 自启)。
