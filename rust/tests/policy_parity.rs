@@ -373,11 +373,13 @@ fn length_buckets_never_give_the_throwaway_bucket_to_an_addressed_turn() {
             "tiny" | "short" | "medium" | "long"
         ));
     }
-    assert_eq!(pick_length_target("open", || 0.34), "tiny");
-    assert_eq!(pick_length_target("open", || 0.35), "short");
+    assert_eq!(pick_length_target("open", || 0.149), "tiny");
+    assert_eq!(pick_length_target("open", || 0.15), "short");
+    assert_eq!(pick_length_target("open", || 0.55), "medium");
+    assert_eq!(pick_length_target("open", || 0.93), "long");
     assert_eq!(pick_length_target("self", || 0.0), "short");
-    assert_eq!(pick_length_target("self", || 0.70), "medium");
-    assert_eq!(pick_length_target("self", || 0.98), "long");
+    assert_eq!(pick_length_target("self", || 0.50), "medium");
+    assert_eq!(pick_length_target("self", || 0.92), "long");
 }
 
 #[test]

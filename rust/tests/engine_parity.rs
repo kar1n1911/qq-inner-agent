@@ -665,6 +665,7 @@ async fn scripted_conversations_match_real_js_decision_by_decision() {
         actual.push(result);
     }
     // 固化金标准：完整阶段 trace 与落库结果，继续使用原 equivalent 的浮点规则。
+    // Rust 长度权重已独立调整；engine.json 仅对应长度 expected 随之更新。
     let expected: Vec<Value> = serde_json::from_value(golden::expected(
         include_str!("golden/engine.json"),
         &json!(cases),
@@ -1071,7 +1072,7 @@ async fn rest_tick_invalidates_version_and_orientation_epoch_is_independent() {
         vec![],
     ));
     *h.hold.lock().unwrap() = Some("FORM".into());
-    e.ingest(&h.event(&json!({}))).unwrap();
+    e.ingest(&h.event(&json!({"text":"继续聊园艺"}))).unwrap();
     e.tick().unwrap();
     entered(&h).await;
     {
@@ -1091,7 +1092,7 @@ async fn rest_tick_invalidates_version_and_orientation_epoch_is_independent() {
     e.stop().await;
     let (e, h) = setup(&base("epoch", json!({}), vec![]));
     *h.hold.lock().unwrap() = Some("FORM".into());
-    e.ingest(&h.event(&json!({}))).unwrap();
+    e.ingest(&h.event(&json!({"text":"继续聊园艺"}))).unwrap();
     e.tick().unwrap();
     entered(&h).await;
     let version = e.chats()[0].1.version;
@@ -1972,7 +1973,7 @@ async fn off_duty_ingest_records_batch_and_resumes_backlog_after_active_window()
         for i in 0..26 {
             let event = h.event(&json!({
                 "id":format!("backlog{i}"),
-                "text":if i == 0 { "[CQ:at,qq=99]你好" } else { "继续聊园艺" }
+                "text":"继续聊园艺"
             }));
             e.ingest(&event).unwrap();
             e.ingest(&event).unwrap(); // 重复投递不增加 version 或入库数量。
@@ -1981,7 +1982,7 @@ async fn off_duty_ingest_records_batch_and_resumes_backlog_after_active_window()
         assert_eq!(state.version, 26);
         assert!(state.pending);
         assert!(!state.pause_done);
-        assert_eq!(state.hint, qq_inner_core::engine::policy::Hint::SelfChat);
+        assert_eq!(state.hint, qq_inner_core::engine::policy::Hint::Open);
         assert_eq!(state.last_id, "backlog25");
         assert_eq!(state.last_human, h.now());
         assert_eq!(state.due, h.now());
@@ -1993,7 +1994,7 @@ async fn off_duty_ingest_records_batch_and_resumes_backlog_after_active_window()
         assert!(h.rows("SELECT * FROM deliveries").is_empty());
         assert_eq!(*h.sends.lock().unwrap(), 0);
 
-        // 离岗两小时已超过活跃窗口，回岗后仍需处理积压且保留批内 self 优先。
+        // 离岗两小时已超过活跃窗口，回岗后仍需处理积压且保留待处理消息。
         *h.now.lock().unwrap() = 14. * 3600.;
         assert!(e.available(h.now()).unwrap());
         e.tick().unwrap();
@@ -2001,7 +2002,9 @@ async fn off_duty_ingest_records_batch_and_resumes_backlog_after_active_window()
         assert_eq!(*h.sends.lock().unwrap(), 1, "{:?}", h.trace.lock().unwrap());
         assert!(!e.chats()[0].1.pending);
         assert!(h.trace.lock().unwrap().iter().any(|row| {
-            row[0] == "model" && row[1] == "FORM" && row[2] == "self"
+            row[0] == "model"
+                && row[1] == "FORM"
+                && row[2] == "open"
                 && row[4].as_array().unwrap().contains(&json!("backlog25"))
         }));
         e.tick().unwrap();
@@ -2023,12 +2026,30 @@ async fn off_duty_ingest_advances_observation_and_memory() {
         vec![],
     ));
     assert!(!e.available(h.now()).unwrap());
-    h.store.lock().unwrap().expect("group:10", h.now(), 60., &json!({})).unwrap();
-    e.ingest(&h.event(&json!({}))).unwrap();
-    assert_eq!(e.orientation.get("group:10").unwrap().unwrap().message_count, 1);
-    assert!(!h.rows("SELECT * FROM memory_layers WHERE layer='short_term'").is_empty());
+    h.store
+        .lock()
+        .unwrap()
+        .expect("group:10", h.now(), 60., &json!({}))
+        .unwrap();
+    e.ingest(&h.event(&json!({"text":"继续聊园艺"}))).unwrap();
     assert_eq!(
-        h.store.lock().unwrap().expectation("group:10", h.now()).unwrap().unwrap()["observation"]["event"],
+        e.orientation
+            .get("group:10")
+            .unwrap()
+            .unwrap()
+            .message_count,
+        1
+    );
+    assert!(!h
+        .rows("SELECT * FROM memory_layers WHERE layer='short_term'")
+        .is_empty());
+    assert_eq!(
+        h.store
+            .lock()
+            .unwrap()
+            .expectation("group:10", h.now())
+            .unwrap()
+            .unwrap()["observation"]["event"],
         "human_message"
     );
     assert!(e.chats()[0].1.pending);
@@ -2054,7 +2075,7 @@ async fn replies_recheck_duty_before_first_task_poll_and_resume() {
         let event = if teaching {
             json!({"post_type":"message","message_type":"private","self_id":99,"user_id":20,"message_id":"command","time":h.now(),"message":"/记住 喜欢Rust"})
         } else {
-            h.event(&json!({}))
+            h.event(&json!({"text":"继续聊园艺"}))
         };
         e.ingest(&event).unwrap();
         e.tick().unwrap();
@@ -2086,7 +2107,8 @@ async fn backlog_digest_reaches_cycle_stages_and_can_withhold() {
         ));
         *h.model.lock().unwrap() = json!({"empty":empty});
         for i in 0..300 {
-            e.ingest(&h.event(&json!({"id":format!("digest{i}")}))).unwrap();
+            e.ingest(&h.event(&json!({"id":format!("digest{i}"),"text":"继续聊园艺"})))
+                .unwrap();
         }
         e.tick().unwrap();
         e.wait_idle().await;
@@ -2333,5 +2355,66 @@ async fn visible_self_identity_is_cached_scoped_and_injected() {
             .filter(|m| m["self"] == true)
             .all(|m| m["speaker"] == "Lantaneen"));
         e.stop().await;
+    }
+}
+
+#[tokio::test]
+async fn self_chat_wakes_off_duty_but_other_hints_preserve_backlog() {
+    use qq_inner_core::engine::policy::Hint;
+    for three_layer in [false, true] {
+        for resting_rhythm in [false, true] {
+            for kind in ["mention", "name", "private", "open", "other"] {
+                let (e, h) = setup(&base(
+                    "wake",
+                    json!({
+                        "threeLayerDecision":three_layer,
+                        "name":{"text":"小机器人"},
+                        "aliases":["小机器人"],
+                        "schedule":{"enabled":!resting_rhythm,"activeStart":"14:00","inactiveStart":"01:00","timezone":"UTC"},
+                        "rhythm":{"enabled":resting_rhythm,"dayProbability":0,"restMinSeconds":600,"restMaxSeconds":600}
+                    }),
+                    vec![],
+                ));
+                assert!(!e.available(h.now()).unwrap());
+                let event = match kind {
+                    "private" => {
+                        json!({"post_type":"message","message_type":"private","self_id":99,"user_id":20,"message_id":"wake","time":h.now(),"message":"活着就说话"})
+                    }
+                    "name" => h.event(&json!({"text":"小机器人：活着就说话"})),
+                    "open" => h.event(&json!({"text":"继续聊园艺"})),
+                    "other" => h.event(&json!({"text":"[CQ:at,qq=21]继续聊园艺"})),
+                    _ => h.event(&json!({})),
+                };
+                e.ingest(&event).unwrap();
+                let addressed = matches!(kind, "mention" | "name" | "private");
+                assert_eq!(e.chats()[0].1.hint == Hint::SelfChat, addressed, "{kind}");
+                let version = e.chats()[0].1.version;
+                if addressed {
+                    *h.hold.lock().unwrap() = Some("FORM".into());
+                }
+                e.tick().unwrap();
+                if addressed {
+                    entered(&h).await;
+                    e.tick().unwrap(); // 休息 tick 不应取消已叫醒的在途回复。
+                    assert_eq!(e.chats()[0].1.version, version);
+                    h.release.add_permits(1);
+                }
+                e.wait_idle().await;
+                assert!(e.last_error().is_none(), "{:?}", e.last_error());
+                assert_eq!(
+                    *h.sends.lock().unwrap(),
+                    usize::from(addressed),
+                    "{kind}, layers={three_layer}, rhythm={resting_rhythm}: {:?}",
+                    h.trace.lock().unwrap()
+                );
+                assert_eq!(e.chats()[0].1.pending, !addressed);
+                if !addressed {
+                    assert_eq!(e.chats()[0].1.version, version + 1);
+                    assert!(h.model_inputs.lock().unwrap().is_empty());
+                }
+                assert!(!e.available(h.now()).unwrap());
+                e.stop().await;
+            }
+        }
     }
 }

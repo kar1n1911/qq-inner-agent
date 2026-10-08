@@ -39,11 +39,18 @@ impl Disposition {
             Self::Supportive => 1.2,
         }
     }
-    pub fn length(self) -> &'static str {
-        match self {
-            Self::Angry | Self::Supportive => "short",
-            Self::Withdrawn => "medium",
-            Self::Scrutinizing => "long",
+    /// 情绪只微调抽样档位：愤怒少说一档，审慎多一档以容纳解释；
+    /// 支持与退缩保留长度多样性（退缩已通过 motivation 降低发言概率）。
+    /// 被点名不能因降档退化为 tiny。
+    pub fn adjust_length(self, length: &'static str, addressed: bool) -> &'static str {
+        match (self, length) {
+            (Self::Angry, "long") => "medium",
+            (Self::Angry, "medium") => "short",
+            (Self::Angry, "short") if !addressed => "tiny",
+            (Self::Scrutinizing, "tiny") => "short",
+            (Self::Scrutinizing, "short") => "medium",
+            (Self::Scrutinizing, "medium") => "long",
+            _ => length,
         }
     }
     pub fn rule(self) -> &'static str {

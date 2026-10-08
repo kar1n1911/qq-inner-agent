@@ -724,21 +724,25 @@ impl Engine {
                 }));
             }
         }
-        if !self.available(now)? {
+        let available = self.available(now)?;
+        if !available {
             for (_, s) in &mut core.chats {
-                s.version += 1;
+                // 被点名（含私聊）可叫醒；其余只使在途回复失效，保留积压。
+                if !(s.pending && s.hint == Hint::SelfChat) {
+                    s.version += 1;
+                }
             }
-            // 离岗只使在途回复失效，保留待处理消息和 Hint，回岗后补看。
-            return Ok(());
+        } else {
+            core.chats.retain(|(_, s)| {
+                s.busy || s.pending || now - s.last_human <= a.active_window_seconds
+            });
         }
-        core.chats
-            .retain(|(_, s)| s.busy || s.pending || now - s.last_human <= a.active_window_seconds);
         let transport = self.transport.state();
         if !transport.connected || !transport.online || *self.aborted.borrow() {
             return Ok(());
         }
         core.tasks.retain(|t| !t.is_finished());
-        if a.identity.enabled && !a.dry_run && !core.identity_busy {
+        if available && a.identity.enabled && !a.dry_run && !core.identity_busy {
             if let Some(chat) = core.identity_commands.pop() {
                 core.identity_busy = true;
                 let engine = self.clone();
@@ -814,7 +818,12 @@ impl Engine {
             }
         }
 
-        for (chat, reply) in std::mem::take(&mut core.teaching_replies) {
+        let teaching_replies = if available {
+            std::mem::take(&mut core.teaching_replies)
+        } else {
+            Vec::new()
+        };
+        for (chat, reply) in teaching_replies {
             if a.dry_run {
                 continue;
             }
@@ -862,7 +871,8 @@ impl Engine {
             if running as f64 >= a.max_concurrent_chats {
                 break;
             }
-            if s.busy
+            if (!available && !(s.pending && s.hint == Hint::SelfChat))
+                || s.busy
                 || (!s.pending && now - s.last_human > a.active_window_seconds)
                 || now < s.due
             {
@@ -1031,7 +1041,8 @@ impl Engine {
             || db.orientation_state(&t.chat)?.map(|r| r.epoch) != t.orientation_epoch)
     }
     fn fresh(&self, core: &Core, db: &Store, t: &Turn) -> Result<bool> {
-        Ok(!self.obsolete(core, db, t)? && self.snapshot(db, self.now())?.active)
+        Ok(!self.obsolete(core, db, t)?
+            && (t.hint == Hint::SelfChat || self.snapshot(db, self.now())?.active))
     }
     fn finish(&self, core: &mut Core, db: &Store, t: &Turn, sent: bool) -> Result<()> {
         if let Some(s) = core.get_mut(&t.chat).filter(|s| s.version == t.version) {
@@ -1111,7 +1122,11 @@ impl Engine {
         // 1–2：入口守卫；版本取自 tick 准入时的快照，等价 JS 首个 await 之前。
         {
             let core = self.core();
-            if core.get(chat).is_none() || !policy::allowed(chat, a) || !self.available(self.now())? {
+            if core.get(chat).is_none()
+                || !policy::allowed(chat, a)
+                || (core.get(chat).unwrap().hint != Hint::SelfChat
+                    && !self.available(self.now())?)
+            {
                 return Ok(());
             }
             // await 观察模型之前复核，防止 tick 准入后新消息/配额变化穿透初筛。
@@ -1154,7 +1169,8 @@ impl Engine {
             // 4–10：捕获五项失效凭证；assessment 防止已处理消息重入。
             if *self.aborted.borrow()
                 || core.get(chat).is_none_or(|s| s.version != version)
-                || !self.available(self.now())?
+                || (core.get(chat).unwrap().hint != Hint::SelfChat
+                    && !self.available(self.now())?)
             {
                 return Ok(());
             }
@@ -1683,7 +1699,9 @@ impl Engine {
             },
             || (self.options.expression_random)(),
         );
-        let length_target = behavior.disposition.map_or(length_target, |d| d.length());
+        let length_target = behavior.disposition.map_or(length_target, |d| {
+            d.adjust_length(length_target, t.hint == Hint::SelfChat)
+        });
         let face_only_allowed = a.emoji.face_only
             && length_target != "long"
             && crate::persona::humanize::face_only_allowed(
@@ -1783,7 +1801,7 @@ impl Engine {
                 // 补看从本轮开始计时，仍保留慢回复超时保护。
                 || self.now() - core.get(chat).unwrap().last_human.max(t.now)
                     > a.active_window_seconds
-                || !self.snapshot(&db, self.now())?.active
+                || (t.hint != Hint::SelfChat && !self.snapshot(&db, self.now())?.active)
             {
                 db.assessment_status(chat, &t.id, "cancelled")?;
                 return Ok(());
@@ -1874,7 +1892,7 @@ impl Engine {
             }
             // face 只挂在最后一条（整体回复的结尾）。
             // 气泡间有异步打字延迟，每条发出前重新检查值班状态。
-            if !self.available(self.now())? {
+            if t.hint != Hint::SelfChat && !self.available(self.now())? {
                 if sent.is_none() {
                     sent = Some(Err(OneBotError {
                         code: "agent_unavailable".into(),

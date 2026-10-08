@@ -293,16 +293,16 @@ pub fn select(
     None
 }
 
-/// 复刻 `pickLengthTarget()`：回复长度分档。
+/// 回复长度分档；Rust 权重已调整，不再逐值复刻 JS 的旧分布。
 ///
 /// 长度均匀是最强的"机器味"信号。被直接点名时禁用 `tiny` —— 不能用一个"哈哈"敷衍提问。
 const LENGTH_BUCKETS_ADDRESSED: [(&str, f64); 3] =
-    [("short", 0.70), ("medium", 0.28), ("long", 0.02)];
+    [("short", 0.50), ("medium", 0.42), ("long", 0.08)];
 const LENGTH_BUCKETS_OPEN: [(&str, f64); 4] = [
-    ("tiny", 0.35),
-    ("short", 0.45),
-    ("medium", 0.18),
-    ("long", 0.02),
+    ("tiny", 0.15),
+    ("short", 0.40),
+    ("medium", 0.38),
+    ("long", 0.07),
 ];
 
 pub fn pick_length_target(hint: &str, random: impl FnOnce() -> f64) -> &'static str {
@@ -319,7 +319,8 @@ pub fn pick_length_target(hint: &str, random: impl FnOnce() -> f64) -> &'static 
             return name;
         }
     }
-    "short"
+    // 浮点累加误差或端点 draw == 1 由最后一个桶兜住。
+    buckets[buckets.len() - 1].0
 }
 
 /// 复刻 `repeated()`：与 agent 自己最近说过的话重复（完全相同，或相似度 > 0.88）。
@@ -809,4 +810,34 @@ pub(crate) fn named<'a>(text: &str, aliases: impl Iterator<Item = &'a str>) -> b
             || lower.starts_with(&format!("{alias}："))
             || lower.starts_with(&format!("@{alias} "))
     })
+}
+
+#[cfg(test)]
+mod length_tests {
+    use super::*;
+
+    #[test]
+    fn normalized_weights_and_distribution() {
+        for (hint, buckets, expected) in [
+            (
+                "self",
+                LENGTH_BUCKETS_ADDRESSED.as_slice(),
+                [0, 500, 420, 80],
+            ),
+            ("open", LENGTH_BUCKETS_OPEN.as_slice(), [150, 400, 380, 70]),
+            ("other", LENGTH_BUCKETS_OPEN.as_slice(), [150, 400, 380, 70]),
+        ] {
+            assert!((buckets.iter().map(|(_, w)| w).sum::<f64>() - 1.0).abs() < 1e-12);
+            let mut counts = [0; 4];
+            for i in 0..1000 {
+                let length = pick_length_target(hint, || (i as f64 + 0.5) / 1000.0);
+                counts[["tiny", "short", "medium", "long"]
+                    .iter()
+                    .position(|x| *x == length)
+                    .unwrap()] += 1;
+            }
+            assert_eq!(counts, expected);
+            assert_eq!(pick_length_target(hint, || 1.0), "long");
+        }
+    }
 }

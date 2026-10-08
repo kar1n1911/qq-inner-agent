@@ -111,7 +111,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "send",
@@ -124,7 +124,7 @@
             "message_sent",
             {
               "chat": "group:10",
-              "lengthTarget": "short",
+              "lengthTarget": "medium",
               "proactive": false
             }
           ]
@@ -373,7 +373,7 @@
               "m1",
               "m2"
             ],
-            "short"
+            "medium"
           ],
           [
             "send",
@@ -386,7 +386,7 @@
             "message_sent",
             {
               "chat": "group:10",
-              "lengthTarget": "short",
+              "lengthTarget": "medium",
               "proactive": false
             }
           ]
@@ -663,7 +663,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "send",
@@ -676,7 +676,7 @@
             "message_sent",
             {
               "chat": "group:10",
-              "lengthTarget": "short",
+              "lengthTarget": "medium",
               "proactive": false
             }
           ]
@@ -861,7 +861,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "send",
@@ -986,7 +986,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "send",
@@ -1109,7 +1109,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "log",
@@ -1301,7 +1301,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "send",
@@ -1314,7 +1314,7 @@
             "message_sent",
             {
               "chat": "group:10",
-              "lengthTarget": "short",
+              "lengthTarget": "medium",
               "proactive": false
             }
           ]
@@ -1487,7 +1487,7 @@
               "m1",
               "m2"
             ],
-            "short"
+            "medium"
           ],
           [
             "send",
@@ -1500,7 +1500,7 @@
             "message_sent",
             {
               "chat": "group:10",
-              "lengthTarget": "short",
+              "lengthTarget": "medium",
               "proactive": false
             }
           ]
@@ -1686,7 +1686,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "send",
@@ -1699,7 +1699,7 @@
             "message_sent",
             {
               "chat": "group:10",
-              "lengthTarget": "short",
+              "lengthTarget": "medium",
               "proactive": false
             }
           ]
@@ -1912,7 +1912,7 @@
             [
               "other"
             ],
-            "short"
+            "medium"
           ],
           [
             "send",
@@ -1925,7 +1925,7 @@
             "message_sent",
             {
               "chat": "group:11",
-              "lengthTarget": "short",
+              "lengthTarget": "medium",
               "proactive": false
             }
           ]
@@ -2103,7 +2103,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "send",
@@ -2116,7 +2116,7 @@
             "message_sent",
             {
               "chat": "group:10",
-              "lengthTarget": "short",
+              "lengthTarget": "medium",
               "proactive": false
             }
           ]
@@ -2239,7 +2239,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "send",
@@ -2252,7 +2252,7 @@
             "message_sent",
             {
               "chat": "group:10",
-              "lengthTarget": "short",
+              "lengthTarget": "medium",
               "proactive": false
             }
           ]
@@ -2694,7 +2694,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "log",
@@ -2794,7 +2794,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ]
         ]
       },
@@ -2886,7 +2886,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ]
         ]
       },
@@ -2978,7 +2978,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ]
         ]
       },
@@ -3070,7 +3070,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ]
         ]
       },
@@ -3162,7 +3162,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ]
         ]
       },
@@ -3254,7 +3254,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "log",
@@ -3484,7 +3484,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "log",
@@ -3584,7 +3584,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "log",
@@ -3684,7 +3684,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "log",
@@ -3889,7 +3889,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "send",
@@ -3902,7 +3902,7 @@
             "message_sent",
             {
               "chat": "group:10",
-              "lengthTarget": "short",
+              "lengthTarget": "medium",
               "proactive": false
             }
           ]
@@ -4405,7 +4405,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "send",
@@ -4418,7 +4418,7 @@
             "message_sent",
             {
               "chat": "group:10",
-              "lengthTarget": "short",
+              "lengthTarget": "medium",
               "proactive": false
             }
           ]
@@ -4921,7 +4921,7 @@
             [
               "m1"
             ],
-            "medium"
+            "long"
           ],
           [
             "send",
@@ -4934,7 +4934,7 @@
             "message_sent",
             {
               "chat": "group:10",
-              "lengthTarget": "medium",
+              "lengthTarget": "long",
               "proactive": false
             }
           ]
@@ -7208,7 +7208,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "send",
@@ -7221,7 +7221,7 @@
             "message_sent",
             {
               "chat": "group:10",
-              "lengthTarget": "short",
+              "lengthTarget": "medium",
               "proactive": false
             }
           ]
@@ -7470,7 +7470,7 @@
               "m1",
               "m2"
             ],
-            "short"
+            "medium"
           ],
           [
             "send",
@@ -7483,7 +7483,7 @@
             "message_sent",
             {
               "chat": "group:10",
-              "lengthTarget": "short",
+              "lengthTarget": "medium",
               "proactive": false
             }
           ]
@@ -7760,7 +7760,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "send",
@@ -7773,7 +7773,7 @@
             "message_sent",
             {
               "chat": "group:10",
-              "lengthTarget": "short",
+              "lengthTarget": "medium",
               "proactive": false
             }
           ]
@@ -7958,7 +7958,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "send",
@@ -8083,7 +8083,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "send",
@@ -8206,7 +8206,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "log",
@@ -8398,7 +8398,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "send",
@@ -8411,7 +8411,7 @@
             "message_sent",
             {
               "chat": "group:10",
-              "lengthTarget": "short",
+              "lengthTarget": "medium",
               "proactive": false
             }
           ]
@@ -8584,7 +8584,7 @@
               "m1",
               "m2"
             ],
-            "short"
+            "medium"
           ],
           [
             "send",
@@ -8597,7 +8597,7 @@
             "message_sent",
             {
               "chat": "group:10",
-              "lengthTarget": "short",
+              "lengthTarget": "medium",
               "proactive": false
             }
           ]
@@ -8783,7 +8783,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "send",
@@ -8796,7 +8796,7 @@
             "message_sent",
             {
               "chat": "group:10",
-              "lengthTarget": "short",
+              "lengthTarget": "medium",
               "proactive": false
             }
           ]
@@ -9009,7 +9009,7 @@
             [
               "other"
             ],
-            "short"
+            "medium"
           ],
           [
             "send",
@@ -9022,7 +9022,7 @@
             "message_sent",
             {
               "chat": "group:11",
-              "lengthTarget": "short",
+              "lengthTarget": "medium",
               "proactive": false
             }
           ]
@@ -9200,7 +9200,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "send",
@@ -9213,7 +9213,7 @@
             "message_sent",
             {
               "chat": "group:10",
-              "lengthTarget": "short",
+              "lengthTarget": "medium",
               "proactive": false
             }
           ]
@@ -9336,7 +9336,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "send",
@@ -9349,7 +9349,7 @@
             "message_sent",
             {
               "chat": "group:10",
-              "lengthTarget": "short",
+              "lengthTarget": "medium",
               "proactive": false
             }
           ]
@@ -9791,7 +9791,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "log",
@@ -9891,7 +9891,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ]
         ]
       },
@@ -9983,7 +9983,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ]
         ]
       },
@@ -10075,7 +10075,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ]
         ]
       },
@@ -10167,7 +10167,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ]
         ]
       },
@@ -10259,7 +10259,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ]
         ]
       },
@@ -10351,7 +10351,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "log",
@@ -10581,7 +10581,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "log",
@@ -10681,7 +10681,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "log",
@@ -10781,7 +10781,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "log",
@@ -10986,7 +10986,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "send",
@@ -10999,7 +10999,7 @@
             "message_sent",
             {
               "chat": "group:10",
-              "lengthTarget": "short",
+              "lengthTarget": "medium",
               "proactive": false
             }
           ]
@@ -11502,7 +11502,7 @@
             [
               "m1"
             ],
-            "short"
+            "medium"
           ],
           [
             "send",
@@ -11515,7 +11515,7 @@
             "message_sent",
             {
               "chat": "group:10",
-              "lengthTarget": "short",
+              "lengthTarget": "medium",
               "proactive": false
             }
           ]
@@ -12018,7 +12018,7 @@
             [
               "m1"
             ],
-            "medium"
+            "long"
           ],
           [
             "send",
@@ -12031,7 +12031,7 @@
             "message_sent",
             {
               "chat": "group:10",
-              "lengthTarget": "medium",
+              "lengthTarget": "long",
               "proactive": false
             }
           ]
