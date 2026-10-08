@@ -14,6 +14,7 @@ use std::{
 pub struct Settings {
     #[serde(default)]
     pub enabled: bool,
+    /// 人工白名单/补充查询；自动查询使用剩余请求预算。
     pub github: Vec<String>,
     /// RSS/论坛须提供 RSS 订阅地址，不解析任意 HTML 页面。
     pub feeds: Vec<String>,
@@ -45,7 +46,7 @@ impl Default for Settings {
 }
 impl Settings {
     pub fn enabled(&self) -> bool {
-        self.enabled && (!self.github.is_empty() || !self.feeds.is_empty())
+        self.enabled
     }
     pub fn validate(&self) -> Result<()> {
         ensure!(
@@ -130,7 +131,19 @@ fn tokens(s: &str) -> BTreeSet<String> {
         })
         .collect()
 }
-pub fn interests(traits: &str, messages: &[String]) -> BTreeSet<String> {
+/// 保留原有匹配集合，同时携带搜索排序需要的信号强度。
+pub struct Interests {
+    terms: BTreeSet<String>,
+    ranked: Vec<String>,
+}
+impl std::ops::Deref for Interests {
+    type Target = BTreeSet<String>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.terms
+    }
+}
+pub fn interests(traits: &str, messages: &[String]) -> Interests {
     let mut out = tokens(traits);
     let mut counts = BTreeMap::new();
     for m in messages {
@@ -140,8 +153,39 @@ pub fn interests(traits: &str, messages: &[String]) -> BTreeSet<String> {
     }
     let mut counts: Vec<_> = counts.into_iter().filter(|(_, n)| *n >= 2).collect();
     counts.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
-    out.extend(counts.into_iter().take(32).map(|(t, _)| t));
-    out
+    let mut strength: BTreeMap<_, _> = out.iter().cloned().map(|t| (t, 2usize)).collect();
+    for (term, count) in counts.into_iter().take(32) {
+        out.insert(term.clone());
+        *strength.entry(term).or_default() += count;
+    }
+    let mut ranked: Vec<_> = strength.into_iter().collect();
+    // 群画像每词计 2 分，近期每条提及消息计 1 分；同分按词排序，结果稳定。
+    ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    Interests {
+        terms: out,
+        ranked: ranked.into_iter().map(|(term, _)| term).collect(),
+    }
+}
+
+fn interest_query(term: &str) -> String {
+    if !term.is_empty()
+        && term.len() <= 50
+        && term
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    {
+        format!("topic:{term}")
+    } else {
+        term.to_owned()
+    }
+}
+
+fn github_url(query: &str, max_items: usize) -> String {
+    format!(
+        "https://api.github.com/search/repositories?q={}&sort=updated&order=desc&per_page={}",
+        query_encode(query),
+        max_items.min(100)
+    )
 }
 pub fn relevance(item: &Item, interests: &BTreeSet<String>) -> (f64, Vec<String>) {
     let terms = tokens(&format!(
@@ -165,7 +209,7 @@ impl Sources {
         cfg: &Settings,
         chat: &str,
         now: f64,
-        interests: &BTreeSet<String>,
+        interests: &Interests,
         mut fetch: impl FnMut(&str, usize) -> Result<Vec<Item>>,
     ) -> Vec<Match> {
         if !cfg.enabled() || interests.is_empty() || !now.is_finite() || cfg.validate().is_err() {
@@ -185,29 +229,45 @@ impl Sources {
         times.push(now);
         self.cache
             .retain(|_, (t, _)| now >= *t && now - *t < cfg.cache_hours * 3600.);
-        let urls = cfg
+        // 人工来源保留原有 URL 排序/优先级，自动查询按兴趣强度追加。
+        // URL 负责去重和共享缓存，显示来源保留实际查询文本。
+        let mut urls: BTreeMap<String, String> = cfg
             .github
             .iter()
-            .map(|q| {
-                format!("https://api.github.com/search/repositories?q={}&sort=updated&order=desc&per_page={}", query_encode(q), cfg.max_items.min(100))
-            })
-            .chain(cfg.feeds.iter().cloned())
-            .collect::<BTreeSet<_>>();
+            .map(|q| (github_url(q.trim(), cfg.max_items), q.trim().to_owned()))
+            .chain(cfg.feeds.iter().map(|url| (url.clone(), url.clone())))
+            .collect();
+        let mut sources: Vec<_> = urls
+            .iter()
+            .map(|(url, source)| (url.clone(), source.clone()))
+            .collect();
+        let mut generated = 0;
+        for term in &interests.ranked {
+            let query = interest_query(term);
+            let url = github_url(&query, cfg.max_items);
+            if urls.insert(url.clone(), query.clone()).is_none() {
+                sources.push((url, query));
+                generated += 1;
+                if generated == 3 {
+                    break;
+                }
+            }
+        }
         let mut requests = 0;
         let mut remaining = cfg.max_total_chars;
         let mut out = vec![];
         let mut seen = BTreeSet::new();
-        for source in urls {
-            if !self.cache.contains_key(&source) {
+        for (url, source) in sources {
+            if !self.cache.contains_key(&url) {
                 if requests >= cfg.max_requests {
                     continue;
                 }
                 requests += 1;
                 // 失败也缓存，避免坏源在多个群之间被反复重试。
-                let items = fetch(&source, cfg.max_items).unwrap_or_default();
-                self.cache.insert(source.clone(), (now, items));
+                let items = fetch(&url, cfg.max_items).unwrap_or_default();
+                self.cache.insert(url.clone(), (now, items));
             }
-            for item in self.cache[&source].1.iter().take(cfg.max_items) {
+            for item in self.cache[&url].1.iter().take(cfg.max_items) {
                 let Some(item) = bounded(item, cfg.max_chars.min(remaining)) else {
                     continue;
                 };
@@ -386,6 +446,121 @@ mod tests {
         }
     }
     #[test]
+    fn generated_queries_use_topics_or_keywords() {
+        for (term, query) in [
+            ("esp32", "topic:esp32"),
+            ("home-assistant", "topic:home-assistant"),
+            ("home assistant", "home assistant"),
+            ("无线电", "无线电"),
+        ] {
+            assert_eq!(interest_query(term), query);
+            let interests = Interests {
+                terms: [term.to_owned()].into(),
+                ranked: vec![term.to_owned()],
+            };
+            let cfg = Settings {
+                enabled: true,
+                ..Default::default()
+            };
+            let mut calls = vec![];
+            Sources::default().collect(&cfg, "g", 0., &interests, |url, limit| {
+                calls.push(url.to_owned());
+                assert_eq!(limit, cfg.max_items);
+                Ok(vec![])
+            });
+            assert_eq!(calls, vec![github_url(query, cfg.max_items)]);
+        }
+    }
+
+    #[test]
+    fn strongest_interests_are_selected_and_capped_at_three() {
+        let interests = interests(
+            "aaa esp32 sdr homeassistant",
+            &["sdr esp32".into(), "sdr esp32".into(), "sdr".into()],
+        );
+        assert_eq!(interests.ranked, ["sdr", "esp32", "aaa", "homeassistant"]);
+        let cfg = Settings {
+            enabled: true,
+            max_requests: 10,
+            ..Default::default()
+        };
+        let mut calls = vec![];
+        Sources::default().collect(&cfg, "g", 0., &interests, |url, _| {
+            calls.push(url.to_owned());
+            Ok(vec![])
+        });
+        assert_eq!(
+            calls,
+            ["topic:sdr", "topic:esp32", "topic:aaa"].map(|q| github_url(q, cfg.max_items))
+        );
+    }
+
+    #[test]
+    fn explicit_queries_deduplicate_and_reserve_request_budget() {
+        let cfg = Settings {
+            enabled: true,
+            github: vec!["topic:esp32".into(), "topic:esp32".into()],
+            feeds: vec!["https://example.org/rss".into()],
+            max_requests: 3,
+            ..Default::default()
+        };
+        let interests = interests("esp32 homeassistant sdr", &[]);
+        let mut calls = vec![];
+        Sources::default().collect(&cfg, "g", 0., &interests, |url, _| {
+            calls.push(url.to_owned());
+            Ok(vec![])
+        });
+        assert_eq!(
+            calls,
+            [
+                github_url("topic:esp32", cfg.max_items),
+                cfg.feeds[0].clone(),
+                github_url("topic:homeassistant", cfg.max_items),
+            ]
+        );
+    }
+
+    #[test]
+    fn generated_results_share_budgets_and_report_actual_query_on_cache_hits() {
+        let cfg = Settings {
+            enabled: true,
+            max_items: 1,
+            max_chars: 32,
+            max_total_chars: 28,
+            ..Default::default()
+        };
+        let interests = interests("esp32 sdr", &[]);
+        let mut sources = Sources::default();
+        let mut calls = 0;
+        let results = sources.collect(&cfg, "g", 0., &interests, |url, _| {
+            calls += 1;
+            assert_eq!(url, github_url("topic:esp32", 1));
+            Ok(vec![item("esp32 long description"), item("sdr")])
+        });
+        assert_eq!(calls, 1);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].source, "topic:esp32");
+        assert_eq!(
+            results[0].item.title.chars().count() + results[0].item.url.chars().count(),
+            28
+        );
+        let cached = sources.collect(&cfg, "other", 1., &interests, |_, _| panic!("cached"));
+        assert_eq!(cached[0].source, "topic:esp32");
+    }
+
+    #[test]
+    fn no_interests_means_no_requests_or_throttling() {
+        let mut sources = Sources::default();
+        assert!(sources
+            .collect(&settings(), "g", 0., &interests("", &[]), |_, _| panic!(
+                "no interests"
+            ))
+            .is_empty());
+        assert!(sources.attempts.is_empty());
+        assert!(sources.cache.is_empty());
+    }
+
+    #[test]
     fn matching_normalizes_and_rejects_unrelated() {
         let interests = interests(
             "ＥＳＰ３２ 无线电",
@@ -438,7 +613,7 @@ mod tests {
             });
             assert_eq!(result.len(), expected, "{chat} {now}");
         }
-        assert_eq!(calls, 2);
+        assert_eq!(calls, 4);
         assert!(sources
             .collect(&cfg, "g1", 7199., &interests, |_, _| panic!(
                 "clock rollback"
@@ -547,19 +722,33 @@ mod tests {
         server.join().unwrap();
     }
     #[test]
-    fn master_switch_requires_sources_and_skips_fetch_when_disabled() {
-        let legacy: Settings = serde_json::from_value(
-            serde_json::json!({"feeds": ["https://example.org/rss"]}),
-        ).unwrap();
+    fn master_switch_does_not_require_sources_and_skips_fetch_when_disabled() {
+        let legacy: Settings =
+            serde_json::from_value(serde_json::json!({"feeds": ["https://example.org/rss"]}))
+                .unwrap();
         assert!(!legacy.enabled);
         assert!(!legacy.enabled());
-        assert!(!Settings { enabled: true, ..Default::default() }.enabled());
+        assert!(Settings {
+            enabled: true,
+            ..Default::default()
+        }
+        .enabled());
         assert!(settings().enabled());
-        assert!(Settings { enabled: true, github: vec!["esp32".into()], ..Default::default() }.enabled());
-        let disabled = Settings { enabled: false, ..settings() };
-        assert!(Sources::default().collect(&disabled, "g", 0., &interests("esp32", &[]), |_, _| {
-            panic!("disabled source must not fetch")
-        }).is_empty());
+        assert!(Settings {
+            enabled: true,
+            github: vec!["esp32".into()],
+            ..Default::default()
+        }
+        .enabled());
+        let disabled = Settings {
+            enabled: false,
+            ..settings()
+        };
+        assert!(Sources::default()
+            .collect(&disabled, "g", 0., &interests("esp32", &[]), |_, _| {
+                panic!("disabled source must not fetch")
+            })
+            .is_empty());
     }
     #[test]
     fn config_defaults_and_validation() {
