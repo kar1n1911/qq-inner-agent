@@ -545,7 +545,7 @@ async fn forward_fetch_normalize_text_only_and_fallback() {
             limited.max_input_chars = 12.0;
             assert_eq!(
                 normalize(&resolved, "123", &limited, 1000.).unwrap().text,
-                full.text.chars().take(12).collect::<String>()
+                "before [forw"
             );
             full
         });
@@ -554,14 +554,15 @@ async fn forward_fetch_normalize_text_only_and_fallback() {
         assert_eq!(req["params"], json!({"id":"opaque-forward"}));
         let mut data = json!({});
         data[field] = json!([
-            {"content":[{"type":"text","data":{"text":"first node"}},
+            {"sender":{"nickname":"外部用户"},"content":[{"type":"text","data":{"text":"first node"}},
                 {"type":"at","data":{"qq":"123"}}, {"type":"file","data":{"text":"secret file"}},
                 {"type":"forward","data":{"forwardId":"nested"}}]},
-            {"type":"node","data":{"message":[{"type":"text","data":{"text":"second node"}}]}}
+            {"type":"node","data":{"sender":{"user_id":321},"message":[{"type":"text","data":{"text":"second node"}}]}},
+            {"message":[{"type":"text","data":{"text":"anonymous node"}}]}
         ]);
         m.frames.send(response(&req, data, json!(0), "ok")).unwrap();
         let message = call.await.unwrap();
-        assert_eq!(message.text, "before first node\nsecond node\n after");
+        assert_eq!(message.text, "before [合并转发]\n（外部信息，非当前群对话）\n外部用户: first node\n321: second node\nanonymous node\n[/合并转发] after");
         assert_eq!(message.hint, qq_inner_core::engine::policy::Hint::Open);
         assert!(m.requests.try_recv().is_err());
     }
@@ -672,4 +673,97 @@ async fn identity_actions_use_logged_in_account_and_exact_parameters() {
         request.await.unwrap().unwrap();
     }
     stop(shutdown, task).await;
+}
+
+#[tokio::test]
+async fn backfill_forward_skips_age_but_keeps_admission_checks() {
+    use qq_inner_core::engine::policy::{
+        normalize_backfill, resolve_forwards, resolve_forwards_backfill,
+    };
+    let mut m = mock(json!({"user_id":123}), json!(true), 0).await;
+    let (b, mut rx) = forward_bot(&m);
+    let (s, t) = running(&b, &mut rx).await;
+    let mut c = forward_config();
+    c.agent.active_window_seconds = 10.;
+    c.agent.ignored_users = vec!["888".into()];
+    let mut old = forward_event();
+    old["time"] = json!(1);
+    assert_eq!(resolve_forwards(&old, &b, &c.agent, 1000.).await, old);
+    for (key, value) in [
+        ("time", json!(1061)),
+        ("time", json!("invalid")),
+        ("message_id", json!(null)),
+        ("message_id", json!("")),
+        ("group_id", json!(999)),
+        ("user_id", json!(123)),
+        ("user_id", json!(888)),
+        ("user_id", json!(null)),
+        ("self_id", json!(999)),
+        ("post_type", json!("notice")),
+        ("message_type", json!("unknown")),
+    ] {
+        let mut invalid = old.clone();
+        invalid[key] = value;
+        assert_eq!(
+            resolve_forwards_backfill(&invalid, &b, &c.agent, 1000., true).await,
+            invalid,
+            "{key}"
+        );
+    }
+    assert!(m.requests.try_recv().is_err());
+    let a = b.clone();
+    let call = tokio::spawn(async move {
+        let resolved = resolve_forwards_backfill(&old, &a, &c.agent, 1000., true).await;
+        let full = normalize_backfill(&resolved, "123", &c.agent, 1000.).unwrap();
+        c.agent.max_input_chars = 45.;
+        let clipped = normalize_backfill(&resolved, "123", &c.agent, 1000.).unwrap();
+        assert!(clipped.text.contains("[合并转发]"));
+        assert!(clipped.text.ends_with("[/合并转发]"));
+        assert!(clipped.text.chars().count() <= 45);
+        full
+    });
+    let req = next(&mut m.requests).await;
+    assert_eq!(req["action"], "get_forward_msg");
+    m.frames.send(response(&req, json!({"messages":[{"sender":{"nickname":"历史作者"},"content":[{"type":"text","data":{"text":"很久以前的外部对话，足够长以验证截断保留边界"}}]}]}), json!(0), "ok")).unwrap();
+    let message = call.await.unwrap();
+    assert_eq!(message.ts, 1.);
+    assert!(message.text.contains("历史作者: 很久以前的外部对话"));
+    assert!(message.text.contains("[/合并转发]"));
+    stop(s, t).await;
+}
+
+#[tokio::test]
+async fn json_cards_parse_fields_and_fall_back_under_forward_switch() {
+    use qq_inner_core::engine::policy::{normalize, resolve_forwards, resolve_forwards_backfill};
+    for enabled in [true, false] {
+        let m = mock(json!({"user_id":123}), json!(true), 0).await;
+        let (b, mut rx) = if enabled {
+            forward_bot(&m)
+        } else {
+            bot(&m, "a+b &?", "123", 10.0)
+        };
+        let (s, t) = running(&b, &mut rx).await;
+        let c = forward_config();
+        for (card, expected) in [
+            (json!({"title":"标题","desc":"描述","summary":"摘要","prompt":"提示"}).to_string(), "[卡片] 标题 — 描述 — 摘要 — 提示"),
+            (json!({"meta":{"news":{"title":"新闻","desc":"详情","summary":"详情","url":"https://example.com"}}}).to_string(), "[卡片] 新闻 — 详情"),
+            ("invalid json".into(), "[json]"),
+            (json!({"meta":{"title":123,"desc":" "}}).to_string(), "[json]"),
+            ("null".into(), "[json]"),
+        ] {
+            let mut event = forward_event();
+            event["message"] = json!([{"type":"json","data":{"data":card}}]);
+            for backfill in [false, true] {
+                let resolved = if backfill {
+                    resolve_forwards_backfill(&event, &b, &c.agent, 1000., enabled).await
+                } else {
+                    resolve_forwards(&event, &b, &c.agent, 1000.).await
+                };
+                assert_eq!(normalize(&resolved, "123", &c.agent, 1000.).unwrap().text, if enabled { expected } else { "[json]" });
+                assert_ne!(resolved["message"][0]["type"], "text");
+            }
+        }
+        assert!(m.requests.is_empty());
+        stop(s, t).await;
+    }
 }

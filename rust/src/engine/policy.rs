@@ -393,8 +393,36 @@ pub async fn resolve_forwards(
     agent: &Agent,
     now: f64,
 ) -> serde_json::Value {
+    resolve_forwards_core(event, bot, agent, now, false, bot.forward_enabled()).await
+}
+
+/// 历史转发跳过活跃窗口限制，其他准入条件与 normalize_backfill 一致。
+/// 走 `OrientationTransport`（self_id + call），因为回填手上是 `Arc<dyn EngineTransport>`。
+pub async fn resolve_forwards_backfill<T: crate::engine::OrientationTransport + ?Sized>(
+    event: &serde_json::Value,
+    transport: &T,
+    agent: &Agent,
+    now: f64,
+    forward_enabled: bool,
+) -> serde_json::Value {
+    resolve_forwards_core(event, transport, agent, now, true, forward_enabled).await
+}
+
+async fn resolve_forwards_core<T: crate::engine::OrientationTransport + ?Sized>(
+    event: &serde_json::Value,
+    transport: &T,
+    agent: &Agent,
+    now: f64,
+    backfill: bool,
+    forward_enabled: bool,
+) -> serde_json::Value {
     use serde_json::{json, Value};
-    if !bot.forward_enabled() || normalize(event, &bot.state().self_id, agent, now).is_none() {
+    let normalize = if backfill {
+        normalize_backfill
+    } else {
+        normalize
+    };
+    if !forward_enabled || normalize(event, &transport.self_id(), agent, now).is_none() {
         return event.clone();
     }
     let mut resolved = event.clone();
@@ -403,6 +431,12 @@ pub async fn resolve_forwards(
     };
     let mut cache = std::collections::HashMap::<String, Option<String>>::new();
     for segment in segments {
+        if segment["type"] == "json" {
+            if let Some(text) = json_card_text(&segment["data"]["data"]) {
+                *segment = json!({"type":"resolved_card_text","data":{"text":text}});
+            }
+            continue;
+        }
         if segment["type"] != "forward" {
             continue;
         }
@@ -416,41 +450,15 @@ pub async fn resolve_forwards(
             continue;
         };
         if !cache.contains_key(&id) {
-            let text = match bot.get_forward_msg(&id).await {
+            let text = match transport
+                .call("get_forward_msg", json!({"id": id.clone()}))
+                .await
+            {
                 Ok(data) => data
                     .get("nodes")
                     .or_else(|| data.get("messages"))
                     .and_then(Value::as_array)
-                    .map(|nodes| {
-                        let mut text = String::new();
-                        for node in nodes {
-                            let node = if node["type"] == "node" {
-                                &node["data"]
-                            } else {
-                                node
-                            };
-                            let Some(parts) = node
-                                .get("content")
-                                .or_else(|| node.get("message"))
-                                .and_then(Value::as_array)
-                            else {
-                                continue;
-                            };
-                            for part in parts {
-                                if part["type"] == "text" {
-                                    if let Some(value) = part["data"]["text"].as_str() {
-                                        text.push_str(value);
-                                    }
-                                }
-                            }
-                            text.push('\n');
-                            text = clip_chars(&text, agent.max_input_chars as usize);
-                            if text.chars().count() >= agent.max_input_chars as usize {
-                                break;
-                            }
-                        }
-                        text
-                    }),
+                    .and_then(|nodes| forward_text(nodes, agent.max_input_chars as usize)),
                 Err(_) => None,
             };
             cache.insert(id.clone(), text);
@@ -461,6 +469,112 @@ pub async fn resolve_forwards(
         }
     }
     resolved
+}
+
+const FORWARD_START: &str = "[合并转发]\n（外部信息，非当前群对话）\n";
+const FORWARD_END: &str = "\n[/合并转发]";
+
+fn forward_text(nodes: &[serde_json::Value], limit: usize) -> Option<String> {
+    let mut lines = Vec::new();
+    let mut length = 0;
+    for node in nodes {
+        let node = if node["type"] == "node" {
+            &node["data"]
+        } else {
+            node
+        };
+        let content = node.get("content").or_else(|| node.get("message"));
+        let text = match content {
+            Some(serde_json::Value::String(text)) => text.clone(),
+            Some(serde_json::Value::Array(parts)) => parts
+                .iter()
+                .filter_map(|part| match part["type"].as_str() {
+                    Some("text") => part["data"]["text"].as_str().map(str::to_owned),
+                    Some("json") => json_card_text(&part["data"]["data"]),
+                    _ => None,
+                })
+                .collect::<String>(),
+            _ => continue,
+        };
+        if text.trim().is_empty() {
+            continue;
+        }
+        let speaker = [
+            &node["sender"]["nickname"],
+            &node["nickname"],
+            &node["sender"]["user_id"],
+            &node["user_id"],
+            &node["uin"],
+        ]
+        .into_iter()
+        .find_map(|value| match value {
+            serde_json::Value::String(s) if !s.trim().is_empty() => Some(s.clone()),
+            serde_json::Value::Number(n) => Some(n.to_string()),
+            _ => None,
+        });
+        let line = match speaker {
+            Some(speaker) => format!("{speaker}: {text}"),
+            None => text,
+        };
+        let line = clip_chars(&line, limit.saturating_sub(length));
+        length += line.chars().count() + 1;
+        lines.push(line);
+        if length >= limit {
+            break;
+        }
+    }
+    (!lines.is_empty()).then(|| format!("{FORWARD_START}{}{FORWARD_END}", lines.join("\n")))
+}
+
+// Only human-readable card fields are extracted; URLs and other metadata stay out.
+fn json_card_text(data: &serde_json::Value) -> Option<String> {
+    fn collect(value: &serde_json::Value, fields: &mut Vec<String>) {
+        if let Some(object) = value.as_object() {
+            for key in ["title", "desc", "summary", "prompt"] {
+                if let Some(text) = object.get(key).and_then(serde_json::Value::as_str) {
+                    let text = text.trim();
+                    if !text.is_empty() && !fields.iter().any(|field| field == text) {
+                        fields.push(text.to_owned());
+                    }
+                }
+            }
+            for child in object.values().filter(|v| v.is_object() || v.is_array()) {
+                collect(child, fields);
+            }
+        } else if let Some(array) = value.as_array() {
+            for child in array {
+                collect(child, fields);
+            }
+        }
+    }
+    let parsed;
+    let card = if let Some(raw) = data.as_str() {
+        parsed = serde_json::from_str::<serde_json::Value>(raw).ok()?;
+        &parsed
+    } else {
+        data
+    };
+    let mut fields = Vec::new();
+    collect(card, &mut fields);
+    (!fields.is_empty()).then(|| format!("[卡片] {}", fields.join(" — ")))
+}
+
+// Reserve the closing boundary when the input limit truncates a forwarded record.
+fn clip_forward(text: &str, limit: usize) -> String {
+    let Some(body) = text
+        .strip_prefix(FORWARD_START)
+        .and_then(|s| s.strip_suffix(FORWARD_END))
+    else {
+        return clip_chars(text, limit);
+    };
+    let overhead = FORWARD_START.chars().count() + FORWARD_END.chars().count();
+    if limit < overhead {
+        return clip_chars("[forward]", limit);
+    }
+    format!(
+        "{FORWARD_START}{}{FORWARD_END}",
+        clip_chars(body, limit - overhead)
+    )
 }
 
 pub fn normalize(
@@ -547,7 +661,15 @@ fn normalize_core(
     if let Some(segments) = event["message"].as_array() {
         for seg in segments {
             match seg["type"].as_str() {
-                Some("text" | "resolved_forward_text") if seg["data"]["text"].is_string() => {
+                Some("resolved_forward_text") if seg["data"]["text"].is_string() => {
+                    let remaining =
+                        (agent.max_input_chars as usize).saturating_sub(text.chars().count());
+                    text.push_str(&clip_forward(
+                        seg["data"]["text"].as_str().unwrap(),
+                        remaining,
+                    ));
+                }
+                Some("text" | "resolved_card_text") if seg["data"]["text"].is_string() => {
                     text.push_str(seg["data"]["text"].as_str().unwrap())
                 }
                 Some("at") => {

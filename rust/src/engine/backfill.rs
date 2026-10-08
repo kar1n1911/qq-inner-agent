@@ -50,6 +50,17 @@ impl Engine {
                 event["message_type"] = json!("group");
                 event["group_id"] = json!(group);
                 event["self_id"] = json!(self.transport.self_id());
+                let event = tokio::select! {
+                    biased;
+                    _ = abort.changed() => return,
+                    event = policy::resolve_forwards_backfill(
+                        &event,
+                        &*self.transport,
+                        &self.config.agent,
+                        self.now(),
+                        self.config.onebot.forward_enabled,
+                    ) => event,
+                };
                 let engine = self.clone();
                 // Same blocking I/O boundary as live ingest; always join before shutdown/reload.
                 if !matches!(
