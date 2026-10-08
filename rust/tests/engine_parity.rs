@@ -26,6 +26,7 @@ struct Harness {
     transport: Mutex<State>,
     sends: Mutex<usize>,
     orientation_reads: Mutex<Vec<String>>,
+    identity_reads: Mutex<Vec<(String, Value)>>,
     budget: f64,
     hold: Mutex<Option<String>>,
     entered: Notify,
@@ -69,8 +70,19 @@ impl OrientationTransport for Harness {
     fn self_id(&self) -> String {
         "99".into()
     }
-    fn call<'a>(&'a self, action: &'a str, _: Value) -> BoxFuture<'a, Result<Value>> {
+    fn call<'a>(&'a self, action: &'a str, params: Value) -> BoxFuture<'a, Result<Value>> {
         Box::pin(async move {
+            if matches!(action, "get_login_info" | "get_group_member_info") {
+                self.identity_reads.lock().unwrap().push((action.into(), params.clone()));
+                let model = self.model.lock().unwrap();
+                let response = if action == "get_login_info" {
+                    &model["loginInfo"]
+                } else {
+                    &model["memberInfo"][params["group_id"].as_str().unwrap()]
+                };
+                anyhow::ensure!(!response.is_null(), "unsupported");
+                return Ok(response.clone());
+            }
             self.orientation_reads.lock().unwrap().push(action.into());
             let hold = self.hold.lock().unwrap().as_deref() == Some("COLLECT");
             if hold && action == "get_group_info" {
@@ -257,6 +269,7 @@ fn setup(case: &Value) -> (Arc<Engine>, Arc<Harness>) {
         }),
         sends: Mutex::new(0),
         orientation_reads: Mutex::new(Vec::new()),
+        identity_reads: Mutex::new(Vec::new()),
         budget: case["budget"].as_f64().unwrap_or(1000.),
         hold: Mutex::new(None),
         entered: Notify::new(),
@@ -2224,4 +2237,101 @@ async fn backfill_ingests_expired_history_without_replying() {
     assert_eq!(*h.sends.lock().unwrap(), 0);
     assert!(h.rows("SELECT * FROM calls").is_empty());
     e.stop().await;
+}
+
+
+#[tokio::test]
+async fn visible_self_identity_is_cached_scoped_and_injected() {
+    for (member, expected) in [
+        (
+            json!({"card":"群里的卡琳","nickname":"Kar1n1911"}),
+            "群里的卡琳",
+        ),
+        (json!({"card":"","nickname":"Kar1n1911"}), "Kar1n1911"),
+        (Value::Null, "Kar1n1911"),
+    ] {
+        let (e, h) = setup(&base(
+            "self_identity",
+            json!({"name":"Lantaneen","aliases":["Lantaneen","Luma"]}),
+            vec![],
+        ));
+        *h.model.lock().unwrap() = json!({"allocation":"self","loginInfo":{"nickname":"Kar1n1911"},"memberInfo":{"10":member,"11":{"card":"别群名片","nickname":"Kar1n1911"}}});
+        e.tick().unwrap();
+        e.wait_idle().await;
+        assert_eq!(h.identity_reads.lock().unwrap().len(), 3);
+        for (i, name) in ["Kar1n1911", expected, "Luma"].iter().enumerate() {
+            e.ingest(&h.event(&json!({"id":format!("alias{i}"),"text":format!("{name}：你好")})))
+                .unwrap();
+            assert_eq!(
+                e.state("group:10").unwrap().hint,
+                qq_inner_core::engine::policy::Hint::SelfChat
+            );
+            e.tick().unwrap();
+            e.wait_idle().await;
+            *h.now.lock().unwrap() += 2.;
+        }
+        let inputs = h.model_inputs.lock().unwrap().clone();
+        let payload = &inputs
+            .iter()
+            .rev()
+            .find(|(stage, _)| stage == "FORM")
+            .unwrap()
+            .1;
+        let own = payload["history"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["self"] == true)
+            .unwrap();
+        assert_eq!(own["speaker"], expected);
+        assert_eq!(payload["selfIdentity"]["qq"], "99");
+        assert_eq!(payload["selfIdentity"]["nickname"], "Kar1n1911");
+        assert_eq!(
+            payload["selfIdentity"]["groupCard"],
+            member["card"].as_str().unwrap_or("")
+        );
+        assert_eq!(
+            payload["selfIdentity"]["instructions"],
+            "群友讨论的那个机器人就是你,不要以第三方身份谈论自己"
+        );
+        assert_eq!(
+            h.identity_reads.lock().unwrap().len(),
+            3,
+            "turns reuse cached identity"
+        );
+        e.ingest(&h.event(&json!({"id":"other-card","text":"别群名片：你好"})))
+            .unwrap();
+        assert_ne!(
+            e.state("group:10").unwrap().hint,
+            qq_inner_core::engine::policy::Hint::SelfChat
+        );
+        *h.now.lock().unwrap() += 301.;
+        *h.model.lock().unwrap() = json!({"allocation":"self"});
+        e.tick().unwrap();
+        e.wait_idle().await;
+        assert_eq!(
+            h.identity_reads.lock().unwrap().len(),
+            6,
+            "failed refresh is also cached"
+        );
+        e.ingest(&h.event(&json!({"id":"fallback","text":"Luma：你好"})))
+            .unwrap();
+        e.tick().unwrap();
+        e.wait_idle().await;
+        let inputs = h.model_inputs.lock().unwrap().clone();
+        let payload = &inputs
+            .iter()
+            .rev()
+            .find(|(stage, _)| stage == "FORM")
+            .unwrap()
+            .1;
+        assert_eq!(payload["selfIdentity"]["visibleName"], "Lantaneen");
+        assert!(payload["history"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|m| m["self"] == true)
+            .all(|m| m["speaker"] == "Lantaneen"));
+        e.stop().await;
+    }
 }
