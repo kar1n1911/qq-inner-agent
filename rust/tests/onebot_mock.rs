@@ -521,6 +521,68 @@ fn forward_event() -> Value {
 }
 
 #[tokio::test]
+async fn forward_images_keep_summaries_and_share_event_budget() {
+    use qq_inner_core::engine::policy::{normalize, resolve_forwards};
+    let mut m = mock(json!({"user_id":123}), json!(true), 0).await;
+    let (b, mut rx) = forward_bot(&m);
+    let (s, t) = running(&b, &mut rx).await;
+    for (enabled, limit) in [(true, 5), (true, 1), (true, 0), (false, 5)] {
+        let images = json!([
+            {"type":"image","data":{"url":"https://example.org/1","file":"one","summary":"[动画表情]"}},
+            {"type":"image","data":{"url":"https://example.org/2","file":"two"}},
+            {"type":"image","data":{"url":"https://example.org/3","file":"three","summary":"  "}}
+        ]);
+        let a = b.clone();
+        let call = tokio::spawn(async move {
+            let mut c = forward_config();
+            c.agent.ocr.enabled = enabled;
+            c.agent.ocr.max_forward_images = limit;
+            let mut event = forward_event();
+            event["message"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({"type":"forward","data":{"id":"opaque-forward"}}));
+            let resolved = resolve_forwards(&event, &a, &c.agent, 1000.).await;
+            let normalized = normalize(&resolved, "123", &c.agent, 1000.).unwrap();
+            (resolved, normalized)
+        });
+        let req = next(&mut m.requests).await;
+        m.frames
+            .send(response(
+                &req,
+                json!({"nodes":[
+                    {"type":"node","data":{"nickname":"外部用户","content":images}}
+                ]}),
+                json!(0),
+                "ok",
+            ))
+            .unwrap();
+        let (resolved, message) = call.await.unwrap();
+        let retained: Vec<_> = resolved["message"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|part| part["type"] == "image")
+            .collect();
+        assert_eq!(retained.len(), limit);
+        for (index, part) in retained.iter().enumerate() {
+            assert_eq!(part["data"], images[index % 3]["data"]);
+        }
+        assert_eq!(
+            message
+                .text
+                .matches("[图片: [动画表情]][图片][图片]")
+                .count(),
+            2
+        );
+        assert!(!message.text.contains("[image]"));
+        // The repeated forward uses the fetch cache, but not a fresh image budget.
+        assert!(m.requests.try_recv().is_err());
+    }
+    stop(s, t).await;
+}
+
+#[tokio::test]
 async fn forward_fetch_normalize_text_only_and_fallback() {
     use qq_inner_core::engine::policy::{normalize, resolve_forwards};
     let mut m = mock(json!({"user_id":123}), json!(true), 0).await;

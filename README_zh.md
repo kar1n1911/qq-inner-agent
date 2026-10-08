@@ -319,3 +319,5 @@ key 也可以通过 `LLM_API_KEY`、`DEEPSEEK_API_KEY`、`OPENAI_API_KEY`、`ANT
 候选池在重启后依然存在，并会针对新上下文重新评估。开放轮次看动机阈值；被明确点名时优先；要打断别人的话轮则需要更高分数。System 1 概率和语气都可配置，用来调节参与风格。
 
 几处有意的偏离：检索用词汇相似度而不是 embedding；评估用经过校验的模型数值评分，而不是按 token logprob 加权的分数。沉默乘数设了上限。另外还加了一些运行层面的控制，用来约束重复、过期输出、API 用量和静默时段内的活跃度。这些分数都是模型判断，不是校准过的概率，也不能当作主观感受的证据。
+
+合并转发由 `onebot.forwardEnabled` 控制解析，图片显示为 `[图片: <summary>]`（无非空 summary 时为 `[图片]`）。Rust 的 `agent.ocr.enabled` 开启后，转发图片复用 OCR worker；`agent.ocr.maxForwardImages` 默认 5，可设为 0–100，同一事件内所有转发按节点顺序共享额度，超额图片只保留文字标记。单图仍受 `agent.ocr.maxBytes`（默认 4 MiB）和 `timeoutSeconds` 限制。OCR 聚合结果放在转发块末尾，保持 `[image: <text>]` 或低可信警示格式。

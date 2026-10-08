@@ -27,6 +27,7 @@ pub struct Settings {
     pub timeout_seconds: u64,
     pub max_chars: usize,
     pub max_bytes: u64,
+    pub max_forward_images: usize,
     pub min_confidence: f64,
 }
 impl Default for Settings {
@@ -39,6 +40,7 @@ impl Default for Settings {
             timeout_seconds: 20,
             max_chars: 800,
             max_bytes: 4 * 1024 * 1024,
+            max_forward_images: 5,
             min_confidence: 60.0,
         }
     }
@@ -69,6 +71,10 @@ impl Settings {
         ensure!(
             (1..=100 * 1024 * 1024).contains(&self.max_bytes),
             "invalid OCR maxBytes"
+        );
+        ensure!(
+            self.max_forward_images <= 100,
+            "invalid OCR maxForwardImages"
         );
         ensure!(
             (0.0..=100.0).contains(&self.min_confidence),
@@ -366,18 +372,23 @@ impl Store {
                 params![row["chat"].as_str(), row["id"].as_str()],
             )? {
                 if let (Some(original), Some(text)) = (row["text"].as_str(), ocr["text"].as_str()) {
-                    // One row represents all images in a message; insert the aggregate only once.
-                    if let Some((pos, token)) = ["[image]", "[图片]"]
+                    let replacement = if ocr["reliable"].as_i64() == Some(1) {
+                        format!("[image: {text}]")
+                    } else {
+                        format!("[图片(文字识别可信度低,仅供参考): {text}]")
+                    };
+                    // Preserve summary markers (which may contain brackets themselves).
+                    // One row aggregates all images; render it once inside the forward block.
+                    if let Some(pos) = original.find("\n[/合并转发]") {
+                        let mut enhanced = original.to_owned();
+                        enhanced.insert_str(pos, &format!("\n{replacement}"));
+                        row["text"] = json!(enhanced);
+                    } else if let Some((pos, token)) = ["[image]", "[图片]"]
                         .into_iter()
                         .filter_map(|token| original.find(token).map(|p| (p, token)))
                         .min_by_key(|(p, _)| *p)
                     {
                         let mut enhanced = original.to_owned();
-                        let replacement = if ocr["reliable"].as_i64() == Some(1) {
-                            format!("[image: {text}]")
-                        } else {
-                            format!("[图片(文字识别可信度低,仅供参考): {text}]")
-                        };
                         enhanced.replace_range(pos..pos + token.len(), &replacement);
                         row["text"] = json!(enhanced);
                     }
@@ -504,6 +515,29 @@ TSV"
         assert!(!std::path::Path::new(&input).parent().unwrap().exists());
     }
     #[test]
+    fn forward_summary_context_keeps_markers_and_quality_warning() {
+        let db = Store::in_memory().unwrap();
+        db.set_ocr_enabled(true).unwrap();
+        let original = "[合并转发]\n（外部信息，非当前群对话）\n[图片: [动画表情]]\n[/合并转发]";
+        db.message(&json!({"chat":"a","id":"1","text":original,"ts":1}))
+            .unwrap();
+        for (reliable, rendered) in [
+            (1, "[image: 文字]"),
+            (0, "[图片(文字识别可信度低,仅供参考): 文字]"),
+        ] {
+            db.execute("INSERT OR REPLACE INTO media_ocr VALUES('a','1','hash','文字','tesseract',1,0.9,?)", [reliable]).unwrap();
+            let expected = original.replace("\n[/合并转发]", &format!("\n{rendered}\n[/合并转发]"));
+            assert_eq!(db.history("a", None).unwrap()[0]["text"], expected);
+            assert_eq!(
+                crate::engine::backlog::full_history(&db, "a", 24).unwrap()[0]["text"],
+                expected
+            );
+        }
+        db.set_ocr_enabled(false).unwrap();
+        assert_eq!(db.history("a", None).unwrap()[0]["text"], original);
+    }
+
+    #[test]
     fn dispatch_validation_and_camel_case() {
         assert!(build(&Settings::default()).is_ok());
         let unsupported = Settings {
@@ -525,6 +559,9 @@ TSV"
             json!({"maxChars":0}),
             json!({"timeoutSeconds":0}),
             json!({"maxBytes":0}),
+            json!({"maxForwardImages":101}),
+            json!({"maxForwardImages":-1}),
+            json!({"maxForwardImages":1.5}),
             json!({"max_chars":42}),
             json!({"engine":"unknown"}),
             json!({"binary":""}),
@@ -600,7 +637,7 @@ TSV"
         let db = Arc::new(Mutex::new(Store::in_memory().unwrap()));
         db.lock()
             .unwrap()
-            .message(&json!({"chat":"group:1","id":"a","text":"look [图片]","ts":1}))
+            .message(&json!({"chat":"group:1","id":"a","text":"[合并转发]\n[图片: [动画表情]]\n[/合并转发]","ts":1}))
             .unwrap();
         let worker = Worker::start(
             &settings,
@@ -609,7 +646,7 @@ TSV"
         )
         .unwrap()
         .unwrap();
-        let event = json!({"message":[{"type":"image","data":{"file":"opaque-id","url":url}}]});
+        let event = json!({"message":[{"type":"image","resolved_forward_image":true,"data":{"file":"opaque-id","url":url,"summary":"[动画表情]"}}]});
         let start = Instant::now();
         worker.enqueue("group:1", "a", &event, 1.);
         assert!(start.elapsed() < Duration::from_millis(100));
@@ -636,20 +673,20 @@ TSV"
         assert_eq!(stored["reliable"], 1);
         assert_eq!(
             db.history("group:1", None).unwrap()[0]["text"],
-            "look [image: 文字🙂]"
+            "[合并转发]\n[图片: [动画表情]]\n[image: 文字🙂]\n[/合并转发]"
         );
         assert_eq!(
             crate::engine::backlog::full_history(&db, "group:1", 24).unwrap()[0]["text"],
-            "look [image: 文字🙂]"
+            "[合并转发]\n[图片: [动画表情]]\n[image: 文字🙂]\n[/合并转发]"
         );
         assert_eq!(
             db.first("SELECT text FROM messages", []).unwrap().unwrap()["text"],
-            "look [图片]"
+            "[合并转发]\n[图片: [动画表情]]\n[/合并转发]"
         );
         db.set_ocr_enabled(false).unwrap();
         assert_eq!(
             db.history("group:1", None).unwrap()[0]["text"],
-            "look [图片]"
+            "[合并转发]\n[图片: [动画表情]]\n[/合并转发]"
         );
         db.execute("DELETE FROM messages", []).unwrap();
         assert!(db.first("SELECT * FROM media_ocr", []).unwrap().is_none());

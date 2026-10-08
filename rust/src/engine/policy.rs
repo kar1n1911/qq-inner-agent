@@ -429,15 +429,19 @@ async fn resolve_forwards_core<T: crate::engine::OrientationTransport + ?Sized>(
     let Some(segments) = resolved["message"].as_array_mut() else {
         return resolved;
     };
-    let mut cache = std::collections::HashMap::<String, Option<String>>::new();
-    for segment in segments {
+    let mut cache = std::collections::HashMap::new();
+    let mut remaining_images = agent.ocr.max_forward_images;
+    let mut expanded = Vec::new();
+    for mut segment in std::mem::take(segments) {
         if segment["type"] == "json" {
             if let Some(text) = json_card_text(&segment["data"]["data"]) {
-                *segment = json!({"type":"resolved_card_text","data":{"text":text}});
+                segment = json!({"type":"resolved_card_text","data":{"text":text}});
             }
+            expanded.push(segment);
             continue;
         }
         if segment["type"] != "forward" {
+            expanded.push(segment);
             continue;
         }
         let Some(id) = segment["data"]["forwardId"]
@@ -447,6 +451,7 @@ async fn resolve_forwards_core<T: crate::engine::OrientationTransport + ?Sized>(
             .filter(|id| !id.trim().is_empty())
             .map(str::to_owned)
         else {
+            expanded.push(segment);
             continue;
         };
         if !cache.contains_key(&id) {
@@ -458,23 +463,44 @@ async fn resolve_forwards_core<T: crate::engine::OrientationTransport + ?Sized>(
                     .get("nodes")
                     .or_else(|| data.get("messages"))
                     .and_then(Value::as_array)
-                    .and_then(|nodes| forward_text(nodes, agent.max_input_chars as usize)),
+                    .and_then(|nodes| {
+                        forward_text(
+                            nodes,
+                            agent.max_input_chars as usize,
+                            agent.ocr.max_forward_images,
+                        )
+                    }),
                 Err(_) => None,
             };
             cache.insert(id.clone(), text);
         }
-        if let Some(Some(text)) = cache.get(&id) {
+        if let Some(Some((text, images))) = cache.get(&id) {
             // 独立内部段避免原始指令提取把转发内容识别成 owner 的直接指令。
-            *segment = json!({"type":"resolved_forward_text","data":{"text":text}});
+            expanded.push(json!({"type":"resolved_forward_text","data":{"text":text}}));
+            for image in images.iter().take(remaining_images) {
+                let mut image = image.clone();
+                // Internal provenance avoids duplicate placeholders during normalization.
+                image["resolved_forward_image"] = json!(true);
+                expanded.push(image);
+                remaining_images -= 1;
+            }
+        } else {
+            expanded.push(segment);
         }
     }
+    *segments = expanded;
     resolved
 }
 
 const FORWARD_START: &str = "[合并转发]\n（外部信息，非当前群对话）\n";
 const FORWARD_END: &str = "\n[/合并转发]";
 
-fn forward_text(nodes: &[serde_json::Value], limit: usize) -> Option<String> {
+fn forward_text(
+    nodes: &[serde_json::Value],
+    limit: usize,
+    max_images: usize,
+) -> Option<(String, Vec<serde_json::Value>)> {
+    let mut images = Vec::new();
     let mut lines = Vec::new();
     let mut length = 0;
     for node in nodes {
@@ -491,6 +517,15 @@ fn forward_text(nodes: &[serde_json::Value], limit: usize) -> Option<String> {
                 .filter_map(|part| match part["type"].as_str() {
                     Some("text") => part["data"]["text"].as_str().map(str::to_owned),
                     Some("json") => json_card_text(&part["data"]["data"]),
+                    Some("image") => {
+                        if images.len() < max_images {
+                            images.push(part.clone());
+                        }
+                        Some(match part["data"]["summary"].as_str().map(str::trim) {
+                            Some(summary) if !summary.is_empty() => format!("[图片: {summary}]"),
+                            _ => "[图片]".into(),
+                        })
+                    }
                     _ => None,
                 })
                 .collect::<String>(),
@@ -523,7 +558,12 @@ fn forward_text(nodes: &[serde_json::Value], limit: usize) -> Option<String> {
             break;
         }
     }
-    (!lines.is_empty()).then(|| format!("{FORWARD_START}{}{FORWARD_END}", lines.join("\n")))
+    (!lines.is_empty()).then(|| {
+        (
+            format!("{FORWARD_START}{}{FORWARD_END}", lines.join("\n")),
+            images,
+        )
+    })
 }
 
 // Only human-readable card fields are extracted; URLs and other metadata stay out.
@@ -661,6 +701,7 @@ fn normalize_core(
     if let Some(segments) = event["message"].as_array() {
         for seg in segments {
             match seg["type"].as_str() {
+                Some("image") if seg["resolved_forward_image"] == true => {}
                 Some("resolved_forward_text") if seg["data"]["text"].is_string() => {
                     let remaining =
                         (agent.max_input_chars as usize).saturating_sub(text.chars().count());

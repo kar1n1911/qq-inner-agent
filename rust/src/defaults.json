@@ -31,6 +31,7 @@
       "timeoutSeconds": 20,
       "maxChars": 800,
       "maxBytes": 4194304,
+      "maxForwardImages": 5,
       "minConfidence": 60.0
     },
     "backfill": {
