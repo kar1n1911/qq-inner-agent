@@ -218,6 +218,7 @@ pub fn validate(c: &Value) -> std::result::Result<(), ConfigError> {
     if let Some(v) = a.get("ocr") {
         let settings: crate::media::ocr::Settings = serde_json::from_value(v.clone())
             .map_err(|e| ConfigError(format!("agent.ocr: {e}")))?;
+        // Includes the finite 0..=100 agent.ocr.minConfidence threshold.
         settings
             .validate()
             .map_err(|e| ConfigError(format!("agent.ocr: {e}")))?;

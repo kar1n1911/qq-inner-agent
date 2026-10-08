@@ -30,7 +30,8 @@
       "binary": "tesseract",
       "timeoutSeconds": 20,
       "maxChars": 800,
-      "maxBytes": 4194304
+      "maxBytes": 4194304,
+      "minConfidence": 60.0
     },
     "backfill": {
       "enabled": true,
