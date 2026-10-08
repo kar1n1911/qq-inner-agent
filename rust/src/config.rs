@@ -218,7 +218,7 @@ pub fn validate(c: &Value) -> std::result::Result<(), ConfigError> {
     if let Some(v) = a.get("ocr") {
         let settings: crate::media::ocr::Settings = serde_json::from_value(v.clone())
             .map_err(|e| ConfigError(format!("agent.ocr: {e}")))?;
-        // Includes the finite 0..=100 agent.ocr.minConfidence threshold.
+        // Validates engine dispatch, python/script and the finite 0..=100 threshold.
         settings
             .validate()
             .map_err(|e| ConfigError(format!("agent.ocr: {e}")))?;
@@ -1177,7 +1177,12 @@ pub fn load_with_env(root: &Path, env: impl Fn(&str) -> Option<String>) -> Resul
             .as_str()
             .context("storage.directory must be a string")?
     )?);
-    let config = Config::from_value(&raw)?;
+    let mut config = Config::from_value(&raw)?;
+    // Resolve against the selected repository root, independent of launch cwd.
+    // Keep raw settings portable for configuration display/editing.
+    config.agent.ocr.script = absolute(root, &config.agent.ocr.script)?
+        .to_string_lossy()
+        .into_owned();
     Ok(Loaded { config, raw })
 }
 

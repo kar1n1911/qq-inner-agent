@@ -28,6 +28,8 @@
       "engine": "tesseract",
       "languages": "chi_sim+eng",
       "binary": "tesseract",
+      "python": "python3",
+      "script": "scripts/ocr-rapidocr.py",
       "timeoutSeconds": 20,
       "maxChars": 800,
       "maxBytes": 4194304,

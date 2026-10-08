@@ -24,6 +24,8 @@ pub struct Settings {
     pub engine: String,
     pub languages: String,
     pub binary: String,
+    pub python: String,
+    pub script: String,
     pub timeout_seconds: u64,
     pub max_chars: usize,
     pub max_bytes: u64,
@@ -37,6 +39,8 @@ impl Default for Settings {
             engine: "tesseract".into(),
             languages: "chi_sim+eng".into(),
             binary: "tesseract".into(),
+            python: "python3".into(),
+            script: "scripts/ocr-rapidocr.py".into(),
             timeout_seconds: 20,
             max_chars: 800,
             max_bytes: 4 * 1024 * 1024,
@@ -47,7 +51,16 @@ impl Default for Settings {
 }
 impl Settings {
     pub fn validate(&self) -> Result<()> {
-        ensure!(self.engine == "tesseract", "unsupported engine");
+        ensure!(
+            matches!(self.engine.as_str(), "tesseract" | "rapidocr"),
+            "unsupported engine"
+        );
+        for (name, value) in [("python", &self.python), ("script", &self.script)] {
+            ensure!(
+                !value.trim().is_empty() && !value.contains('\0'),
+                "invalid OCR {name}"
+            );
+        }
         ensure!(
             !self.binary.trim().is_empty() && !self.binary.contains('\0'),
             "invalid OCR binary"
@@ -89,7 +102,7 @@ pub struct OcrOutput {
     pub text: String,
     pub confidence: f64,
     pub reliable: bool,
-    /// Fraction of recognized words below the configured confidence threshold.
+    /// Fraction of recognized words (Tesseract) or lines (RapidOCR) below the threshold.
     pub low_confidence_ratio: f64,
 }
 pub trait Engine {
@@ -115,60 +128,143 @@ impl Drop for Process {
         let _ = self.0.wait();
     }
 }
-impl Engine for Tesseract {
-    fn recognize(&self, image: &[u8]) -> Result<OcrOutput> {
-        let run = || -> Result<OcrOutput> {
-            let path = std::env::temp_dir().join(format!("qq-ocr-{}", crate::store::uuid()));
-            let mut builder = fs::DirBuilder::new();
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::DirBuilderExt;
-                builder.mode(0o700);
+// Both engines share bounded output, timeout handling and RAII cleanup.
+fn run_process(
+    image: &[u8],
+    timeout_seconds: u64,
+    command: impl FnOnce(&std::path::Path) -> Command,
+) -> Result<Vec<u8>> {
+    let run = || -> Result<Vec<u8>> {
+        let path = std::env::temp_dir().join(format!("qq-ocr-{}", crate::store::uuid()));
+        let mut builder = fs::DirBuilder::new();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
+        builder.create(&path)?;
+        let tmp = Temporary(path);
+        let input = tmp.0.join("input");
+        File::create(&input)?.write_all(image)?;
+        let output = tmp.0.join("stdout");
+        // No shell interpolation; neither stderr nor temporary paths escape this module.
+        let mut child = Process(
+            command(&input)
+                .stdin(Stdio::null())
+                .stderr(Stdio::null())
+                .stdout(File::create(&output)?)
+                .spawn()?,
+        );
+        let start = Instant::now();
+        loop {
+            if let Some(status) = child.0.try_wait()? {
+                ensure!(status.success(), "ocr_failed");
+                break;
             }
-            builder.create(&path)?;
-            let tmp = Temporary(path);
-            let input = tmp.0.join("input");
-            File::create(&input)?.write_all(image)?;
-            let output = tmp.0.join("stdout");
-            // No shell interpolation; neither stderr nor temporary paths escape this module.
-            let mut child = Process(
-                Command::new(&self.binary)
-                    .arg(&input)
-                    .args(["stdout", "-l", &self.languages, "tsv"])
-                    .stdin(Stdio::null())
-                    .stderr(Stdio::null())
-                    .stdout(File::create(&output)?)
-                    .spawn()?,
+            ensure!(
+                start.elapsed() < Duration::from_secs(timeout_seconds),
+                "ocr_failed"
             );
-            let start = Instant::now();
-            loop {
-                if let Some(status) = child.0.try_wait()? {
-                    ensure!(status.success(), "ocr_failed");
-                    break;
-                }
-                ensure!(
-                    start.elapsed() < Duration::from_secs(self.timeout_seconds),
-                    "ocr_failed"
-                );
-                // Bound output even for a broken replacement binary.
-                ensure!(
-                    fs::metadata(&output)?.len() <= 4 * 1024 * 1024,
-                    "ocr_failed"
-                );
-                std::thread::sleep(Duration::from_millis(10));
-            }
+            // Bound output even for a broken replacement binary.
             ensure!(
                 fs::metadata(&output)?.len() <= 4 * 1024 * 1024,
                 "ocr_failed"
             );
-            let mut bytes = Vec::new();
-            File::open(output)?
-                .take(4 * 1024 * 1024)
-                .read_to_end(&mut bytes)?;
-            parse_tsv(&String::from_utf8_lossy(&bytes), self.min_confidence)
-        };
-        run().map_err(|_| anyhow::anyhow!("ocr_failed"))
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        ensure!(
+            fs::metadata(&output)?.len() <= 4 * 1024 * 1024,
+            "ocr_failed"
+        );
+        let mut bytes = Vec::new();
+        File::open(output)?
+            .take(4 * 1024 * 1024)
+            .read_to_end(&mut bytes)?;
+        Ok(bytes)
+    };
+    run().map_err(|_| anyhow::anyhow!("ocr_failed"))
+}
+impl Engine for Tesseract {
+    fn recognize(&self, image: &[u8]) -> Result<OcrOutput> {
+        let bytes = run_process(image, self.timeout_seconds, |input| {
+            let mut command = Command::new(&self.binary);
+            command
+                .arg(input)
+                .args(["stdout", "-l", &self.languages, "tsv"]);
+            command
+        })?;
+        parse_tsv(&String::from_utf8_lossy(&bytes), self.min_confidence)
+            .map_err(|_| anyhow::anyhow!("ocr_failed"))
     }
+}
+pub struct RapidOcr {
+    pub min_confidence: f64,
+    pub python: String,
+    pub script: String,
+    pub timeout_seconds: u64,
+}
+impl Engine for RapidOcr {
+    fn recognize(&self, image: &[u8]) -> Result<OcrOutput> {
+        // One process per image reloads ONNX models (~2–3s). A persistent worker
+        // can replace this later without changing Engine or the JSON contract.
+        let bytes = run_process(image, self.timeout_seconds, |input| {
+            let mut command = Command::new(&self.python);
+            command.arg(&self.script).arg(input);
+            command
+        })?;
+        parse_rapidocr(&bytes, self.min_confidence).map_err(|_| anyhow::anyhow!("ocr_failed"))
+    }
+}
+fn parse_rapidocr(bytes: &[u8], min_confidence: f64) -> Result<OcrOutput> {
+    #[derive(Deserialize)]
+    struct Line {
+        text: String,
+        score: f64,
+    }
+    #[derive(Deserialize)]
+    struct Output {
+        lines: Vec<Line>,
+        text: String,
+        confidence: f64,
+    }
+    let output: Output = serde_json::from_slice(bytes)?;
+    ensure!(
+        (0.0..=1.0).contains(&output.confidence),
+        "invalid confidence"
+    );
+    let mut sum = 0.0;
+    let mut low = 0;
+    for line in &output.lines {
+        ensure!((0.0..=1.0).contains(&line.score), "invalid line confidence");
+        sum += line.score;
+        low += usize::from(line.score < min_confidence / 100.0);
+    }
+    let count = output.lines.len();
+    let mean = if count == 0 { 0.0 } else { sum / count as f64 };
+    ensure!(
+        (output.confidence - mean).abs() <= 1e-6,
+        "inconsistent confidence"
+    );
+    ensure!(
+        output.text
+            == output
+                .lines
+                .iter()
+                .map(|line| line.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        "inconsistent text"
+    );
+    Ok(OcrOutput {
+        reliable: !output.text.trim().is_empty() && output.confidence >= min_confidence / 100.0,
+        text: output.text,
+        confidence: output.confidence,
+        low_confidence_ratio: if count == 0 {
+            0.0
+        } else {
+            low as f64 / count as f64
+        },
+    })
 }
 // Tesseract TSV has conf in column 11 and text in column 12 (not the last
 // column for confidence). Ignore structural rows, whose confidence is -1.
@@ -215,7 +311,7 @@ fn parse_tsv(tsv: &str, min_confidence: f64) -> Result<OcrOutput> {
     })
 }
 struct Limited {
-    engine: Tesseract,
+    engine: Box<dyn Engine>,
     max_chars: usize,
 }
 impl Engine for Limited {
@@ -226,22 +322,28 @@ impl Engine for Limited {
     }
 }
 pub fn build(settings: &Settings) -> Result<Box<dyn Engine>> {
-    match settings.engine.as_str() {
-        "tesseract" => {
-            settings.validate()?;
-            Ok(Box::new(Limited {
-                engine: Tesseract {
-                    min_confidence: settings.min_confidence,
-                    binary: settings.binary.clone(),
-                    languages: settings.languages.clone(),
-                    timeout_seconds: settings.timeout_seconds,
-                },
-                max_chars: settings.max_chars,
-            }))
-        }
+    settings.validate()?;
+    let engine: Box<dyn Engine> = match settings.engine.as_str() {
+        "tesseract" => Box::new(Tesseract {
+            min_confidence: settings.min_confidence,
+            binary: settings.binary.clone(),
+            languages: settings.languages.clone(),
+            timeout_seconds: settings.timeout_seconds,
+        }),
+        "rapidocr" => Box::new(RapidOcr {
+            min_confidence: settings.min_confidence,
+            python: settings.python.clone(),
+            script: settings.script.clone(),
+            timeout_seconds: settings.timeout_seconds,
+        }),
         _ => bail!("unsupported engine"),
-    }
+    };
+    Ok(Box::new(Limited {
+        engine,
+        max_chars: settings.max_chars,
+    }))
 }
+
 struct Job {
     chat: String,
     id: String,
@@ -419,6 +521,126 @@ mod tests {
             },
         )
     }
+    fn rapid_stub(body: &str) -> (Temporary, Settings) {
+        let (dir, mut settings) = stub("exit 99");
+        let script = dir.0.join("rapid stub.sh");
+        fs::write(&script, format!("printf '%s' \"$1\" > \"$0.input\"\n[ \"$(cat \"$1\")\" = image ] || exit 8\n{body}\n")).unwrap();
+        settings.engine = "rapidocr".into();
+        settings.python = "/bin/sh".into();
+        settings.script = script.to_string_lossy().into_owned();
+        // Reuse the cleanup assertion's recorded input path.
+        settings.binary = settings.script.clone();
+        (dir, settings)
+    }
+    fn json_stub(value: Value) -> String {
+        format!("cat <<'JSON'\n{value}\nJSON")
+    }
+    #[test]
+    fn rapidocr_dispatch_quality_and_limits() {
+        let (dir, mut settings) = rapid_stub(&json_stub(json!({
+            "lines": [{"text":"肺鼠疫🙂", "score":0.9}, {"text":"上线", "score":0.5}],
+            "text":"肺鼠疫🙂\n上线", "confidence":0.7
+        })));
+        settings.max_chars = 4;
+        for (threshold, reliable, ratio) in [
+            (50.0, true, 0.0),
+            (70.0, true, 0.5),
+            (71.0, false, 0.5),
+            (100.0, false, 1.0),
+        ] {
+            settings.min_confidence = threshold;
+            let output = build(&settings).unwrap().recognize(b"image").unwrap();
+            assert_eq!(output.text, "肺鼠疫🙂");
+            assert_eq!(output.confidence, 0.7);
+            assert_eq!(output.reliable, reliable);
+            assert_eq!(output.low_confidence_ratio, ratio);
+            cleaned(&settings);
+        }
+        // Runtime configuration resolves relative scripts against the selected
+        // root, even when the process cwd points elsewhere; raw stays portable.
+        fs::write(
+            dir.0.join("config.json"),
+            r#"{"agent":{"ocr":{"engine":"rapidocr"}}}"#,
+        )
+        .unwrap();
+        let loaded = crate::config::load_with_env(&dir.0, |_| None).unwrap();
+        assert_eq!(
+            loaded.config.agent.ocr.script,
+            dir.0.join("scripts/ocr-rapidocr.py").to_string_lossy()
+        );
+        assert_eq!(
+            loaded.raw["agent"]["ocr"]["script"],
+            "scripts/ocr-rapidocr.py"
+        );
+        fs::write(
+            dir.0.join("config.json"),
+            serde_json::to_vec(&json!({"agent":{"ocr":settings}})).unwrap(),
+        )
+        .unwrap();
+        let loaded = crate::config::load_with_env(&dir.0, |_| None).unwrap();
+        assert_eq!(loaded.config.agent.ocr.script, settings.script);
+    }
+    #[test]
+    fn rapidocr_empty_and_invalid_output() {
+        let (_dir, mut settings) =
+            rapid_stub(&json_stub(json!({"lines":[], "text":"", "confidence":0.0})));
+        settings.min_confidence = 0.0;
+        let output = build(&settings).unwrap().recognize(b"image").unwrap();
+        assert_eq!(
+            output,
+            OcrOutput {
+                text: String::new(),
+                confidence: 0.0,
+                reliable: false,
+                low_confidence_ratio: 0.0
+            }
+        );
+        cleaned(&settings);
+        for value in [
+            json!({}),
+            json!({"error":"failure"}),
+            json!({"lines":[], "text":"", "confidence":1.1}),
+            json!({"lines":[], "text":"", "confidence":0.5}),
+            json!({"lines":[], "text":"unexpected", "confidence":0.0}),
+            json!({"lines":[{"text":"bad", "score":-0.1}], "text":"bad", "confidence":0.0}),
+            json!({"lines":[{"text":"bad", "score":1.1}], "text":"bad", "confidence":1.0}),
+            json!({"lines":[{"text":"bad", "score":"NaN"}], "text":"bad", "confidence":0.0}),
+        ] {
+            let (_dir, settings) = rapid_stub(&json_stub(value));
+            assert!(build(&settings).unwrap().recognize(b"image").is_err());
+            cleaned(&settings);
+        }
+    }
+    #[test]
+    fn rapidocr_failure_timeout_and_cleanup() {
+        for body in [
+            "echo model-log",
+            "echo '{invalid'",
+            "echo secret >&2; exit 3",
+            "exec sleep 10",
+            "head -c 4194305 /dev/zero",
+        ] {
+            let (_dir, mut settings) = rapid_stub(body);
+            settings.timeout_seconds = 1;
+            let start = Instant::now();
+            assert_eq!(
+                build(&settings)
+                    .unwrap()
+                    .recognize(b"image")
+                    .unwrap_err()
+                    .to_string(),
+                "ocr_failed"
+            );
+            assert!(start.elapsed() < Duration::from_secs(3));
+            cleaned(&settings);
+        }
+        let (dir, mut settings) = rapid_stub("exit 0");
+        settings.python = dir.0.join("missing-python").to_string_lossy().into_owned();
+        assert!(build(&settings).unwrap().recognize(b"image").is_err());
+        settings.python = "/bin/sh".into();
+        settings.script = dir.0.join("missing-script").to_string_lossy().into_owned();
+        assert!(build(&settings).unwrap().recognize(b"image").is_err());
+    }
     const HEADER: &str = "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext";
     fn tsv_stub(text: &str, confidence: f64) -> String {
         format!("cat <<'TSV'\n{HEADER}\n5\t1\t1\t1\t1\t1\t0\t0\t10\t10\t{confidence}\t{text}\nTSV")
@@ -565,6 +787,11 @@ TSV"
             json!({"max_chars":42}),
             json!({"engine":"unknown"}),
             json!({"binary":""}),
+            json!({"python":""}),
+            json!({"python":"bad\u{0}python"}),
+            json!({"script":"  "}),
+            json!({"script":"bad\u{0}script"}),
+            json!({"script":42}),
         ] {
             c["agent"]["ocr"] = bad;
             assert!(crate::config::validate(&c).is_err());
