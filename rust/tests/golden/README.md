@@ -13,7 +13,7 @@ policy 使用序列化 payload 为键的 map，明确断言四个键（含 activ
   只有随机临时根路径用 `<ROOT>` 占位，读取时恢复；其余值保持捕获结果。
 - policy：4 组完整矩阵（时区、本地分钟、安静时段、活跃时段、词项、相似度）。
 - prompts：1 组，所有常量、规则组合、语言变体逐字比较。
-  本次为有意调整人味：精确更新 formation / evaluation 及其规则组合中的对应 expected 文本，未重新捕获其他套件。本次范围另含 formation 的互动风格学习与 skip 口径、learnedStyle 的通用口语、orientation 的参与取向、articulation 的 bubbles 契约和合计长度要求，并同步这些常量在规则组合及语言变体中的引用。
+  本次为有意调整人味：精确更新 formation / evaluation 及其规则组合中的对应 expected 文本，未重新捕获其他套件。本次范围另含 formation 的互动风格学习与 skip 口径、learnedStyle 的通用口语、orientation 的参与取向、articulation 的 bubbles 契约和合计长度要求，并同步这些常量在规则组合及语言变体中的引用。C4 补充：涉及本机器人自身的记忆用“我”记录，其他机器人或服务保持第三人称，不改变 verdict 与来源要求；仅精确更新 formation 及其规则组合中的对应 expected 文本。
 - sending：1 组、1920 个参数组合，概率和所有因子按 IEEE-754 位精确比较。
 - activity：1 组、183 个输入组合，保留原来的 exp 绝对误差规则。
 - provider：3 组，端点、模型列表端点、JSON 解析及错误码。
