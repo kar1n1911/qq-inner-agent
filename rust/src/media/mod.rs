@@ -1,6 +1,7 @@
 //! 显式启用的 Rust 入站采集入口；默认 Store 和消息写入契约保持不变。
 pub mod media_select;
 pub mod media_source;
+pub mod ocr;
 
 use crate::{
     config::{js_string, Agent},
@@ -140,34 +141,7 @@ impl Collector {
             );
             (sha256(format!("face:{id}").as_bytes()), id, 0, None)
         } else {
-            let source = s["data"]["file"]
-                .as_str()
-                .ok_or_else(|| anyhow::anyhow!("missing_file"))?;
-            // 各 OneBot 实现的取文件接口未确认，不猜 API；只支持 file 本地路径与 HTTP(S)。
-            // URL 会过期，必须在本次采集立即下载并落盘，绝不能把 URL 当作素材存储。
-            let reader: Box<dyn Read> =
-                if source.starts_with("http://") || source.starts_with("https://") {
-                    Box::new(
-                        ureq::AgentBuilder::new()
-                            .timeout(Duration::from_secs(self.config.timeout_seconds.max(1)))
-                            .build()
-                            .get(source)
-                            .call()?
-                            .into_reader(),
-                    )
-                } else {
-                    Box::new(fs::File::open(
-                        source.strip_prefix("file://").unwrap_or(source),
-                    )?)
-                };
-            let mut data = Vec::new();
-            reader
-                .take(self.config.max_file_bytes.saturating_add(1))
-                .read_to_end(&mut data)?;
-            ensure!(
-                !data.is_empty() && data.len() as u64 <= self.config.max_file_bytes,
-                "invalid_media_size"
-            );
+            let data = read_image(s, self.config.max_file_bytes, self.config.timeout_seconds)?;
             let hash = sha256(&data);
             let ext = if data.starts_with(b"\x89PNG\r\n\x1a\n") {
                 "png"
@@ -454,4 +428,36 @@ impl Store {
         self.execute("INSERT INTO media_stages VALUES(?,?,?,?) ON CONFLICT(chat,message_id) DO UPDATE SET observed=excluded.observed,classification=excluded.classification",params![chat,id,now,serde_json::to_string(&result)?])?;
         Ok(())
     }
+}
+
+/// Shared bounded image reader. OneBot commonly supplies an opaque file id plus a URL.
+pub fn read_image(segment: &Value, max_bytes: u64, timeout_seconds: u64) -> Result<Vec<u8>> {
+    let source = segment["data"]["url"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .or_else(|| segment["data"]["file"].as_str())
+        .ok_or_else(|| anyhow::anyhow!("missing_file"))?;
+    let reader: Box<dyn Read> = if source.starts_with("http://") || source.starts_with("https://") {
+        Box::new(
+            ureq::AgentBuilder::new()
+                .timeout(Duration::from_secs(timeout_seconds.max(1)))
+                .build()
+                .get(source)
+                .call()?
+                .into_reader(),
+        )
+    } else {
+        Box::new(fs::File::open(
+            source.strip_prefix("file://").unwrap_or(source),
+        )?)
+    };
+    let mut data = Vec::new();
+    reader
+        .take(max_bytes.saturating_add(1))
+        .read_to_end(&mut data)?;
+    ensure!(
+        !data.is_empty() && data.len() as u64 <= max_bytes,
+        "invalid_media_size"
+    );
+    Ok(data)
 }

@@ -43,6 +43,7 @@ fn expected(f: &Fixture, env: &[(&str, &str)], mode: &str) -> Value {
 
 // Rust 新增的可选扩展单独测试，旧 JS 金标准继续逐字段覆盖原有协议。
 fn legacy_config(mut value: Value) -> Value {
+    value["agent"].as_object_mut().unwrap().remove("ocr");
     value["agent"].as_object_mut().unwrap().remove("backfill");
     value["agent"]["observation"].as_object_mut().unwrap().remove("backlogDigest");
     value
@@ -281,6 +282,7 @@ fn cli_defaults_are_complete_editable_and_secret_free() {
         "/agent/identity",
         "/agent/relay",
         "/agent/topicSource",
+        "/agent/ocr",
         "/agent/backstory",
         "/agent/multiBubble",
         "/agent/memoryRecall",

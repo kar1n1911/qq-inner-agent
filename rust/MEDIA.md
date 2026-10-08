@@ -109,3 +109,27 @@ occurrences 猜人数。淘汰素材同时删除发送者索引。
 测试精确断言默认未知、人工覆盖优先级/撤销/持久化、不同发送者数、旧库迁移和出群闸门；
 传播信号只断言随人数增加的方向。本地语料哈希使用公开 abc 向量，不从实现反推期望值。
 当前工作区设计文档尚无 13.8 正文，本节实现依据本次任务给出的新增要求。
+
+## Optional image OCR
+
+`agent.ocr` is disabled by default. Enable it with
+`{"enabled":true,"engine":"tesseract","languages":"chi_sim+eng","binary":"tesseract","timeoutSeconds":20,"maxChars":800,"maxBytes":4194304}`.
+Install Tesseract and the requested language data separately. No Rust dependency is added.
+
+`media/ocr.rs::build` dispatches the `Engine::recognize(&[u8])` implementation;
+add an engine branch there to integrate PaddleOCR or a vision API. The built
+Tesseract adapter clips output by Unicode characters. Image downloads reuse
+`media::read_image` and enforce `maxBytes` before recognition.
+
+Accepted live and backfill image messages enter a bounded background queue.
+Download/recognition never holds the database mutex; errors or queue saturation
+only emit `ocr_failed`. A stopped/replaced engine discards queued OCR work.
+The `media_ocr` table is created only when enabled, keyed by chat/message ID;
+message deletion also removes its OCR row. Multiple images are combined in
+segment order within the per-message character budget.
+
+History, backlog history and backlog samples enhance the first `[image]` or
+`[图片]` placeholder to `[image: text]` when the result is ready. Original message
+text is unchanged. A response built before OCR finishes retains its placeholder;
+later contexts include the text. Disabling OCR also disables enhancement of
+previously stored results, and starts no worker or image download.

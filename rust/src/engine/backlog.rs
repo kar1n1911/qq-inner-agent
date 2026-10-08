@@ -71,14 +71,16 @@ pub fn full_history(db: &Store, chat: &str, minimum: i64) -> Result<Vec<Value>> 
     let limit = minimum.max(unread_count(db, chat)?);
     // db.history 取时间上最后 N 条；晚到的旧时间戳消息可能落在 N 条之外。
     // 并入未读区间以保证不漏，通常仍是 limit 条，仅乱序时可能多于该下限。
-    db.rows(
+    let mut rows = db.rows(
         &format!(
             "SELECT * FROM messages WHERE rowid IN \
              (SELECT rowid FROM messages WHERE chat=?1 ORDER BY ts DESC,rowid DESC LIMIT ?2) \
              OR ({UNREAD}) ORDER BY ts,rowid"
         ),
         rusqlite::params![chat, limit],
-    )
+    )?;
+    db.enhance_ocr(&mut rows)?;
+    Ok(rows)
 }
 
 // 固定 FNV-1a 加 avalanche，避免运行时随机种子或顺序消息 id 的局部聚集。
@@ -133,6 +135,7 @@ pub fn build(db: &Store, chat: &str, settings: &Settings) -> Result<Option<Diges
             rusqlite::params![chat, ids[i]["id"].as_str()],
         )?);
     }
+    db.enhance_ocr(&mut messages)?;
     Ok(Some(Digest {
         messages,
         context: json!({

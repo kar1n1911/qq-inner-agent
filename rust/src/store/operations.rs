@@ -77,6 +77,7 @@ impl Store {
             params![chat, limit.unwrap_or(24)],
         )?;
         rows.reverse();
+        self.enhance_ocr(&mut rows)?;
         Ok(rows)
     }
     pub fn learning_state(&self, chat: &str) -> Result<Value> {

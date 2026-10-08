@@ -202,6 +202,7 @@ pub struct Engine {
     options: Options,
     media_config: media_select::Config,
     collector: Option<crate::media::Collector>,
+    ocr: Option<crate::media::ocr::Worker>,
     topic_sources: Arc<Mutex<crate::topic::Sources>>,
     core: Mutex<Core>,
     aborted: watch::Sender<bool>,
@@ -284,6 +285,11 @@ impl Engine {
                     .map_err(|_| anyhow::anyhow!("store_poisoned"))?,
             )?;
         }
+        let ocr = crate::media::ocr::Worker::start(
+            &config.agent.ocr,
+            store.clone(),
+            options.log.clone(),
+        )?;
         let collector = collection
             .enabled
             .then(|| crate::media::Collector::new(&config.data_dir, collection));
@@ -304,6 +310,7 @@ impl Engine {
             options,
             media_config,
             collector,
+            ocr,
             topic_sources: Arc::new(Mutex::new(Default::default())),
             orientation,
             core: Mutex::new(Core::default()),
@@ -471,6 +478,9 @@ impl Engine {
         };
         if !self.db()?.message(&value)? {
             return Ok(());
+        }
+        if let Some(worker) = &self.ocr {
+            worker.enqueue(&m.chat, &m.id, event, now);
         }
         if a.emoji.learn_frequency {
             crate::persona::humanize::capture(&*self.db()?, &m.chat, &m.id, event)?;
@@ -921,6 +931,9 @@ impl Engine {
         }
     }
     pub async fn stop(&self) {
+        if let Some(worker) = &self.ocr {
+            worker.stop();
+        }
         {
             let _core = self.core();
             self.aborted.send_replace(true);

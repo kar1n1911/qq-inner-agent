@@ -23,6 +23,15 @@
     "reconnectMaxSeconds": 60
   },
   "agent": {
+    "ocr": {
+      "enabled": false,
+      "engine": "tesseract",
+      "languages": "chi_sim+eng",
+      "binary": "tesseract",
+      "timeoutSeconds": 20,
+      "maxChars": 800,
+      "maxBytes": 4194304
+    },
     "backfill": {
       "enabled": true,
       "intervalSeconds": 60,

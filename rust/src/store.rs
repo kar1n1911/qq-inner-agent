@@ -6,6 +6,7 @@ use std::path::Path;
 
 pub struct Store {
     db: Connection,
+    pub(crate) ocr_enabled: std::cell::Cell<bool>,
     // 所有 LayeredMemory 视图共享计数，learn/reset 不会使入站容量索引失效。
     pub(crate) memory_pending:
         std::cell::RefCell<std::collections::HashMap<String, crate::memory::Pending>>,
@@ -23,6 +24,7 @@ impl Store {
         db.execute_batch(include_str!("store/schema.sql"))?;
         let store = Self {
             db,
+            ocr_enabled: Default::default(),
             memory_pending: Default::default(),
             memory_last_maintenance: Default::default(),
         };
