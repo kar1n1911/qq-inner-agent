@@ -6,6 +6,7 @@ mod backfill;
 pub mod decision;
 pub mod orientation;
 pub mod policy;
+mod self_identity;
 pub mod sending;
 
 use crate::{
@@ -170,6 +171,7 @@ struct Core {
     last_cycle: f64,
     identity_checked: Option<f64>,
     identity_busy: bool,
+    self_identity_busy: bool,
     orientation_collecting: HashSet<String>,
     identity_commands: Vec<String>,
 }
@@ -205,6 +207,7 @@ pub struct Engine {
     ocr: Option<crate::media::ocr::Worker>,
     topic_sources: Arc<Mutex<crate::topic::Sources>>,
     core: Mutex<Core>,
+    self_identity: self_identity::Cache,
     aborted: watch::Sender<bool>,
     // 多个 stop/wait_idle 调用者不能各自拿走任务后提前报告空闲。
     joining: tokio::sync::Mutex<()>,
@@ -314,6 +317,7 @@ impl Engine {
             topic_sources: Arc::new(Mutex::new(Default::default())),
             orientation,
             core: Mutex::new(Core::default()),
+            self_identity: self_identity::Cache::default(),
             aborted,
             joining: tokio::sync::Mutex::new(()),
         }))
@@ -410,9 +414,16 @@ impl Engine {
         } else {
             policy::normalize(event, &self_id, a, now)
         };
-        let Some(m) = message else {
+        let Some(mut m) = message else {
             return Ok(());
         };
+        let identity = self.self_identity.identity(&self_id, &m.chat);
+        if policy::named(
+            &m.text,
+            [&identity.nickname, &identity.card].into_iter().map(String::as_str),
+        ) {
+            m.hint = Hint::SelfChat;
+        }
         let value = serde_json::to_value(&m)?;
         // 指令先去重再执行；命中后不 capture、不触发普通回复或常规学习。
         let raw = if let Some(s) = event["message"].as_str() {
@@ -660,6 +671,25 @@ impl Engine {
         let mut core = self.core();
         let now = self.now();
         let a = &self.config.agent;
+        let state = self.transport.state();
+        if state.connected
+            && state.online
+            && !*self.aborted.borrow()
+            && !core.self_identity_busy
+            && self.self_identity.due(&state.self_id, now)
+        {
+            core.self_identity_busy = true;
+            let engine = self.clone();
+            let mut abort = self.aborted.subscribe();
+            core.tasks.push(tokio::spawn(async move {
+                tokio::select! {
+                    biased;
+                    _ = abort.changed() => {},
+                    _ = engine.self_identity.refresh(&engine) => {},
+                }
+                engine.core().self_identity_busy = false;
+            }));
+        }
         // 入群/定时立即采集，不再等首次发言；安静群也会在下一轮 tick 获取资料。
         // 被动数据采集不受作息影响，只要求连接在线且引擎未停止。
         let transport = self.transport.state();
@@ -1024,6 +1054,9 @@ impl Engine {
     }
     fn context(&self, db: &Store, t: &Turn, payload: &mut Value) -> Result<()> {
         let a = &self.config.agent;
+        payload["selfIdentity"] = self.self_identity
+            .identity(&self.transport.self_id(), &t.chat)
+            .payload(&a.name.text);
         let sender = text(&t.last, "sender");
         let context = if a.learning.enabled {
             LayeredMemory::new(db).context(&t.chat, sender, t.now, &a.memory, &t.query)?
@@ -1105,6 +1138,11 @@ impl Engine {
             _ = signal.changed() => return Ok(()),
             result = self.orientation.before_speak(chat) => result?,
         };
+        tokio::select! {
+            biased;
+            _ = signal.changed() => return Ok(()),
+            _ = self.self_identity.refresh(self) => {},
+        }
         let mut t = {
             let mut core = self.core();
             if !oriented {
@@ -1209,8 +1247,9 @@ impl Engine {
             }
             // 只压缩模型上下文，内部 history 保留原学习证据与发送策略语义。
             let prompt_history = digest.as_ref().map_or(&t.history, |d| &d.messages);
+            let identity = self.self_identity.identity(&self.transport.self_id(), chat);
             let mut payload = json!({"personality":personality_context(a,|| (self.options.expression_random)()),"persona":crate::persona::persona(&db, chat, &a.persona.text, &a.identity)?,"name":a.name.text,"trigger":trigger,"addressedHint":t.hint,"groupOrientation":orientation_profile,
-                "history":prompt_history.iter().map(|m|json!({"id":m["id"],"sender":m["sender"],"self":truthy(&m["self"]),"timestamp":m["ts"],"speaker":if truthy(&m["self"]) {a.name.text.as_str()} else {text(m,"name")},"text":m["text"]})).collect::<Vec<_>>(),
+                "history":prompt_history.iter().map(|m|json!({"id":m["id"],"sender":m["sender"],"self":truthy(&m["self"]),"timestamp":m["ts"],"speaker":if truthy(&m["self"]) {identity.visible_name(&a.name.text)} else {text(m,"name")},"text":m["text"]})).collect::<Vec<_>>(),
                 "retainedIdeas":self.reservoir(&db,&t)?,"priorExpectation":db.expectation(chat,now)?});
             if let Some(digest) = digest {
                 payload["backlogDigest"] = digest.context;

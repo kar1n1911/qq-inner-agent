@@ -773,13 +773,7 @@ fn normalize_core(
     if text.is_empty() {
         return None;
     }
-    let lower = text.to_lowercase();
-    let named = agent.aliases.iter().any(|alias| {
-        let alias = alias.to_lowercase();
-        lower.starts_with(&format!("{alias}:"))
-            || lower.starts_with(&format!("{alias}："))
-            || lower.starts_with(&format!("@{alias} "))
-    });
+    let named = named(&text, agent.aliases.iter().map(String::as_str));
     let name = [
         &event["sender"]["card"],
         &event["sender"]["nickname"],
@@ -803,5 +797,16 @@ fn normalize_core(
         } else {
             Hint::Open
         },
+    })
+}
+
+/// Apply the same addressing syntax to configured and runtime identity aliases.
+pub(crate) fn named<'a>(text: &str, aliases: impl Iterator<Item = &'a str>) -> bool {
+    let lower = text.to_lowercase();
+    aliases.filter(|alias| !alias.trim().is_empty()).any(|alias| {
+        let alias = alias.to_lowercase();
+        lower.starts_with(&format!("{alias}:"))
+            || lower.starts_with(&format!("{alias}："))
+            || lower.starts_with(&format!("@{alias} "))
     })
 }

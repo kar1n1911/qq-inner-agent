@@ -292,7 +292,10 @@ async fn switches_collision_and_unavailable_originals_fail_closed() {
     ] {
         let (e, m, db) = setup(settings, &root);
         tick(&e).await;
-        assert!(m.calls.lock().unwrap().is_empty());
+        // Visible identity reads are independent of automatic identity mutations.
+        assert!(m.calls.lock().unwrap().iter().all(|(action, _)| {
+            matches!(action.as_str(), "get_login_info" | "get_group_member_info")
+        }));
         assert!(db
             .lock()
             .unwrap()
