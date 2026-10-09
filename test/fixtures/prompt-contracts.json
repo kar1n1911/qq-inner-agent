@@ -2,6 +2,7 @@
   "formation": [
     "{\"allocation\":\"self|other|open\",\"candidates\":[{\"kind\":\"system1|system2\",\"text\":\"简短的候选发言\"}]}",
     "{\"layers\":[{\"subject\":\"person:发言人QQ号 或 group\",\"layer\":\"long_term 或 traits\",\"key\":\"稳定的短主题键\",\"operation\":\"upsert 或 forget\",\"text\":\"精简的新内容\",\"importance\":0.8,\"confidence\":0.8,\"keywords\":[\"主题词\"],\"sourceIds\":[\"真实的人类消息id\"]}]}",
+    "{\"verdict\":\"skip\",\"reason\":\"一句不记忆的理由\"}",
     "{\"subject\":\"group 或 person:QQ号\",\"kind\":\"jargon 或 expression\",\"term\":\"原始黑话词或稳定表达名称\",\"meaning\":\"含义或表达方法\",\"situation\":\"适用情绪与场景，注明不适用情况\",\"example\":\"原消息中的连续原文\",\"confidence\":0.9,\"sourceIds\":[\"消息id\"]}"
   ],
   "evaluation": [
