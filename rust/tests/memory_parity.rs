@@ -898,3 +898,47 @@ fn scoped_notes_and_context_obey_distinct_budgets_and_match_gates() {
         1
     );
 }
+
+#[test]
+fn minimum_confidence_is_a_usage_gate_even_for_the_only_candidate() {
+    let (memory, expression) = settings(&json!({
+        "settings": {"minConfidence": 0.6},
+        "expressions": {"minConfidence": 0.6, "useLearned": true}
+    }));
+    for confidence in [0.0, 0.1, 0.599999, 0.6, 0.600001, 1.0] {
+        let row = json!({"id":"one","subject":"person:20","layer":"long_term",
+            "slot":"garden","text":"garden","confidence":confidence,
+            "importance":1,"updated":1000});
+        for require_match in [true, false] {
+            let result =
+                ranking::rank_memories(std::slice::from_ref(&row), "garden", 1001., &memory, require_match);
+            assert_eq!(!result.is_empty(), confidence >= memory.min_confidence);
+        }
+        let mut owner_note = row;
+        owner_note["layer"] = json!("owner_note");
+        assert_eq!(
+            ranking::rank_memories(&[owner_note], "unrelated", 1001., &memory, true).len(),
+            1
+        );
+
+        let store = Store::in_memory().unwrap();
+        let expressions = ExpressionMemory::new(&store);
+        let update = json!({"subject":"person:20","kind":"jargon","term":"garden",
+            "meaning":"garden","situation":"garden","example":"garden",
+            "confidence":confidence,"sources":[
+                {"id":"a","sender":"20","ts":999},
+                {"id":"b","sender":"20","ts":1000}]});
+        expressions
+            .apply("group:10", &[update], 1000., &expression)
+            .unwrap();
+        let context = expressions
+            .context("group:10", "20", "garden", 1001., &expression, &memory)
+            .unwrap();
+        assert_eq!(!context.is_empty(), confidence >= expression.min_confidence);
+        // 此门控制使用而非存储：保持已有暂存行为，不引入新的入库路径。
+        assert_eq!(
+            store.rows("SELECT * FROM expressions", []).unwrap().len(),
+            1
+        );
+    }
+}

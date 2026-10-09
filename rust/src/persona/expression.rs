@@ -140,6 +140,9 @@ impl<'a> ExpressionMemory<'a> {
         if !settings.use_learned {
             return Ok(vec![]);
         }
+        // confidence 是程度，SQL 下限却是“允许使用学到的表达”的最低可信度契约。
+        // 必须保留硬门：只降权会在没有其他候选时仍注入低可信表达；文档 §6.6
+        // 不允许倾向绕过事实性校验。来源数量/作者校验独立保留，此处不是入库门。
         let mut rows = Vec::new();
         for subject in memory_subjects(chat, sender)? {
             for mut r in self.store.rows("SELECT * FROM expressions WHERE chat=? AND subject=? AND updated>? AND confidence>=? AND (last_used=0 OR last_used<=?)",params![chat,subject,now-settings.retention_days*86400.,settings.min_confidence,now-settings.reuse_seconds])? {

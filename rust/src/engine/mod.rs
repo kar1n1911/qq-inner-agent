@@ -1874,7 +1874,9 @@ impl Engine {
             if (proactive && policy::quiet(self.now(), a.quiet_hours.as_ref()))
                 || (!behavior.burst
                     && !face_only
-                    && policy::repeated(text(&decorated, "text"), &own))
+                    && policy::suppress_repetition(text(&decorated, "text"), &own, || {
+                        (self.options.selection_random)()
+                    }))
             {
                 db.assessment_status(chat, &t.id, "cancelled")?;
                 db.r#use(&selected.candidate.id)?;
