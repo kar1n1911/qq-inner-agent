@@ -135,7 +135,7 @@ pub fn reviewed(
     cfg: &RelaySettings,
     origins: Vec<Origin>,
     audit: &serde_json::Value,
-    interests: &BTreeSet<String>,
+    interests: &crate::topic::Interests,
     short_term: &[String],
 ) -> Vec<crate::topic::Match> {
     origins
@@ -167,7 +167,7 @@ pub fn reviewed(
 pub fn shortlist(
     origins: Vec<Origin>,
     cfg: &RelaySettings,
-    interests: &BTreeSet<String>,
+    interests: &crate::topic::Interests,
     short_term: &[String],
 ) -> Vec<Origin> {
     origins
@@ -382,5 +382,25 @@ mod tests {
         unproved.self_review = SelfReview::Keep;
         unproved.evidence.pop();
         assert!(super::super::decide(&cfg(), &unproved, &interests, &[]).is_none());
+        let mut wrong_link = candidates(&db).remove(0);
+        wrong_link.self_review = SelfReview::Keep;
+        wrong_link.evidence[1].text =
+            "another independent message https://example.org/other".into();
+        assert!(super::super::decide(&cfg(), &wrong_link, &interests, &[]).is_none());
+        let mut wrong_source = candidates(&db).remove(0);
+        wrong_source.self_review = SelfReview::Keep;
+        wrong_source.source = "https://example.org/other".into();
+        assert!(super::super::decide(&cfg(), &wrong_source, &interests, &[]).is_none());
+        for allow_high_risk in [false, true] {
+            let mut origin = candidates(&db).remove(0);
+            origin.self_review = SelfReview::Keep;
+            let settings = RelaySettings {
+                allow_high_risk,
+                ..cfg()
+            };
+            let decision = super::super::decide(&settings, &origin, &interests, &[]).unwrap();
+            assert_eq!(decision.kind, super::super::RelayKind::LowRisk);
+            assert_eq!(decision.source, URL);
+        }
     }
 }

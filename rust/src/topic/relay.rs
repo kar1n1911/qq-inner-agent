@@ -203,7 +203,12 @@ pub fn decide(
         (_, Some(chat)) if chat.starts_with("group:") && chat.len() > 6 => {}
         _ => return None,
     }
-    if origin.kind == OriginKind::Link && !independent_evidence(origin) {
+    // A link's provenance must prove this exact URL, not merely two unrelated messages.
+    if origin.kind == OriginKind::Link
+        && (origin.source != origin.item.url
+            || !independent_evidence(origin)
+            || origin.evidence.iter().any(|e| !links::extract(&e.text).contains(&origin.source)))
+    {
         return None;
     }
     let body = format!(
@@ -274,7 +279,11 @@ mod tests {
                 tags: vec![],
                 url: "https://example.org/esp32".into(),
             },
-            source: "https://example.org/rss".into(),
+            source: if kind == OriginKind::Link {
+                "https://example.org/esp32".into()
+            } else {
+                "https://example.org/rss".into()
+            },
             source_chat: if kind == OriginKind::External {
                 None
             } else {
@@ -284,12 +293,12 @@ mod tests {
                 Evidence {
                     message_id: "1".into(),
                     author: "10".into(),
-                    text: "esp32 board".into(),
+                    text: "esp32 board https://example.org/esp32".into(),
                 },
                 Evidence {
                     message_id: "2".into(),
                     author: "20".into(),
-                    text: "esp32 tools".into(),
+                    text: "esp32 tools https://example.org/esp32".into(),
                 },
             ],
             command_sender: None,

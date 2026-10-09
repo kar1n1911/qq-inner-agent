@@ -146,6 +146,12 @@ impl OrientationProvider for Harness {
             if system.contains(qq_inner_core::topic::relay::links::REVIEW) {
                 self.model_inputs.lock().unwrap().push(("RELAY".into(), payload));
                 anyhow::ensure!(self.model.lock().unwrap()["relayError"] != true, "audit unavailable");
+                if self.model.lock().unwrap()["relayConcurrentDuplicate"] == true {
+                    self.store.lock().unwrap().execute(
+                        "INSERT INTO memory_layers(id,chat,subject,layer,slot,text,sources,expires) VALUES('during-audit','group:10','group','short_term','during-audit',?,'[]',?)",
+                        rusqlite::params!["https://example.org/esp32", self.now() + 100.],
+                    )?;
+                }
                 return Ok(self.model.lock().unwrap().get("relayAudit").cloned().unwrap_or(json!({"keep":[]})));
             }
             let stage = system
@@ -2427,9 +2433,9 @@ async fn self_chat_wakes_off_duty_but_other_hints_preserve_backlog() {
 #[tokio::test]
 async fn relay_links_enter_formation_only_after_review_and_local_dedup() {
     const URL: &str = "https://example.org/esp32";
-    for mode in ["keep", "drop", "duplicate", "disabled", "one_author", "audit_error"] {
-        let (e, h) = topic_setup(json!({"relay":{"enabled":mode != "disabled"}}));
-        *h.model.lock().unwrap() = json!({"relayError":mode == "audit_error","relayAudit":{"keep":if mode == "drop" {json!([])} else {json!([0])}},"empty":true});
+    for mode in ["keep", "drop", "duplicate", "disabled", "one_author", "audit_error", "concurrent_duplicate", "high_risk_enabled"] {
+        let (e, h) = topic_setup(json!({"relay":{"enabled":mode != "disabled", "allowHighRisk":mode == "high_risk_enabled"}}));
+        *h.model.lock().unwrap() = json!({"relayConcurrentDuplicate":mode == "concurrent_duplicate","relayError":mode == "audit_error","relayAudit":{"keep":if mode == "drop" {json!([])} else {json!([0])}},"empty":true});
         {
             let db = h.store.lock().unwrap();
             // No reservoir needed: relay independently makes the topic path eligible.
@@ -2449,12 +2455,13 @@ async fn relay_links_enter_formation_only_after_review_and_local_dedup() {
         assert_eq!(e.last_error(), None, "{mode}");
         let inputs = h.model_inputs.lock().unwrap();
         let audit = inputs.iter().find(|(stage, _)| stage == "RELAY");
-        assert_eq!(audit.is_some(), matches!(mode, "keep" | "drop" | "audit_error"), "{mode}");
+        assert_eq!(audit.is_some(), matches!(mode, "keep" | "drop" | "audit_error" | "concurrent_duplicate" | "high_risk_enabled"), "{mode}");
         if let Some((_, payload)) = audit { assert_eq!(payload, &json!({"links":[URL]})); }
+        if mode == "disabled" { assert!(inputs.is_empty()); }
         let formed = inputs.iter().find(|(stage, _)| stage == "FORM");
         let topics = formed.map(|(_, payload)| &payload["externalTopics"]);
-        assert_eq!(topics.is_some_and(|v| v.is_array()), mode == "keep", "{mode}");
-        if mode == "keep" {
+        assert_eq!(topics.is_some_and(|v| v.is_array()), matches!(mode, "keep" | "high_risk_enabled"), "{mode}");
+        if matches!(mode, "keep" | "high_risk_enabled") {
             let topics = topics.unwrap();
             assert_eq!(topics[0]["item"]["url"], URL);
             assert_eq!(topics[0]["source"], URL);

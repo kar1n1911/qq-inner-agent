@@ -1301,18 +1301,18 @@ impl Engine {
                     .map(|m| text(m, "text").to_owned())
                     .collect::<Vec<_>>();
                 let interests = crate::topic::interests(&traits, &messages);
-                let relay_interests = interests.clone();
                 let cfg = a.topic_source.clone();
                 let sources = self.topic_sources.clone();
                 let group = chat.to_owned();
-                let items = tokio::task::spawn_blocking(move || {
-                    sources.lock().expect("topic sources poisoned").collect(
+                let (items, relay_interests) = tokio::task::spawn_blocking(move || {
+                    let items = sources.lock().expect("topic sources poisoned").collect(
                         &cfg,
                         &group,
                         now,
                         &interests,
                         crate::topic::fetch,
-                    )
+                    );
+                    (items, interests)
                 })
                 .await?;
                 if !self.fresh(&self.core(), &*self.db()?, &t)? {
