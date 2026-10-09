@@ -13,7 +13,20 @@ function greetingFor(date) {
 const $ = id => document.getElementById(id);
 startI18n();
 let csrf = '', saved = null, dirty = false, polling = false, logs = [], online = false;
-let learningView = '';
+let learningView = '', preset = {};
+// Object key order is irrelevant; arrays are atomic ordered values. Missing
+// advanced keys are rejected rather than silently resetting unrelated settings.
+function configPatch(base, next, prefix = '', patch = Object.create(null)) {
+  const object = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+  if (object(base) && object(next)) {
+    for (const key of Object.keys(base)) if (!Object.hasOwn(next, key)) throw Error(`Missing setting: ${prefix}${key}`);
+    for (const key of Object.keys(next)) configPatch(base[key], next[key], prefix + key + '.', patch);
+  } else if (Array.isArray(base) && Array.isArray(next)) {
+    const equal = (a, b) => a === b || (a !== null && b !== null && typeof a === 'object' && typeof b === 'object' && Array.isArray(a) === Array.isArray(b) && Object.keys(a).length === Object.keys(b).length && Object.keys(a).every(k => Object.hasOwn(b, k) && equal(a[k], b[k])));
+    if (!equal(base, next)) patch[prefix.slice(0, -1)] = next;
+  } else if (base !== next) patch[prefix.slice(0, -1)] = next;
+  return patch;
+}
 const get = (obj, key) => key.split('.').reduce((o, k) => o?.[k], obj);
 const set = (obj, key, value) => { const parts = key.split('.'); const end = parts.pop(); parts.reduce((o,k) => o[k] ??= {}, obj)[end] = value; };
 const ids = value => [...new Set(value.split(/[\s,]+/).filter(Boolean))];
@@ -34,7 +47,7 @@ function page(name) {
   $('page-title').textContent = { overview: 'Overview', config: 'Configuration', activity: 'Activity & logs', advanced: 'Advanced' }[name];
 }
 function populate(data) {
-  saved = data;
+  saved = data; preset = {};
   setLanguage(data.config.ui.language);
   $('interface-language').value = data.config.ui.language;
   for (const input of document.querySelectorAll('[data-config]')) {
@@ -58,6 +71,7 @@ function formConfig() {
     let value = input.type === 'checkbox' ? input.checked : input.dataset.type === 'lines' ? input.value.split('\n').map(x=>x.trim()).filter(Boolean) : input.dataset.type === 'ids' ? ids(input.value) : ['number', 'range'].includes(input.type) ? Number(input.value) : input.value;
     set(c, input.dataset.config, value);
   }
+  Object.assign(c.provider, preset);
   if (c.agent.name !== saved.config.agent.name) c.agent.aliases = [...new Set([c.agent.name, ...c.agent.aliases])];
   c.agent.quietHours = $('quiet-enabled').checked ? { start: Number($('quiet-start').value), end: Number($('quiet-end').value), timezone: $('quiet-timezone').value } : null;
   return c;
@@ -200,7 +214,7 @@ $('config-form').addEventListener('input', () => { changed(); $('threshold-outpu
 $('config-form').addEventListener('submit', async e => {
   e.preventDefault(); document.querySelectorAll('[data-save]').forEach(b => b.disabled = true);
   try {
-    const result = await api('/api/config', { method: 'PUT', body: JSON.stringify({ revision: saved.revision, config: formConfig(), apiKey: $('api-key').value, onebotToken: $('onebot-token').value, clearApiKey: $('clear-api-key').checked }) });
+    const result = await api('/api/config', { method: 'PUT', body: JSON.stringify({ revision: saved.revision, patch: configPatch(saved.config, formConfig()), apiKey: $('api-key').value, onebotToken: $('onebot-token').value, clearApiKey: $('clear-api-key').checked }) });
     populate(result); notice('Settings saved. The agent is applying them now.'); await refresh();
   } catch (e) { notice(e.message, true); }
   finally { document.querySelectorAll('[data-save]').forEach(b => b.disabled = false); }
@@ -213,7 +227,12 @@ $('deepseek-preset').addEventListener('click', () => {
   const kind = document.querySelector('[data-config="provider.kind"]').value;
   document.querySelector('[data-config="provider.baseUrl"]').value = kind === 'anthropic' ? 'https://api.deepseek.com/anthropic' : 'https://api.deepseek.com';
   document.querySelector('[data-config="provider.model"]').value = 'deepseek-flash';
-  saved.config.provider.tokenParameter = 'max_tokens'; saved.config.provider.thinking = 'disabled'; changed();
+  preset = { tokenParameter: 'max_tokens', thinking: 'disabled' };
+  if ($('use-advanced').checked) {
+    try { const c = JSON.parse($('advanced-json').value); Object.assign(c.provider, preset, { baseUrl: document.querySelector('[data-config="provider.baseUrl"]').value, model: 'deepseek-flash' }); $('advanced-json').value = JSON.stringify(c, null, 2); }
+    catch { notice('Fix the advanced JSON before saving the preset.', true); }
+  }
+  changed();
 });
 document.querySelectorAll('[data-service]').forEach(b => b.addEventListener('click', async () => {
   b.disabled = true; try { await api('/api/service', { method: 'POST', body: JSON.stringify({ action: b.dataset.service }) }); notice(`Service command completed: ${b.dataset.service}.`); await refresh(); } catch(e) { notice(e.message, true); } finally { b.disabled = false; }

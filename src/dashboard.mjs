@@ -155,7 +155,7 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
         for (const [id, s] of sessions) if (s.expires < now) sessions.delete(id);
         if (sessions.size >= 20) sessions.delete(sessions.keys().next().value);
         const id = randomBytes(32).toString('hex'), csrf = randomBytes(24).toString('hex');
-        sessions.set(id, { csrf, expires: now + 12 * 3600_000 });
+        sessions.set(id, { csrf, expires: now + 12 * 3600_000, settingsHistory: new Map() });
         res.setHeader('Set-Cookie', `qia_session=${id}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200${secure ? '; Secure' : ''}`);
         json(res, 200, { csrf }); return;
       }
@@ -186,11 +186,11 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
       if (url.pathname === '/api/logout' && req.method === 'POST') {
         sessions.delete(id); res.setHeader('Set-Cookie', `qia_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secure ? '; Secure' : ''}`); json(res, 200, { ok: true }); return;
       }
-      if (url.pathname === '/api/config' && req.method === 'GET') { json(res, 200, publicSettings(root)); return; }
+      if (url.pathname === '/api/config' && req.method === 'GET') { json(res, 200, publicSettings(root, session.settingsHistory)); return; }
       if (url.pathname === '/api/config' && req.method === 'PUT') {
         if (saving) throw fail(409, 'A save is already in progress');
         const input = await body(req); saving = true;
-        try { json(res, 200, saveSettings(root, input)); }
+        try { json(res, 200, saveSettings(root, input, session.settingsHistory)); }
         catch (e) { throw fail(e.status || 400, e.message); }
         finally { saving = false; }
         return;
