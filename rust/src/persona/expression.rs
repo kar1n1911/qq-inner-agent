@@ -155,10 +155,14 @@ impl<'a> ExpressionMemory<'a> {
         ranking.min_confidence = settings.min_confidence;
         let mut result = rank_memories(&rows, query, now, &ranking, true);
         result.truncate(settings.max_per_reply as usize);
+        result.extend(crate::memory::sharing::recall(self.store, chat, now, memory_settings, settings, true)?);
         Ok(result)
     }
     pub fn used(&self, chat: &str, rows: &[Value], content: &str, now: f64) -> Result<()> {
         for r in rows {
+            if r.get("sourceChat").is_some() {
+                continue;
+            }
             if content.contains(text(
                 r,
                 if r["kind"] == "jargon" {

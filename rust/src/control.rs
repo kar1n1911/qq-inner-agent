@@ -521,7 +521,12 @@ fn local(dir: &Path, store: &Mutex<Store>, method: &str, params: &Value) -> Resu
                 "SELECT * FROM expressions ORDER BY updated DESC LIMIT ?",
                 [remaining],
             )?);
-            Ok(json!({"entries":entries}))
+            let mut result = json!({"entries":entries});
+            let sharing = db.group_sharing.borrow();
+            if !sharing.reports.is_empty() {
+                result["sharing"] = json!(sharing.reports.values().collect::<Vec<_>>());
+            }
+            Ok(result)
         }
         "learning.reset" => {
             let chat = params["chat"].as_str().unwrap_or("");

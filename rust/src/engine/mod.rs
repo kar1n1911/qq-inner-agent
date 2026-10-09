@@ -1085,11 +1085,11 @@ impl Engine {
             .payload(&a.name.text);
         let sender = text(&t.last, "sender");
         let context = if a.learning.enabled {
-            LayeredMemory::new(db).context(&t.chat, sender, t.now, &a.memory, &t.query)?
+            LayeredMemory::new(db).context_with_expression(&t.chat, sender, t.now, &a.memory, &t.query, &a.expression)?
         } else {
             vec![]
         };
-        payload["chatStyle"] = json!(context.iter().map(|scope| json!({"subject":scope["subject"],"traits":array(&scope["traits"]).iter().map(|m|json!({"key":m["slot"],"text":m["text"],"sources":m["sources"]})).collect::<Vec<_>>()})).collect::<Vec<_>>());
+        payload["chatStyle"] = json!(context.iter().map(|scope| json!({"subject":scope["subject"],"traits":array(&scope["traits"]).iter().map(|m| if m.get("sourceChat").is_some() {json!({"sourceChat":m["sourceChat"],"text":m["text"]})} else {json!({"key":m["slot"],"text":m["text"],"sources":m["sources"]})}).collect::<Vec<_>>()})).collect::<Vec<_>>());
         payload["memoryContext"] = json!(context);
         payload["memories"] = json!(db.retrieve_scoped(
             &t.chat,
@@ -1115,6 +1115,14 @@ impl Engine {
         } else {
             vec![]
         });
+        let shared: Vec<_> = array(&payload["memoryContext"]).iter()
+            .filter(|scope| scope.get("sourceChat").is_some())
+            .flat_map(|scope| array(&scope["traits"]).iter().chain(array(&scope["long_term"])))
+            .chain(array(&payload["expressions"]).iter().filter(|row| row.get("sourceChat").is_some()))
+            .collect();
+        if !shared.is_empty() {
+            (self.options.log)("cross_group_memory", json!({"chat":t.chat,"count":shared.len(),"entries":shared}));
+        }
         Ok(())
     }
     fn reservoir(&self, db: &Store, t: &Turn) -> Result<Vec<Value>> {
