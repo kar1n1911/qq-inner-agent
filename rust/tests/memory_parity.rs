@@ -174,6 +174,7 @@ fn run(input: &Value) -> Value {
                         &serde_json::from_value(defaults["agent"]["learning"].clone())?,
                         a["epoch"].as_i64().unwrap_or(0),
                         a.get("layered").map(|v| LayeredUpdate {
+                            affect_enabled: false,
                             updates: arr(v),
                             settings: &settings,
                             expressions: a.get("expressionUpdates").map(arr),
@@ -596,7 +597,7 @@ fn learning_rolls_back_revision_and_expression_on_failure() {
     s.connection().execute_batch("CREATE TEMP TRIGGER reject_learning BEFORE INSERT ON chat_learning BEGIN SELECT RAISE(ABORT,'test rollback'); END;").unwrap();
     let revised = vec![update("key", "traits", "新文本", "b", 1001.)];
     let learning = serde_json::from_value(config::defaults()["agent"]["learning"].clone()).unwrap();
-    assert!(s.learn("group:10",&json!({"style":null,"memories":[],"forgetIds":[]}),1001.,"b",&learning,0,Some(LayeredUpdate{updates:&revised,settings:&settings,expressions:Some(&[json!({"subject":"person:20","kind":"jargon","term":"咕咕","meaning":"推迟","situation":"聊天","example":"咕咕","confidence":0.9,"sources":[{"id":"b","sender":"20","ts":1001}]})]),expression_settings:&es})).is_err());
+    assert!(s.learn("group:10",&json!({"style":null,"memories":[],"forgetIds":[]}),1001.,"b",&learning,0,Some(LayeredUpdate{affect_enabled:false,updates:&revised,settings:&settings,expressions:Some(&[json!({"subject":"person:20","kind":"jargon","term":"咕咕","meaning":"推迟","situation":"聊天","example":"咕咕","confidence":0.9,"sources":[{"id":"b","sender":"20","ts":1001}]})]),expression_settings:&es})).is_err());
     assert_eq!(dump(&s).unwrap(), before);
     assert!(s.connection().is_autocommit());
     assert_eq!(s.learning_state("group:10").unwrap()["epoch"], 0);
@@ -724,6 +725,7 @@ fn shared_capacity_index_survives_learning_reset_and_rollback() {
         &learning,
         0,
         Some(LayeredUpdate {
+            affect_enabled: false,
             updates: &[u.clone()],
             settings: &settings,
             expressions: None,
@@ -751,6 +753,7 @@ fn shared_capacity_index_survives_learning_reset_and_rollback() {
             &learning,
             1,
             Some(LayeredUpdate {
+                affect_enabled: false,
                 updates: &[u],
                 settings: &settings,
                 expressions: None,

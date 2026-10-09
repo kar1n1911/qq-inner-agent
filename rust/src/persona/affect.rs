@@ -306,6 +306,9 @@ pub fn apply(store: &Store, chat: &str, last: &Value, value: &Value, now: f64) -
         (Dimension::Affinity, affinity),
     ] {
         update(store, chat, &subject, d, d, n, confidence, id, now)?;
+        if chat.starts_with("group:") && d != Dimension::Affinity {
+            update(store, chat, "group", d, d, n, confidence, id, now)?;
+        }
     }
     Ok(())
 }
@@ -332,6 +335,7 @@ pub fn content_allowed(text: &str) -> bool {
 #[derive(Default)]
 pub struct Behavior {
     pub mood: f64,
+    pub group_mood: f64,
     pub rationality: f64,
     pub affinity: f64,
     pub disposition: Option<Disposition>,
@@ -355,6 +359,11 @@ pub fn behavior(
     let burst =
         disposition == Some(Disposition::Angry) && burst_allowed(store, chat, text(last, "id"))?;
     Ok(Behavior {
+        group_mood: if chat.starts_with("group:") {
+            read(store, chat, "group", Dimension::Mood, now)?
+        } else {
+            0.
+        },
         mood,
         rationality,
         affinity,

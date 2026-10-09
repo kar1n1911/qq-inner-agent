@@ -1555,6 +1555,7 @@ impl Engine {
                             &a.learning,
                             t.profile["epoch"].as_i64().unwrap_or(0),
                             Some(LayeredUpdate {
+                                affect_enabled: a.affect.enabled,
                                 updates: &updates,
                                 settings: &a.memory,
                                 expressions: Some(&expressions),

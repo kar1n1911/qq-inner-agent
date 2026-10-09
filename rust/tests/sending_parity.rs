@@ -296,6 +296,7 @@ fn affect_disabled_is_identical_and_enabled_factors_change_probability() {
             affinity: 0.,
             disposition: Some(disposition(mood, rationality)),
             burst: false,
+            group_mood: 0.,
         };
         let off = sending_probability_with_affect(&settings(), &t, &f, false, &b);
         assert_eq!(
@@ -323,7 +324,7 @@ fn affect_disabled_is_identical_and_enabled_factors_change_probability() {
 }
 
 #[test]
-fn addressed_disposition_has_a_floor_without_changing_other_affect_factors_or_vetoes() {
+fn addressed_affect_has_a_floor_without_changing_vetoes() {
     use qq_inner_core::{
         engine::sending::sending_probability_with_affect,
         persona::affect::{disposition, motivation, Behavior},
@@ -349,15 +350,16 @@ fn addressed_disposition_has_a_floor_without_changing_other_affect_factors_or_ve
             affinity: -0.5,
             disposition,
             burst: false,
+            group_mood: -0.8,
         };
         let f = forecast(true, 0.1, ResponseMode::Answer);
         let got = sending_probability_with_affect(&settings, &t, &f, true, &behavior);
         let factors = got.factors.affect.unwrap();
         assert!(factors.disposition >= 1.);
         assert_eq!(factors.disposition, expected);
-        assert_eq!(factors.mood, if disposition.is_some() { 1. } else { 0.9 });
-        assert_eq!(factors.affinity, 0.9);
-        assert_eq!(got.probability, 0.5 * factors.mood * 0.9 * expected);
+        assert_eq!(factors.mood, 1.);
+        assert_eq!(factors.affinity, 1.);
+        assert_eq!(got.probability, 0.5 * expected);
         assert_eq!(
             sending_probability_with_affect(&settings, &t, &f, false, &behavior),
             sending_probability(&settings, &t, &f)
@@ -369,6 +371,29 @@ fn addressed_disposition_has_a_floor_without_changing_other_affect_factors_or_ve
             let got = sending_probability_with_affect(&settings, &t, &vetoed, true, &behavior);
             assert!(got.veto.is_some());
             assert_eq!(got.probability, 0.);
+        }
+    }
+}
+
+#[test]
+fn group_mood_continuously_modulates_only_proactive_admission() {
+    use qq_inner_core::{
+        engine::sending::sending_probability_with_affect, persona::affect::Behavior,
+    };
+    let f = forecast(true, 0.1, ResponseMode::Answer);
+    for proactive in [true, false] {
+        let t = timing(proactive, 15., 300., 6., 5.);
+        let base = sending_probability(&settings(), &t, &f).probability;
+        for mood in [-1., -0.1, 0., 0.1, 1.] {
+            let b = Behavior {
+                group_mood: mood,
+                ..Default::default()
+            };
+            let got = sending_probability_with_affect(&settings(), &t, &f, true, &b);
+            assert_eq!(
+                got.probability,
+                (base * if proactive { 1. + 0.2 * mood } else { 1. }).clamp(0., 1.)
+            );
         }
     }
 }
