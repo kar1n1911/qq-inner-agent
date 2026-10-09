@@ -112,6 +112,10 @@ pub fn rank_with_stats(
                     / (tf + 1.2 * (0.25 + 0.75 * *length as f64 / average))
             })
             .sum::<f64>();
+        // confidence 本身是程度，但这里是最低可信度的使用准入门，必须保留硬阈值。
+        // 文档 §4 允许 partial 低置信度暂存，§6.6 要求事实性校验不随倾向放宽。
+        // 仅降排序权重会让唯一的低可信候选仍被召回；owner_note 仍沿用显式教学例外。
+        // 此处不负责入库，后续 confidence 排名也不替代这道准入门。
         if s(row, "layer") != "owner_note"
             && (n(row, "confidence", 0.6) < settings.min_confidence
                 || (require_match && lexical <= 0.))

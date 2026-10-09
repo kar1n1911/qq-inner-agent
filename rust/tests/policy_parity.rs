@@ -281,7 +281,7 @@ fn candidate(
 }
 
 #[test]
-fn selection_honours_thresholds_and_allocation() {
+fn selection_honours_probability_saturation_and_allocation() {
     let agent = config_with(
         json!({ "agent": { "proactive": true, "threshold": 4.09, "interruptThreshold": 4.8 } }),
     )
@@ -383,7 +383,7 @@ fn length_buckets_never_give_the_throwaway_bucket_to_an_addressed_turn() {
 }
 
 #[test]
-fn repetition_detection_matches_the_javascript_rule() {
+fn exact_repetition_is_distinct_from_similarity_penalty() {
     let history = vec![
         "今天天气不错".to_string(),
         "先试试这个简单方法。".to_string(),
@@ -393,9 +393,10 @@ fn repetition_detection_matches_the_javascript_rule() {
         "identical text counts as a repeat"
     );
     assert!(repeated("  今天天气不错  ", &history), "comparison trims");
-    assert!(
-        repeated("先试试这个简单方法", &history),
-        "high similarity counts as a repeat"
+    assert!(!repeated("先试试这个简单方法", &history));
+    assert_eq!(
+        qq_inner_core::engine::policy::repetition_penalty("先试试这个简单方法", &history),
+        1.0
     );
     assert!(!repeated("完全不同的一句话内容", &history));
 }
@@ -413,4 +414,110 @@ fn allowed_requires_an_explicit_match() {
     );
     assert!(!allowed("channel:10", &agent));
     assert!(!allowed("group:", &agent));
+}
+
+#[test]
+fn selection_probability_is_continuous_in_every_degree() {
+    use qq_inner_core::engine::policy::select;
+    let agent = config_with(json!({"agent": {"proactive": true, "threshold": 3.01,
+        "interruptThreshold": 4.8, "system1Probability": 0}}))
+    .agent;
+    let rate = |candidate: &Candidate, allocation, agent: &qq_inner_core::config::Agent| {
+        let count = (0..10000)
+            .filter(|i| {
+                select(
+                    std::slice::from_ref(candidate),
+                    allocation,
+                    agent,
+                    0.0,
+                    || (*i as f64 + 0.5) / 10000.0,
+                )
+                .is_some()
+            })
+            .count();
+        count as f64 / 10000.0
+    };
+    for axis in 0..3 {
+        let with_score = |score| {
+            let mut c = candidate("one", CandidateKind::System2, 5.0, 5.0, 5.0);
+            match axis {
+                0 => c.motivation = score,
+                1 => c.relevance = score,
+                _ => c.originality = score,
+            }
+            c
+        };
+        let boundary = if axis == 0 { 3.01 } else { 3.0 };
+        let below = rate(&with_score(boundary - 0.0001), Allocation::Open, &agent);
+        let above = rate(&with_score(boundary + 0.0001), Allocation::Open, &agent);
+        assert!((above - below).abs() < 0.001);
+        let mut previous = 0.0;
+        for score in [1.0, 1.0001, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0] {
+            let current = rate(&with_score(score), Allocation::Open, &agent);
+            assert!(current >= previous);
+            previous = current;
+        }
+        assert_eq!(rate(&with_score(1.0001), Allocation::Open, &agent), 0.0);
+    }
+    let c = candidate("one", CandidateKind::System2, 2.5, 3.0, 3.0);
+    assert!(rate(&c, Allocation::Other, &agent) < rate(&c, Allocation::Open, &agent));
+    let fallback = qq_inner_core::config::Agent {
+        system1_probability: 1.0,
+        ..agent.clone()
+    };
+    let weak = candidate("weak", CandidateKind::System1, 1.0, 1.0001, 5.0);
+    assert_eq!(rate(&weak, Allocation::Open, &fallback), 0.0);
+    assert!(select(&[weak], Allocation::Other, &fallback, 0.0, || 0.0).is_none());
+    let duplicated = vec![c.clone(); 100];
+    for draw in [0.1, 0.9] {
+        assert_eq!(
+            select(&duplicated, Allocation::Open, &agent, 0.0, || draw).is_some(),
+            select(
+                std::slice::from_ref(&c),
+                Allocation::Open,
+                &agent,
+                0.0,
+                || draw
+            )
+            .is_some()
+        );
+    }
+    let low = candidate("low", CandidateKind::System2, 5.0, 1.0, 5.0);
+    let good = candidate("good", CandidateKind::System2, 4.0, 5.0, 5.0);
+    assert_eq!(
+        select(&[low, good.clone()], Allocation::Open, &agent, 0.0, || 0.0)
+            .unwrap()
+            .candidate
+            .id,
+        "good"
+    );
+    let mut tied = good.clone();
+    tied.id = "second".into();
+    assert_eq!(
+        select(&[good, tied], Allocation::Open, &agent, 0.0, || 0.0)
+            .unwrap()
+            .candidate
+            .id,
+        "good"
+    );
+}
+
+#[test]
+fn repetition_penalty_controls_suppression_without_count_amplification() {
+    use qq_inner_core::engine::policy::{repetition_penalty, suppress_repetition};
+    let history = vec!["alpha beta gamma delta".into()];
+    let text = "alpha beta gamma epsilon";
+    let penalty = repetition_penalty(text, &history);
+    assert!(penalty > 0.0 && penalty < 1.0);
+    assert!(suppress_repetition(text, &history, || penalty - 1e-6));
+    assert!(!suppress_repetition(text, &history, || penalty + 1e-6));
+    assert_eq!(
+        penalty,
+        repetition_penalty(text, &vec![history[0].clone(); 100])
+    );
+    assert!(!suppress_repetition("unrelated words", &history, || 0.0));
+    assert!(!suppress_repetition(text, &[], || 0.0));
+    assert!(suppress_repetition(" x ", &["x".into()], || panic!(
+        "exact repeats need no draw"
+    )));
 }

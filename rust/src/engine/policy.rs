@@ -237,11 +237,10 @@ pub struct Selected {
     pub adjusted: f64,
 }
 
-/// 复刻 `select()`。
-///
-/// 三个阈值语义：`allocation == self` 一定选第一个；非主动模式下直接返回 `None`；
-/// 只有 `relevance >= 3 && originality >= 3` 的候选才有资格，`other` 用更高的
-/// `interruptThreshold`。
+/// 主动候选按连续参与概率选择；显式点名与 proactive 开关仍是事实性路由。
+/// 文档 prompt-and-learning-design.md §10.4 不二值化相关度，§18 将相关度视为启发式。
+/// 评分最低端 1 表示没有参与价值；原来的 3 / threshold 改为权重饱和点，
+/// 平方爬坡让低端趋零。最终抽样是离散动作，但其概率不会在旧阈值处跳变。
 pub fn select(
     rated: &[Candidate],
     allocation: Allocation,
@@ -272,25 +271,58 @@ pub fn select(
     if !agent.proactive {
         return None;
     }
-    let appropriate: Vec<&Selected> = pool
-        .iter()
-        .filter(|x| x.candidate.relevance >= 3.0 && x.candidate.originality >= 3.0)
-        .collect();
     let threshold = if allocation == Allocation::Other {
         agent.interrupt_threshold
     } else {
         agent.threshold
     };
-    if let Some(top) = appropriate.iter().find(|x| x.adjusted >= threshold) {
-        return Some((*top).clone());
+    // 只抽一次、只尝试一个候选，避免候选数放大低质量内容的通过概率。
+    let (top, probability) = pool
+        .into_iter()
+        // max_by 并列时取最后一个；逆序保证仍优先原池中的第一项。
+        .rev()
+        .map(|selected| {
+            let probability = participation_probability(&selected, allocation, agent, threshold);
+            (selected, probability)
+        })
+        .max_by(|(a, pa), (b, pb)| {
+            pa.total_cmp(pb)
+                .then_with(|| a.adjusted.total_cmp(&b.adjusted))
+        })?;
+    if probability >= 1.0 || random() < probability {
+        Some(top)
+    } else {
+        None
     }
-    if allocation == Allocation::Open && random() < agent.system1_probability {
-        return appropriate
-            .iter()
-            .find(|x| x.candidate.kind == CandidateKind::System1)
-            .map(|x| (*x).clone());
+}
+
+/// 连续、单调的评分权重；无效评分不能获得参与机会。
+fn rating_weight(score: f64, full_at: f64) -> f64 {
+    if !score.is_finite() || !full_at.is_finite() {
+        return 0.0;
     }
-    None
+    ((score - 1.0) / (full_at - 1.0).max(f64::EPSILON))
+        .clamp(0.0, 1.0)
+        .powi(2)
+}
+
+fn participation_probability(
+    selected: &Selected,
+    allocation: Allocation,
+    agent: &Agent,
+    threshold: f64,
+) -> f64 {
+    let quality = rating_weight(selected.candidate.relevance, 3.0)
+        * rating_weight(selected.candidate.originality, 3.0);
+    let motivation = rating_weight(selected.adjusted, threshold);
+    let fallback =
+        if allocation == Allocation::Open && selected.candidate.kind == CandidateKind::System1 {
+            agent.system1_probability.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+    // System1 兜底也必须承受相同的相关度/原创度惩罚。
+    quality * (motivation + (1.0 - motivation) * fallback)
 }
 
 /// 回复长度分档；Rust 权重已调整，不再逐值复刻 JS 的旧分布。
@@ -341,12 +373,40 @@ pub fn pick_length_target(
     buckets[buckets.len() - 1].0
 }
 
-/// 复刻 `repeated()`：与 agent 自己最近说过的话重复（完全相同，或相似度 > 0.88）。
+/// 完全相同的正文是事实性重复，必须确定性拒绝；不能仅靠概率去重。
 pub fn repeated(text: &str, self_messages: &[String]) -> bool {
-    let trimmed = text.trim();
     self_messages
         .iter()
-        .any(|previous| previous.trim() == trimmed || similarity(text, previous) > 0.88)
+        .any(|previous| previous.trim() == text.trim())
+}
+
+/// 词元相似度是程度而非消息身份（文档 §18），不能在 0.88 两侧突然翻转。
+/// 用 smoothstep 作连续抑制：无重合时为零，近似完全重复时趋近一，
+/// 两端斜率为零。取最大值避免重复历史条数人为放大惩罚。
+pub fn repetition_penalty(text: &str, self_messages: &[String]) -> f64 {
+    if repeated(text, self_messages) {
+        return 1.0;
+    }
+    self_messages
+        .iter()
+        .map(|previous| {
+            let s = similarity(text, previous).clamp(0.0, 1.0);
+            similarity_penalty(s)
+        })
+        .fold(0.0, f64::max)
+}
+
+fn similarity_penalty(s: f64) -> f64 {
+    s * s * (3.0 - 2.0 * s)
+}
+
+pub fn suppress_repetition(
+    text: &str,
+    self_messages: &[String],
+    random: impl FnOnce() -> f64,
+) -> bool {
+    let penalty = repetition_penalty(text, self_messages);
+    penalty >= 1.0 || (penalty > 0.0 && random() < penalty)
 }
 
 /// 消息形状与 JS 相同；self 是 Rust 关键字，因此字段名使用 is_self。
@@ -896,5 +956,39 @@ mod length_tests {
             }
             assert_eq!(pick_length_target(hint, None, || 1.0), "long");
         }
+    }
+}
+
+#[cfg(test)]
+mod threshold_tests {
+    use super::*;
+
+    #[test]
+    fn continuous_weights_are_monotone_and_vanish_at_low_end() {
+        for full_at in [3.0, 3.01, 4.8] {
+            let mut last = 0.0;
+            for i in 0..=1000 {
+                let weight = rating_weight(1.0 + 4.0 * i as f64 / 1000.0, full_at);
+                assert!((0.0..=1.0).contains(&weight));
+                assert!(weight >= last);
+                last = weight;
+            }
+            assert_eq!(rating_weight(1.0, full_at), 0.0);
+            assert!(rating_weight(1.0001, full_at) < 1e-8);
+            let jump =
+                rating_weight(full_at + 1e-7, full_at) - rating_weight(full_at - 1e-7, full_at);
+            assert!(jump < 1e-6);
+        }
+        let mut last = 0.0;
+        for i in 0..=1000 {
+            let penalty = similarity_penalty(i as f64 / 1000.0);
+            assert!((0.0..=1.0).contains(&penalty));
+            assert!(penalty >= last);
+            last = penalty;
+        }
+        assert_eq!(similarity_penalty(0.0), 0.0);
+        assert!(similarity_penalty(0.0001) < 1e-7);
+        assert!(similarity_penalty(0.8800001) - similarity_penalty(0.8799999) < 1e-6);
+        assert_eq!(similarity_penalty(1.0), 1.0);
     }
 }
