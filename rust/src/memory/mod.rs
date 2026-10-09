@@ -216,11 +216,53 @@ pub(crate) struct Pending {
 /// 普通 capture 只做两次定点 put 和 O(1) 计数；每 chat 累积 shortLimit 次追加后批清理。
 pub struct LayeredMemory<'a> {
     store: &'a Store,
+    affect_enabled: bool,
 }
 impl<'a> LayeredMemory<'a> {
     pub fn new(store: &'a Store) -> Self {
-        Self { store }
+        Self {
+            store,
+            affect_enabled: false,
+        }
     }
+    pub fn with_affect(mut self, enabled: bool) -> Self {
+        self.affect_enabled = enabled;
+        self
+    }
+
+    // Called only on parsed, reviewed updates. No agreement, model input or reward path.
+    fn learning_thresholds(
+        &self,
+        chat: &str,
+        v: &Value,
+        now: f64,
+        base: usize,
+    ) -> Result<(f64, f64, f64)> {
+        if !self.affect_enabled {
+            return Ok((0., 0., base.max(1) as f64));
+        }
+        use crate::persona::affect::{read, Dimension};
+        let mut mood = if chat.starts_with("group:") {
+            read(self.store, chat, "group", Dimension::Mood, now)?
+        } else {
+            0.
+        };
+        let mut affinity: f64 = 1.;
+        // Group conclusions use the most conservative cited author's state.
+        for source in array(&v["sources"]) {
+            let subject = format!("person:{}", text(source, "sender"));
+            mood = mood.min(read(self.store, chat, &subject, Dimension::Mood, now)?);
+            affinity = affinity.min(read(self.store, chat, &subject, Dimension::Affinity, now)?);
+        }
+        let low_mood = (-mood).max(0.);
+        let base = base.max(1) as f64;
+        Ok((
+            2. * low_mood,
+            1. + (-affinity).max(0.) * base,
+            (base * (1. - 0.5 * affinity) + low_mood * base).max(1.),
+        ))
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn put(
         &self,
@@ -375,6 +417,21 @@ impl<'a> LayeredMemory<'a> {
             }
             let mut v = original.clone();
             if v["operation"] == "upsert" {
+                let (confidence_threshold, initial_evidence, promotion_evidence) =
+                    self.learning_thresholds(chat, &v, now, settings.partial_evidence)?;
+                // At clearly low mood (<= -0.5), even full confidence cannot promote.
+                // Skipping preserves existing partials and does not bank heated evidence.
+                if num(&v, "confidence") <= confidence_threshold && confidence_threshold > 0. {
+                    continue;
+                }
+                let distinct = array(&v["sources"])
+                    .iter()
+                    .map(source_identity)
+                    .collect::<HashSet<_>>()
+                    .len();
+                if (distinct as f64) < initial_evidence {
+                    v["verdict"] = json!("partial");
+                }
                 let old = self.store.first(
                     "SELECT * FROM memory_layers WHERE chat=? AND subject=? AND layer=? AND slot=? AND expires>?",
                     params![chat,text(&v,"subject"),text(&v,"layer"),text(&v,"key"),now])?;
@@ -403,7 +460,7 @@ impl<'a> LayeredMemory<'a> {
                             evidence.insert(source_identity(source));
                         }
                     }
-                    let promoted = evidence.len() >= settings.partial_evidence.max(1);
+                    let promoted = evidence.len() as f64 >= promotion_evidence;
                     let mut keywords = array(&v["keywords"]).to_vec();
                     if promoted {
                         v["confidence"] = json!(num(&v, "confidence").max(0.6));

@@ -14,6 +14,7 @@ pub struct ScopedOptions {
     pub limit: Option<usize>,
 }
 pub struct LayeredUpdate<'a> {
+    pub affect_enabled: bool,
     pub updates: &'a [Value],
     pub settings: &'a Memory,
     pub expressions: Option<&'a [Value]>,
@@ -102,7 +103,9 @@ impl Store {
             return Ok(false);
         }
         if let Some(layered) = layered {
-            LayeredMemory::new(self).apply(chat, layered.updates, now, layered.settings)?;
+            LayeredMemory::new(self)
+                .with_affect(layered.affect_enabled)
+                .apply(chat, layered.updates, now, layered.settings)?;
             if let Some(expressions) = layered.expressions {
                 ExpressionMemory::new(self).apply(
                     chat,

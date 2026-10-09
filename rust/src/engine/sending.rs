@@ -281,8 +281,19 @@ pub fn sending_probability_with_affect(
             }
         }),
     };
+    let group_gain = if timing.proactive {
+        1. + 0.2 * behavior.group_mood.clamp(-1., 1.)
+    } else {
+        1.
+    };
+    let mut factors = factors;
+    if !timing.proactive {
+        factors.mood = factors.mood.max(1.);
+        factors.affinity = factors.affinity.max(1.);
+    }
     gate.probability =
-        (gate.probability * factors.mood * factors.affinity * factors.disposition).clamp(0., 1.);
+        (gate.probability * factors.mood * factors.affinity * factors.disposition * group_gain)
+            .clamp(0., 1.);
     gate.factors.affect = Some(factors);
     gate
 }

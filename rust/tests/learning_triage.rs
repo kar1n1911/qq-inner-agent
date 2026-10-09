@@ -195,3 +195,103 @@ fn evidence_config_is_optional_bounded_and_integer() {
         3
     );
 }
+
+fn affect_state(db: &Store, subject: &str, dimension: &str, value: f64) {
+    qq_inner_core::persona::affect::enable(db).unwrap();
+    db.execute(
+        "INSERT OR REPLACE INTO affect_state VALUES(?,?,?,?,0,1,200,'[]')",
+        rusqlite::params!["group:10", subject, dimension, value],
+    )
+    .unwrap();
+}
+
+#[test]
+fn low_group_or_person_mood_skips_heated_traits_and_preserves_partials() {
+    for subject in ["group", "person:20"] {
+        let db = Store::in_memory().unwrap();
+        let cfg = settings();
+        let mut v = candidate("garden", 0);
+        v["verdict"] = json!("partial");
+        LayeredMemory::new(&db)
+            .apply("group:10", &parse(json!([v]), &cfg), 200., &cfg)
+            .unwrap();
+        affect_state(&db, subject, "mood", -0.8);
+        let mut v = candidate("garden", 1);
+        v["sourceIds"] = json!(["m1", "m2", "m3", "m4", "m5", "m6"]);
+        let updates = parse(json!([v, candidate("heated", 7)]), &cfg);
+        LayeredMemory::new(&db)
+            .with_affect(true)
+            .apply("group:10", &updates, 200., &cfg)
+            .unwrap();
+        assert_eq!(rows(&db).len(), 1);
+        assert_eq!(rows(&db)[0]["pending"], true);
+        assert_eq!(rows(&db)[0]["sources"].as_array().unwrap().len(), 1);
+    }
+}
+
+#[test]
+fn affinity_modulates_evidence_but_never_source_validation_or_stability() {
+    for affinity in [-1., 0., 1.] {
+        let db = Store::in_memory().unwrap();
+        let cfg = settings();
+        affect_state(&db, "person:20", "affinity", affinity);
+        let apply = |v| {
+            LayeredMemory::new(&db)
+                .with_affect(true)
+                .apply("group:10", &parse(json!([v]), &cfg), 200., &cfg)
+                .unwrap()
+        };
+        apply(candidate("direct", 0));
+        assert_eq!(
+            rows(&db).iter().find(|r| r["slot"] == "direct").unwrap()["pending"] == true,
+            affinity < 0.
+        );
+        let mut v = candidate("pending", 0);
+        v["verdict"] = json!("partial");
+        apply(v);
+        for n in 1..=3 {
+            apply(candidate("pending", n));
+            let pending = rows(&db)
+                .into_iter()
+                .find(|r| r["slot"] == "pending")
+                .unwrap();
+            assert_eq!(
+                pending["pending"] == true,
+                (n as f64) < 2. * (1. - 0.5 * affinity)
+            );
+        }
+        let mut bad = candidate("bad", 0);
+        bad["sourceIds"] = json!(["invented"]);
+        assert!(parse_memory_updates(
+            &json!([candidate("valid", 0), bad]),
+            &history(),
+            "group:10",
+            "20",
+            &cfg
+        )
+        .is_err());
+    }
+}
+
+#[test]
+fn agreement_ratings_do_not_change_learning() {
+    for agreement in [-1., 1.] {
+        let db = Store::in_memory().unwrap();
+        let cfg = settings();
+        qq_inner_core::persona::affect::enable(&db).unwrap();
+        db.message(&history()[0]).unwrap();
+        qq_inner_core::persona::affect::rate(&db, "group:10", "m0", 0., agreement, 1., 200.)
+            .unwrap();
+        LayeredMemory::new(&db)
+            .with_affect(true)
+            .apply(
+                "group:10",
+                &parse(json!([candidate("garden", 0)]), &cfg),
+                200.,
+                &cfg,
+            )
+            .unwrap();
+        assert!(rows(&db)[0].get("pending").is_none());
+        assert_eq!(rows(&db)[0]["confidence"], 0.9);
+    }
+}
