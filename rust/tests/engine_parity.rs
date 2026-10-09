@@ -83,6 +83,13 @@ impl OrientationTransport for Harness {
                 anyhow::ensure!(!response.is_null(), "unsupported");
                 return Ok(response.clone());
             }
+            if action == "get_group_member_list" {
+                self.identity_reads.lock().unwrap().push((action.into(), params.clone()));
+                let model = self.model.lock().unwrap();
+                let response = &model["memberList"][params["group_id"].as_str().unwrap()];
+                anyhow::ensure!(!response.is_null(), "unsupported");
+                return Ok(response.clone());
+            }
             self.orientation_reads.lock().unwrap().push(action.into());
             let hold = self.hold.lock().unwrap().as_deref() == Some("COLLECT");
             if hold && action == "get_group_info" {
@@ -143,6 +150,9 @@ impl EngineTransport for Harness {
 impl OrientationProvider for Harness {
     fn json<'a>(&'a self, system: &'a str, payload: Value) -> BoxFuture<'a, Result<Value>> {
         Box::pin(async move {
+            if system == qq_inner_core::persona::NAME_PROMPT {
+                return Ok(json!("清风"));
+            }
             if system.contains(qq_inner_core::topic::relay::links::REVIEW) {
                 self.model_inputs.lock().unwrap().push(("RELAY".into(), payload));
                 anyhow::ensure!(self.model.lock().unwrap()["relayError"] != true, "audit unavailable");
@@ -2328,12 +2338,12 @@ async fn visible_self_identity_is_cached_scoped_and_injected() {
         assert_eq!(payload["selfIdentity"]["visibleName"], expected);
         let instructions = payload["selfIdentity"]["instructions"].as_str().unwrap();
         for constraint in [
-            "只有证据明确指向你时",
+            "只有证据明确指向你这个账号时",
             "消息里 @ 了你的 QQ（[@99]）",
             "同一话题下有你自己发出的消息",
             "称呼命中你的群名片或昵称",
             "内容明确指向你的自身属性",
-            "群里可能有其他 bot",
+            "群里可能有多个机器人，也可能有其他 bot",
             "仅出现“机器人/bot”字样",
             "称呼可能指别人时，不等于你",
             "不要以第一人称谈论别人的事",
@@ -2527,5 +2537,84 @@ async fn continuous_affect_length_flows_from_stored_coordinates() {
             .expect("addressed affect must reach articulation");
         assert_eq!(payload["lengthTarget"], expected, "{mood}, {rationality}");
         assert_eq!(*h.sends.lock().unwrap(), 1);
+    }
+}
+
+#[tokio::test]
+async fn existing_member_list_calls_cache_other_bots_without_extra_requests() {
+    for (members, expected) in [
+        (
+            json!([
+                {"user_id":99,"card":"丹德莱","is_robot":true},
+                {"user_id":20,"nickname":"群友","title":"bot","is_robot":false},
+                {"user_id":22,"card":"其他机器人","nickname":"Other","is_robot":true}
+            ]),
+            Some(json!([{"qq":"22","name":"其他机器人"}])),
+        ),
+        (
+            json!([{"user_id":20,"nickname":"群友","title":"bot"}]),
+            None,
+        ),
+    ] {
+        let (e, h) = setup(&base(
+            "cached-other-bots",
+            json!({"identity":{"enabled":true,"allowGroupCard":true,"minTraits":1,"minAgeDays":0}}),
+            vec![],
+        ));
+        *h.model.lock().unwrap() = json!({"allocation":"self","memberList":{"10":members}});
+        h.store.lock().unwrap().execute(
+            "INSERT INTO memory_layers(id,chat,subject,layer,slot,text,sources) VALUES('identity-trait','group:10','group','traits','style','好奇探索','[]')", [],
+        ).unwrap();
+        e.ingest(&h.event(&json!({"id":"before-roster"}))).unwrap();
+        e.tick().unwrap();
+        e.wait_idle().await;
+        let list_calls = || {
+            h.identity_reads
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(action, _)| action == "get_group_member_list")
+                .count()
+        };
+        assert_eq!(
+            list_calls(),
+            2,
+            "only nickname sampling and persona automation fetch the list"
+        );
+        // A subsequent turn reads the cache, after both existing paths have finished.
+        *h.now.lock().unwrap() += 2.;
+        e.ingest(&h.event(&json!({"id":"after-roster"}))).unwrap();
+        e.tick().unwrap();
+        e.wait_idle().await;
+        {
+            let inputs = h.model_inputs.lock().unwrap();
+            let payload = &inputs
+                .iter()
+                .rev()
+                .find(|(stage, _)| stage == "FORM")
+                .unwrap()
+                .1;
+            assert_eq!(payload["selfIdentity"].get("otherBots"), expected.as_ref());
+        }
+        e.ingest(&h.event(&json!({"id":"other-group","group":11})))
+            .unwrap();
+        e.tick().unwrap();
+        e.wait_idle().await;
+        {
+            let inputs = h.model_inputs.lock().unwrap();
+            let payload = &inputs
+                .iter()
+                .rev()
+                .find(|(stage, _)| stage == "FORM")
+                .unwrap()
+                .1;
+            assert!(payload["selfIdentity"].get("otherBots").is_none());
+        }
+        assert_eq!(
+            list_calls(),
+            2,
+            "payload construction never fetches a roster"
+        );
+        e.stop().await;
     }
 }
