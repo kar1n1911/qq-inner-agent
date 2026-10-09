@@ -153,6 +153,39 @@ fn qq_id(s: &str) -> bool {
         .is_some_and(|b| (b'1'..=b'9').contains(b))
         && s.bytes().all(|b| b.is_ascii_digit())
 }
+// Telegram 身份 id 是纯数字串：群号为可负的 1..=20 位，用户号为 1..=20 位。
+// 不做 qq_id 的首位非零限制，允许前导零与 `-0`（与设计中的 `^-?\d{1,20}$` 对齐）。
+fn telegram_id(s: &str, signed: bool) -> bool {
+    let digits = match s.strip_prefix('-') {
+        Some(rest) => {
+            if !signed {
+                return false;
+            }
+            rest
+        }
+        None => s,
+    };
+    !digits.is_empty() && digits.len() <= 20 && digits.bytes().all(|b| b.is_ascii_digit())
+}
+fn telegram_group_id(s: &str) -> bool {
+    telegram_id(s, true)
+}
+fn telegram_user_id(s: &str) -> bool {
+    telegram_id(s, false)
+}
+// 代理允许任意 host（含 localhost），但必须是无凭据/查询/片段的 http(s) URL。
+fn proxy_url(raw: &str) -> bool {
+    let Ok(parsed) = ureq::get(raw).request_url() else {
+        return false;
+    };
+    let u = parsed.as_url();
+    ["http", "https"].contains(&u.scheme())
+        && !u.host_str().unwrap_or("").is_empty()
+        && u.username().is_empty()
+        && u.password().unwrap_or("").is_empty()
+        && u.query().unwrap_or("").is_empty()
+        && u.fragment().unwrap_or("").is_empty()
+}
 fn clock_time(s: &str) -> bool {
     let b = s.as_bytes();
     b.len() == 5
@@ -465,6 +498,18 @@ pub fn validate(c: &Value) -> std::result::Result<(), ConfigError> {
         &["https", "http"],
     )?;
     url_host(&c["onebot"]["url"], "onebot.url", &["ws", "wss"])?;
+    if let Some(v) = c.get("telegram") {
+        check(v.is_object(), "telegram must be object")?;
+        // 与 agent.allowedGroups/allowedUsers 一致：出现时必须是数组；元素可为数字（后续按 String() 归一化）。
+        for k in ["allowedGroups", "allowedUsers"] {
+            if let Some(list) = v.get(k) {
+                check(list.is_array(), format!("telegram.{k} must be array"))?;
+            }
+        }
+        let telegram: Telegram =
+            serde_json::from_value(v.clone()).map_err(|e| ConfigError(format!("telegram: {e}")))?;
+        telegram.validate_settings()?;
+    }
     check(
         [json!("max_tokens"), json!("max_completion_tokens")]
             .contains(&c["provider"]["tokenParameter"]),
@@ -532,6 +577,14 @@ pub fn normalize(c: &Value) -> std::result::Result<Value, ConfigError> {
                 .collect(),
         );
     }
+    if let Some(t) = c.get_mut("telegram").filter(|v| v.is_object()) {
+        for k in ["allowedGroups", "allowedUsers"] {
+            if let Some(list) = t.get(k).and_then(|v| v.as_array()) {
+                let values: Vec<Value> = list.iter().map(|v| Value::String(js_string(v))).collect();
+                t[k] = Value::Array(values);
+            }
+        }
+    }
     Ok(c)
 }
 
@@ -592,7 +645,7 @@ const MEMORY_RANGES: &[(&str, f64, f64)] = &[
 
 /// JS 未限制类型的文本字段，加载时缓存 String(value) 和原始 truthiness。
 /// 热路径无需访问 JSON；原始类型（包括 null/数组）仍完整保存在 Loaded.raw。
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct RuntimeText {
     pub text: String,
     pub is_truthy: bool,
@@ -612,6 +665,17 @@ fn deserialize_js_string<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> std::result::Result<String, D::Error> {
     Ok(js_string(&Value::deserialize(deserializer)?))
+}
+// 与 agent 白名单一致：数组元素按 JS String() 归一化，数字 id 也能被接受。
+fn deserialize_js_string_vec<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Vec<String>, D::Error> {
+    let v = Value::deserialize(deserializer)?;
+    Ok(match v {
+        Value::Array(a) => a.iter().map(js_string).collect(),
+        Value::Null => Vec::new(),
+        other => vec![js_string(&other)],
+    })
 }
 // 所有数值用 f64：JS 的普通 ranges 允许小数，专用整数规则由 validate 保证。
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -666,6 +730,90 @@ pub struct Onebot {
     pub request_timeout_seconds: f64,
     /// 配置键 `onebot.reconnectMaxSeconds`。
     pub reconnect_max_seconds: f64,
+}
+
+/// 与 OneBot 平级的 Telegram Bot 网关配置；默认关闭，旧配置缺失该段时不影响 QQ。
+/// 当 `enabled` 且配置了 token 时，`allowedGroups`/`allowedUsers` 在运行时并入
+/// `agent.allowedGroups/allowedUsers`（网关扁平化）；未启用时完全不参与运行时视图。
+/// 无论是否合并，`config.json` 与 `Loaded.raw` 都保持分段，仪表盘仍展示独立面板。
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Telegram {
+    /// 配置键 `telegram.enabled`。
+    pub enabled: bool,
+    /// 配置键 `telegram.proxy`；空串表示直连。
+    #[serde(deserialize_with = "deserialize_js_string")]
+    pub proxy: String,
+    /// 配置键 `telegram.pollTimeoutSeconds`；getUpdates 长轮询上限 50s。
+    pub poll_timeout_seconds: f64,
+    /// 配置键 `telegram.requestTimeoutSeconds`。
+    pub request_timeout_seconds: f64,
+    /// 配置键 `telegram.reconnectMaxSeconds`。
+    pub reconnect_max_seconds: f64,
+    /// 配置键 `telegram.allowedGroups`；Telegram 群 id 为负数。
+    #[serde(default, deserialize_with = "deserialize_js_string_vec")]
+    pub allowed_groups: Vec<String>,
+    /// 配置键 `telegram.allowedUsers`。
+    #[serde(default, deserialize_with = "deserialize_js_string_vec")]
+    pub allowed_users: Vec<String>,
+}
+impl Default for Telegram {
+    fn default() -> Self {
+        // 与 defaults.json 的 telegram 段逐字段一致；缺段配置回退到这里。
+        Self {
+            enabled: false,
+            proxy: String::new(),
+            poll_timeout_seconds: 20.,
+            request_timeout_seconds: 30.,
+            reconnect_max_seconds: 60.,
+            allowed_groups: Vec::new(),
+            allowed_users: Vec::new(),
+        }
+    }
+}
+impl Telegram {
+    /// 校验 Telegram 段。`validate` 在归一化前调用，因此 id 允许 JSON 数字等可 stringify 的值。
+    fn validate_settings(&self) -> std::result::Result<(), ConfigError> {
+        for (key, value, max) in [
+            (
+                "telegram.pollTimeoutSeconds",
+                self.poll_timeout_seconds,
+                50.,
+            ),
+            (
+                "telegram.requestTimeoutSeconds",
+                self.request_timeout_seconds,
+                300.,
+            ),
+            (
+                "telegram.reconnectMaxSeconds",
+                self.reconnect_max_seconds,
+                300.,
+            ),
+        ] {
+            check(
+                value.is_finite() && (1.0..=max).contains(&value),
+                format!("{key} must be between 1 and {max}"),
+            )?;
+        }
+        check(
+            !nonblank(&self.proxy) || proxy_url(&self.proxy),
+            "telegram.proxy: invalid URL (no credentials/query/fragment)",
+        )?;
+        for id in &self.allowed_groups {
+            check(
+                telegram_group_id(id),
+                "telegram.allowedGroups: expected group IDs",
+            )?;
+        }
+        for id in &self.allowed_users {
+            check(
+                telegram_user_id(id),
+                "telegram.allowedUsers: expected user IDs",
+            )?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1064,6 +1212,9 @@ pub struct Config {
     pub provider: Provider,
     /// 配置键 `onebot`。
     pub onebot: Onebot,
+    /// 配置键 `telegram`；旧配置缺失时回退到 Telegram::default()。
+    #[serde(default)]
+    pub telegram: Telegram,
     /// 配置键 `agent`。
     pub agent: Agent,
     /// 配置键 `storage`。
@@ -1072,6 +1223,9 @@ pub struct Config {
     pub api_key: RuntimeText,
     /// 加载派生键 `onebotToken`。
     pub onebot_token: RuntimeText,
+    /// 加载派生键 `telegramToken`；缺省为空，便于测试与旧配置直接构造。
+    #[serde(default)]
+    pub telegram_token: RuntimeText,
     /// 加载派生键 `dataDir`。
     pub data_dir: PathBuf,
 }
@@ -1090,7 +1244,45 @@ impl Config {
         if !truthy(&view["agent"]["quietHours"]) {
             view["agent"]["quietHours"] = Value::Null;
         }
+        // 网关扁平化：Telegram 白名单并入运行时 agent 列表，使观察期/persona/topic/relay 等
+        // 已有 `starts_with("group:")`/allowed 逻辑对 Telegram 自动生效。
+        // 仅在运行时视图生效，不写回 config.json 或 Loaded.raw。
+        flatten_telegram_allowlists(&mut view);
         serde_json::from_value(view).context("construct runtime configuration")
+    }
+}
+
+// 幂等去重；agent 原有 id 优先保留，Telegram 独有的负数群 id 追加在后。
+// 仅在 Telegram 网关真正启用（`enabled` 且配置了 token）时合并，与
+// `Gateways::new` 构造 Telegram 后端的条件一致；否则完全不动 agent 列表，
+// 避免关闭 Telegram 后其白名单仍影响 QQ 的 readiness/观察期等运行时行为。
+fn flatten_telegram_allowlists(view: &mut Value) {
+    let enabled = view.get("telegram").is_some_and(|t| truthy(&t["enabled"]));
+    if !enabled || !truthy(&view["telegramToken"]) {
+        return;
+    }
+    let (groups, users) = match view.get("telegram") {
+        Some(t) => (
+            t["allowedGroups"].as_array().cloned().unwrap_or_default(),
+            t["allowedUsers"].as_array().cloned().unwrap_or_default(),
+        ),
+        None => return,
+    };
+    let Some(agent) = view.get_mut("agent").and_then(|a| a.as_object_mut()) else {
+        return;
+    };
+    for (key, extra) in [("allowedGroups", groups), ("allowedUsers", users)] {
+        if extra.is_empty() {
+            continue;
+        }
+        let slot = agent.entry(key).or_insert_with(|| json!([]));
+        if let Some(list) = slot.as_array_mut() {
+            for value in extra {
+                if !list.contains(&value) {
+                    list.push(value);
+                }
+            }
+        }
     }
 }
 
@@ -1098,13 +1290,13 @@ impl Config {
 pub fn public_defaults() -> Result<Value> {
     let defaults = defaults();
     let mut input = defaults.clone();
-    for key in ["apiKey", "onebotToken", "dataDir"] {
+    for key in ["apiKey", "onebotToken", "telegramToken", "dataDir"] {
         input[key] = json!("");
     }
     let config = Config::from_value(&input)?;
     // Restore public scalar values in place of RuntimeText's internal representation.
     let mut schema = merge(&serde_json::to_value(&config)?, &defaults);
-    for key in ["apiKey", "onebotToken", "dataDir"] {
+    for key in ["apiKey", "onebotToken", "telegramToken", "dataDir"] {
         schema.as_object_mut().unwrap().remove(key);
     }
     // These defaults are deliberately omitted by runtime serialization for parity.
@@ -1171,6 +1363,7 @@ pub fn load_with_env(root: &Path, env: impl Fn(&str) -> Option<String>) -> Resul
     };
     raw["apiKey"] = key(&["LLM_API_KEY", vendor], &secrets["apiKey"]);
     raw["onebotToken"] = key(&["ONEBOT_TOKEN"], &secrets["onebotToken"]);
+    raw["telegramToken"] = key(&["TELEGRAM_BOT_TOKEN"], &secrets["telegramToken"]);
     raw["dataDir"] = json!(absolute(
         root,
         raw["storage"]["directory"]
@@ -1205,7 +1398,8 @@ pub fn summary(c: &Config) -> Value {
     json!({"provider":{"kind":c.provider.kind,"model":c.provider.model.text},"dataDir":c.data_dir,
         "selectedChats":c.agent.allowed_groups.len()+c.agent.allowed_users.len(),"dryRun":c.agent.dry_run,
         "apiKey":if c.api_key.is_truthy {"[redacted]"} else {""},
-        "onebotToken":if c.onebot_token.is_truthy {"[redacted]"} else {""},"missing":readiness(c)})
+        "onebotToken":if c.onebot_token.is_truthy {"[redacted]"} else {""},
+        "telegramToken":if c.telegram_token.is_truthy {"[redacted]"} else {""},"missing":readiness(c)})
 }
 
 #[cfg(test)]
@@ -1304,5 +1498,216 @@ mod tests {
         validate(&c).unwrap();
         assert_eq!(js_string(&json!(1e21)), "1e+21");
         assert_eq!(js_string(&json!(1e20)), "100000000000000000000");
+    }
+
+    // 配置单测的临时根目录；析构时清理，绝不触碰真实 data/。
+    struct Fixture(std::path::PathBuf);
+    impl Fixture {
+        fn new() -> Self {
+            let p = std::env::temp_dir().join(format!(
+                "qq-config-telegram-{}-{}",
+                std::process::id(),
+                rand::random::<u64>()
+            ));
+            std::fs::create_dir_all(&p).unwrap();
+            Self(p)
+        }
+        fn write(&self, name: &str, value: &Value) {
+            crate::settings::atomic_json(&self.0.join(name), value).unwrap();
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    fn loadable(extra: &Value) -> Value {
+        merge(
+            &defaults(),
+            &merge(
+                &json!({"apiKey":"","onebotToken":"","dataDir":"unused"}),
+                extra,
+            ),
+        )
+    }
+
+    #[test]
+    fn telegram_defaults_are_disabled_and_editable() {
+        let expected = json!({
+            "enabled": false,
+            "proxy": "",
+            "pollTimeoutSeconds": 20,
+            "requestTimeoutSeconds": 30,
+            "reconnectMaxSeconds": 60,
+            "allowedGroups": [],
+            "allowedUsers": []
+        });
+        assert_eq!(defaults()["telegram"], expected);
+        let schema = public_defaults().unwrap();
+        assert_eq!(schema["telegram"], expected);
+        assert!(schema.get("telegramToken").is_none());
+        let config = Config::from_value(&loadable(&json!({}))).unwrap();
+        assert!(!config.telegram.enabled);
+        assert_eq!(config.telegram.poll_timeout_seconds, 20.);
+        assert_eq!(config.telegram.request_timeout_seconds, 30.);
+        assert_eq!(config.telegram.reconnect_max_seconds, 60.);
+    }
+
+    #[test]
+    fn missing_telegram_section_falls_back_to_defaults() {
+        let mut c = loadable(&json!({}));
+        c.as_object_mut().unwrap().remove("telegram");
+        let config = Config::from_value(&c).unwrap();
+        assert!(!config.telegram.enabled);
+        assert_eq!(config.telegram, Telegram::default());
+    }
+
+    #[test]
+    fn telegram_validation_accepts_valid_values() {
+        for patch in [
+            json!({"telegram":{"enabled":true,"proxy":"http://127.0.0.1:8080","allowedGroups":["-1001234567890"],"allowedUsers":["123456789"]}}),
+            json!({"telegram":{"proxy":"","allowedGroups":[],"allowedUsers":[]}}),
+            json!({"telegram":{"proxy":"https://proxy.example.com:8443"}}),
+            // 数字 id 与 agent 白名单一样按 JS String() 归一化。
+            json!({"telegram":{"allowedGroups":[-1001234567890_i64],"allowedUsers":[5]}}),
+            json!({"telegram":{"pollTimeoutSeconds":1,"requestTimeoutSeconds":1,"reconnectMaxSeconds":1}}),
+            json!({"telegram":{"pollTimeoutSeconds":50,"requestTimeoutSeconds":300,"reconnectMaxSeconds":300}}),
+        ] {
+            let c = loadable(&patch);
+            validate(&c).unwrap_or_else(|e| panic!("{patch}: {e}"));
+            Config::from_value(&c).unwrap_or_else(|e| panic!("{patch}: {e}"));
+        }
+    }
+
+    #[test]
+    fn telegram_validation_rejects_invalid_values() {
+        let long_id = "9".repeat(21);
+        for patch in [
+            json!({"telegram":{"enabled":"yes"}}),
+            json!({"telegram":{"proxy":"ftp://example.com"}}),
+            json!({"telegram":{"proxy":"http://user:pass@example.com"}}),
+            json!({"telegram":{"proxy":"http://example.com/?key=secret"}}),
+            json!({"telegram":{"proxy":"http://example.com/#fragment"}}),
+            json!({"telegram":{"proxy":"not a url"}}),
+            json!({"telegram":{"allowedGroups":["abc"]}}),
+            json!({"telegram":{"allowedGroups":["1.5"]}}),
+            json!({"telegram":{"allowedGroups":[""]}}),
+            json!({"telegram":{"allowedGroups":[" "]}}),
+            json!({"telegram":{"allowedGroups":[long_id]}}),
+            // 白名单必须是数组，标量/null 不隐式包装。
+            json!({"telegram":{"allowedGroups":"-100"}}),
+            json!({"telegram":{"allowedGroups":null}}),
+            json!({"telegram":{"allowedUsers":"5"}}),
+            // 用户 id 不允许负数。
+            json!({"telegram":{"allowedUsers":["-1"]}}),
+            json!({"telegram":{"allowedUsers":["1-2"]}}),
+            json!({"telegram":{"allowedUsers":[""]}}),
+            json!({"telegram":{"pollTimeoutSeconds":0}}),
+            json!({"telegram":{"pollTimeoutSeconds":51}}),
+            json!({"telegram":{"requestTimeoutSeconds":0}}),
+            json!({"telegram":{"requestTimeoutSeconds":301}}),
+            json!({"telegram":{"reconnectMaxSeconds":0}}),
+            json!({"telegram":{"reconnectMaxSeconds":301}}),
+            json!({"telegram":false}),
+        ] {
+            let c = loadable(&patch);
+            assert!(validate(&c).is_err(), "{patch}");
+            assert!(Config::from_value(&c).is_err(), "{patch}");
+        }
+    }
+
+    #[test]
+    fn telegram_allowlists_flatten_only_when_enabled_with_token() {
+        let base = json!({
+            "agent":{"allowedGroups":["10"],"allowedUsers":["20"]},
+            "telegram":{"allowedGroups":["-100","10"],"allowedUsers":["123456789","20"]}
+        });
+        // enabled=false：白名单非空也不并入 agent，保持纯 QQ 行为。
+        let config = Config::from_value(&loadable(&base)).unwrap();
+        assert_eq!(config.agent.allowed_groups, vec!["10"]);
+        assert_eq!(config.agent.allowed_users, vec!["20"]);
+        // enabled=true 但缺 token：与 Gateways 不构造 Telegram 后端一致，不合并。
+        let mut no_token = base.clone();
+        no_token["telegram"]["enabled"] = json!(true);
+        let config = Config::from_value(&loadable(&no_token)).unwrap();
+        assert_eq!(config.agent.allowed_groups, vec!["10"]);
+        assert_eq!(config.agent.allowed_users, vec!["20"]);
+        // enabled=true + token：合并（去重，agent 原有 id 优先保留）。
+        let mut enabled = base.clone();
+        enabled["telegram"]["enabled"] = json!(true);
+        let mut input = loadable(&enabled);
+        input["telegramToken"] = json!("TEST:TOKEN");
+        let config = Config::from_value(&input).unwrap();
+        assert_eq!(config.agent.allowed_groups, vec!["10", "-100"]);
+        assert_eq!(config.agent.allowed_users, vec!["20", "123456789"]);
+        // 分段视图不被合并写回：Loaded.raw 仍需独立展示 Telegram 面板。
+        let segmented = normalize(&input).unwrap();
+        assert_eq!(segmented["agent"]["allowedGroups"], json!(["10"]));
+        assert_eq!(
+            segmented["telegram"]["allowedGroups"],
+            json!(["-100", "10"])
+        );
+    }
+
+    #[test]
+    fn readiness_is_satisfied_by_telegram_allowlists_alone() {
+        let c = loadable(&json!({
+            "apiKey":"key",
+            "provider":{"model":"mock"},
+            "telegram":{"enabled":true,"allowedGroups":["-100"],"allowedUsers":["5"]},
+            "telegramToken":"TEST:TOKEN"
+        }));
+        let config = Config::from_value(&c).unwrap();
+        assert!(config.agent.allowed_groups.contains(&"-100".to_string()));
+        assert!(config.agent.allowed_users.contains(&"5".to_string()));
+        assert!(readiness(&config).is_empty(), "{:?}", readiness(&config));
+    }
+
+    #[test]
+    fn disabled_telegram_allowlists_do_not_satisfy_readiness() {
+        // 未启用 Telegram 时其白名单不应被算作已选 chat（否则服务会在无对话目标时启动）。
+        let c = loadable(&json!({
+            "apiKey":"key",
+            "provider":{"model":"mock"},
+            "telegram":{"enabled":false,"allowedGroups":["-100"],"allowedUsers":["5"]}
+        }));
+        let config = Config::from_value(&c).unwrap();
+        assert!(readiness(&config).contains(&"selected chat IDs".to_string()));
+    }
+
+    #[test]
+    fn telegram_token_comes_from_secrets_and_env() {
+        let f = Fixture::new();
+        f.write("config.json", &json!({}));
+        f.write(
+            "secrets.json",
+            &json!({"apiKey":"a","telegramToken":"file-token"}),
+        );
+        let loaded = load_with_env(&f.0, |_| None).unwrap();
+        assert_eq!(loaded.config.telegram_token.text, "file-token");
+        assert_eq!(loaded.raw["telegramToken"], json!("file-token"));
+        let loaded = load_with_env(&f.0, |k| {
+            (k == "TELEGRAM_BOT_TOKEN").then(|| "env-token".into())
+        })
+        .unwrap();
+        assert_eq!(loaded.config.telegram_token.text, "env-token");
+        // 空字符串环境变量不覆盖 secrets，与既有 apiKey/onebotToken 行为一致。
+        let loaded = load_with_env(&f.0, |_| Some(String::new())).unwrap();
+        assert_eq!(loaded.config.telegram_token.text, "file-token");
+    }
+
+    #[test]
+    fn summary_redacts_telegram_token() {
+        let config = Config::from_value(&loadable(&json!({
+            "apiKey":"k",
+            "onebotToken":"o",
+            "telegramToken":"secret-telegram-token"
+        })))
+        .unwrap();
+        let text = summary(&config).to_string();
+        assert!(!text.contains("secret-telegram-token"), "{text}");
+        assert_eq!(summary(&config)["telegramToken"], json!("[redacted]"));
+        let config = Config::from_value(&loadable(&json!({"apiKey":"k"}))).unwrap();
+        assert_eq!(summary(&config)["telegramToken"], json!(""));
     }
 }

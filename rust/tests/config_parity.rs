@@ -46,6 +46,10 @@ fn legacy_config(mut value: Value) -> Value {
     value["agent"].as_object_mut().unwrap().remove("ocr");
     value["agent"].as_object_mut().unwrap().remove("backfill");
     value["agent"]["observation"].as_object_mut().unwrap().remove("backlogDigest");
+    // Telegram 是 Rust 先行新增的网关段，JS 金标准尚未覆盖；分段保留在 config.json，
+    // 运行时并入 agent 白名单的处理由 config 单测覆盖。
+    value.as_object_mut().unwrap().remove("telegram");
+    value.as_object_mut().unwrap().remove("telegramToken");
     value
 }
 
@@ -292,6 +296,8 @@ fn cli_defaults_are_complete_editable_and_secret_free() {
         "/agent/emoji/learnFrequency",
         "/agent/emoji/faceOnly",
         "/agent/memory/partialEvidence",
+        "/telegram",
+        "/telegram/enabled",
     ] {
         assert!(schema.pointer(pointer).is_some(), "missing {pointer}");
     }

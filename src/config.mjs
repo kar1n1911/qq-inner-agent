@@ -8,6 +8,8 @@ export const defaults = {
     retries: 2, requestsPerHour: 120, anthropicAuth: 'x-api-key', workspaceId: '', thinking: null },
   onebot: { url: 'ws://127.0.0.1:3001/', selfId: '', heartbeatSeconds: 30,
     requestTimeoutSeconds: 12, reconnectMaxSeconds: 60, forwardEnabled: false },
+  telegram: { enabled: false, proxy: '', pollTimeoutSeconds: 20, requestTimeoutSeconds: 30,
+    reconnectMaxSeconds: 60, allowedGroups: [], allowedUsers: [] },
   agent: { name: 'Luma', persona: '你是 QQ 聊天中善于接话、抛出话题、带动轻松交流的 AI 伙伴。先接住对方的情绪和话头，再给出一个容易接下去的回应。可以分享贴合上下文的观察、轻巧联想、适度玩笑，或一个具体且低负担的问题；不要每句话都追问，也不要把闲聊变成客服答疑或长篇讲课。话题自然结束时，可以从共同兴趣或未完的话题轻轻开启新方向，但冷场不必硬救。气氛热闹时给别人空间，有人认真求助或表达难过时先认真回应。逐渐适应每个聊天的用语、节奏和兴趣，尊重明确反馈，不把一个人的偏好当成所有人的偏好。表达自然、有温度，不编造亲身经历，不冒充真人。', replyLanguage: 'auto',
     personality: { behavior: '先听懂当前话题，再决定接话、补充、提问或安静旁观。认真求助优先，不强行热场。', replyStyle: '自然、简洁、口语化，一次接住一个重点。避免客服式开场、机械复述、连续追问和过度比喻。', interests: [], variants: [], variantProbability: 0 },
     expression: { learn: true, useLearned: true, minConfidence: 0.8, maxPerReply: 2, maxEntries: 100, retentionDays: 90, reuseSeconds: 1800 },
@@ -91,6 +93,28 @@ export function validate(c) {
     if (!schemes.includes(u.protocol) || u.username || u.password || u.search || u.hash) throw Error(`${name}: invalid URL (no credentials/query/fragment)`);
     if (['http:', 'ws:'].includes(u.protocol) && !['127.0.0.1', 'localhost', '[::1]'].includes(u.hostname)) throw Error(`${name}: use TLS outside localhost`);
   }
+  // Telegram 网关与 Rust config.rs 的 Telegram 段保持同一语义（群 id 可负，代理可指向 localhost）。
+  if (c.telegram !== undefined) {
+    if (!c.telegram || typeof c.telegram !== 'object' || Array.isArray(c.telegram)) throw Error('Invalid telegram settings');
+    // 与 Rust `#[serde(default)]` 一致：缺失字段回退到默认值，旧配置可只写要改的键。
+    const t = { ...defaults.telegram, ...c.telegram };
+    c.telegram = t;
+    if (typeof t.enabled !== 'boolean') throw Error('Invalid telegram.enabled');
+    const proxy = String(t.proxy);
+    if (proxy.trim()) {
+      let u;
+      try { u = new URL(proxy); } catch { throw Error('telegram.proxy: invalid URL (no credentials/query/fragment)'); }
+      if (!['http:', 'https:'].includes(u.protocol) || !u.hostname || u.username || u.password || u.search || u.hash) throw Error('telegram.proxy: invalid URL (no credentials/query/fragment)');
+    }
+    for (const [key, pattern, label] of [['allowedGroups', /^-?\d{1,20}$/, 'group IDs'], ['allowedUsers', /^\d{1,20}$/, 'user IDs']]) {
+      if (t[key] !== undefined && (!Array.isArray(t[key]) || t[key].some(x => !pattern.test(String(x))))) throw Error(`telegram.${key}: expected ${label}`);
+      t[key] = (t[key] === undefined ? [] : t[key]).map(String);
+    }
+    for (const [key, min, max] of [['pollTimeoutSeconds', 1, 50], ['requestTimeoutSeconds', 1, 300], ['reconnectMaxSeconds', 1, 300]]) {
+      const value = t[key];
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) throw Error(`Invalid telegram.${key}: expected ${min}..${max}`);
+    }
+  }
   if (!['max_tokens', 'max_completion_tokens'].includes(c.provider.tokenParameter)) throw Error('Invalid tokenParameter');
   if (!['x-api-key', 'bearer'].includes(c.provider.anthropicAuth)) throw Error('Invalid anthropicAuth');
   if (![null, 'disabled'].includes(c.provider.thinking)) throw Error('thinking must be null or disabled');
@@ -143,6 +167,7 @@ export function loadConfig(root) {
     : process.env[c.provider.kind === 'openai' ? 'OPENAI_API_KEY' : 'ANTHROPIC_API_KEY'];
   c.apiKey = process.env.LLM_API_KEY || vendorKey || s.apiKey || '';
   c.onebotToken = process.env.ONEBOT_TOKEN || s.onebotToken || '';
+  c.telegramToken = process.env.TELEGRAM_BOT_TOKEN || s.telegramToken || '';
   c.dataDir = path.resolve(root, c.storage.directory);
   return c;
 }
@@ -150,6 +175,9 @@ export function readiness(c) {
   const missing = [];
   if (!c.apiKey) missing.push('API key');
   if (!c.provider.model) missing.push('model');
-  if (!c.agent.allowedGroups.length && !c.agent.allowedUsers.length) missing.push('selected chat IDs');
+  // 与 Rust 的网关扁平化一致：Telegram 白名单计入已选聊天，任一侧有配置即算就绪。
+  const hasChats = c.agent.allowedGroups.length || c.agent.allowedUsers.length
+    || c.telegram?.allowedGroups?.length || c.telegram?.allowedUsers?.length;
+  if (!hasChats) missing.push('selected chat IDs');
   return missing;
 }

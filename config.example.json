@@ -13,7 +13,8 @@
     "requestsPerHour": 120,
     "anthropicAuth": "x-api-key",
     "workspaceId": "",
-    "thinking": "disabled"
+    "thinking": "disabled",
+    "headers": {}
   },
   "onebot": {
     "url": "ws://127.0.0.1:3001/",
@@ -21,6 +22,15 @@
     "heartbeatSeconds": 30,
     "requestTimeoutSeconds": 12,
     "reconnectMaxSeconds": 60
+  },
+  "telegram": {
+    "enabled": false,
+    "proxy": "",
+    "pollTimeoutSeconds": 20,
+    "requestTimeoutSeconds": 30,
+    "reconnectMaxSeconds": 60,
+    "allowedGroups": [],
+    "allowedUsers": []
   },
   "agent": {
     "name": "Luma",
