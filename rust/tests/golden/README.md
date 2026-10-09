@@ -14,6 +14,7 @@ policy 使用序列化 payload 为键的 map，明确断言四个键（含 activ
 - policy：4 组完整矩阵（时区、本地分钟、安静时段、活跃时段、词项、相似度）。
 - prompts：1 组，所有常量、规则组合、语言变体逐字比较。
   本次为有意调整人味：精确更新 formation / evaluation 及其规则组合中的对应 expected 文本，未重新捕获其他套件。本次范围另含 formation 的互动风格学习与 skip 口径、learnedStyle 的通用口语、orientation 的参与取向、articulation 的 bubbles 契约和合计长度要求，并同步这些常量在规则组合及语言变体中的引用。C4 补充：涉及本机器人自身的记忆用“我”记录，其他机器人或服务保持第三人称，不改变 verdict 与来源要求；仅精确更新 formation 及其规则组合中的对应 expected 文本。
+  本次（2026-10-09）仅更新 formation 的 C4 自我指涉判据与 evaluation 的无信息增量评分口径：C4 以 @ 自己的 QQ、同话题自己参与、称呼命中自己名片/昵称、明确自身属性四项任一命中判定第一人称，同时保留其他 bot、指代不明的反例及原 verdict/sourceIds 要求；evaluation 明确不要求建议、信息增量、结论或“有用”，不得因此压低 motivation/relevance/originality，information_gap/expected_impact 仅作可选参考。精确替换这两个常量及各 20 个规则组合，共 42 处 expected 字符串；其他 expected、输入、语言变体及其他套件均未改动，未重新捕获金标准。
 - sending：1 组、1920 个参数组合，概率和所有因子按 IEEE-754 位精确比较。
 - activity：1 组、183 个输入组合，保留原来的 exp 绝对误差规则。
 - provider：3 组，端点、模型列表端点、JSON 解析及错误码。
