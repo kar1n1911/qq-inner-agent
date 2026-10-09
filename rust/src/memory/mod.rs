@@ -1,5 +1,6 @@
 //! 三层记忆。连接由 Store 统一拥有，不创建新 schema、不读取真实 data/。
 pub mod ranking;
+pub mod sharing;
 pub mod text;
 pub mod memory_unicode;
 
@@ -554,6 +555,21 @@ impl<'a> LayeredMemory<'a> {
         settings: &Memory,
         query: &str,
     ) -> Result<Vec<Value>> {
+        let expression = serde_json::from_value(crate::config::defaults()["agent"]["expression"].clone())?;
+        self.context_with_expression(chat, sender, now, settings, query, &expression)
+    }
+    /// The engine supplies its expression policy so both sharing directions use
+    /// the same live candidate pool, including mixed memory/expression pairs.
+    #[allow(clippy::too_many_arguments)]
+    pub fn context_with_expression(
+        &self,
+        chat: &str,
+        sender: &str,
+        now: f64,
+        settings: &Memory,
+        query: &str,
+        expression: &crate::config::Expression,
+    ) -> Result<Vec<Value>> {
         let subjects = memory_subjects(chat, sender)?;
         let mut out: Vec<_> = subjects
             .iter()
@@ -600,6 +616,16 @@ impl<'a> LayeredMemory<'a> {
             }
             target.push(r);
             used += size;
+        }
+        let shared = sharing::recall(self.store, chat, now, settings, expression, false)?;
+        for row in shared {
+            let source = row["sourceChat"].clone();
+            let index = out.iter().position(|s| s["sourceChat"] == source).unwrap_or_else(|| {
+                out.push(json!({"subject":"group","sourceChat":source,"long_term":[],"traits":[]}));
+                out.len() - 1
+            });
+            let layer = text(&row, "layer").to_owned();
+            out[index][layer].as_array_mut().unwrap().push(row);
         }
         Ok(out)
     }

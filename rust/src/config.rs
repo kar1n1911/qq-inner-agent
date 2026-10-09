@@ -404,6 +404,9 @@ pub fn validate(c: &Value) -> std::result::Result<(), ConfigError> {
         a["memory"].is_object() || a["memory"].is_array(),
         "Invalid memory settings",
     )?;
+    if let Some(v) = a["memory"].get("crossGroupDisabled") {
+        check(v.is_boolean(), "Invalid memory.crossGroupDisabled")?;
+    }
     if let Some(n) = a["memory"].get("partialEvidence") {
         check(
             number(n, 1., 100., true),
@@ -768,6 +771,9 @@ fn is_default_partial_evidence(n: &usize) -> bool {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Memory {
+    /// Global §15 opt-out; omitted by default for JS configuration parity.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cross_group_disabled: bool,
     /// Independent new evidence required after a partial baseline (Rust only).
     #[serde(
         default = "default_partial_evidence",
@@ -1111,6 +1117,7 @@ pub fn public_defaults() -> Result<Value> {
     schema["agent"]["emoji"]["learnFrequency"] = json!(config.agent.emoji.learn_frequency);
     schema["agent"]["emoji"]["faceOnly"] = json!(config.agent.emoji.face_only);
     schema["agent"]["memory"]["partialEvidence"] = json!(config.agent.memory.partial_evidence);
+    schema["agent"]["memory"]["crossGroupDisabled"] = json!(false);
     Ok(schema)
 }
 

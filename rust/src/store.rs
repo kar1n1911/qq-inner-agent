@@ -5,6 +5,7 @@ use serde_json::{json, Map, Value};
 use std::path::Path;
 
 pub struct Store {
+    pub(crate) group_sharing: std::cell::RefCell<crate::memory::sharing::Cache>,
     db: Connection,
     pub(crate) ocr_enabled: std::cell::Cell<bool>,
     // 所有 LayeredMemory 视图共享计数，learn/reset 不会使入站容量索引失效。
@@ -24,6 +25,7 @@ impl Store {
         db.execute_batch(include_str!("store/schema.sql"))?;
         let store = Self {
             db,
+            group_sharing: Default::default(),
             ocr_enabled: Default::default(),
             memory_pending: Default::default(),
             memory_last_maintenance: Default::default(),
