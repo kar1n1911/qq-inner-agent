@@ -270,7 +270,15 @@ pub fn sending_probability_with_affect(
             1. + 0.2 * behavior.mood.clamp(-1., 1.)
         },
         affinity: 1. + 0.2 * behavior.affinity.clamp(-1., 1.),
-        disposition: behavior.disposition.map_or(1., |d| d.motivation()),
+        disposition: behavior.disposition.map_or(1., |d| {
+            let motivation = d.motivation();
+            if timing.proactive {
+                motivation
+            } else {
+                // 被点名或私聊时保留情绪增益，但不因情绪压制回应。
+                motivation.max(1.)
+            }
+        }),
     };
     gate.probability =
         (gate.probability * factors.mood * factors.affinity * factors.disposition).clamp(0., 1.);

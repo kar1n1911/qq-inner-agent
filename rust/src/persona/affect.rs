@@ -21,8 +21,21 @@ pub enum Disposition {
     Scrutinizing,
     Supportive,
 }
-/// 零归入正轴；二维坐标独立，agreement 不参与四象限。
+// 情绪值域目前只有 ±0.01 量级，用符号决定象限等于用噪声决定要不要说话。
+const DISPOSITION_DEAD_ZONE: f64 = 0.05;
+
+/// 死区内坐标先归零，零归入正轴；二维坐标独立，agreement 不参与四象限。
 pub fn disposition(valence: f64, rationality: f64) -> Disposition {
+    let valence = if valence.abs() < DISPOSITION_DEAD_ZONE {
+        0.
+    } else {
+        valence
+    };
+    let rationality = if rationality.abs() < DISPOSITION_DEAD_ZONE {
+        0.
+    } else {
+        rationality
+    };
     match (valence < 0., rationality < 0.) {
         (true, true) => Disposition::Angry,
         (true, false) => Disposition::Withdrawn,
@@ -34,7 +47,7 @@ impl Disposition {
     pub fn motivation(self) -> f64 {
         match self {
             Self::Angry => 1.4,
-            Self::Withdrawn => 0.2,
+            Self::Withdrawn => 0.5,
             Self::Scrutinizing => 0.7,
             Self::Supportive => 1.2,
         }

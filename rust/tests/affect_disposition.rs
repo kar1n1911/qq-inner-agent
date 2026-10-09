@@ -1,5 +1,32 @@
 mod affect_support;
 use qq_inner_core::persona::affect::{self, disposition, Disposition::*};
+
+#[test]
+fn dead_zone_neutralizes_each_coordinate_independently() {
+    for valence in [-0.049, -0.01, -0.002614, 0., 0.01, 0.049] {
+        for rationality in [-0.049, -0.01, 0., 0.000829, 0.01, 0.049] {
+            assert_eq!(disposition(valence, rationality), Scrutinizing);
+        }
+    }
+    assert_eq!(disposition(-0.2, 0.01), Withdrawn);
+    assert_eq!(disposition(-0.2, -0.01), Withdrawn);
+    assert_eq!(disposition(-0.01, -0.2), Supportive);
+    assert_eq!(disposition(-0.2, -0.2), Angry);
+    // Only magnitudes strictly below the threshold are neutralized.
+    assert_eq!(disposition(-0.05, -0.05), Angry);
+    assert_eq!(disposition(-0.05, 0.05), Withdrawn);
+    assert_eq!(disposition(0.05, -0.05), Supportive);
+    assert_eq!(disposition(0.05, 0.05), Scrutinizing);
+}
+
+#[test]
+fn motivation_preserves_gains_and_softens_withdrawal() {
+    assert_eq!(Withdrawn.motivation(), 0.5);
+    assert_eq!(Angry.motivation(), 1.4);
+    assert_eq!(Scrutinizing.motivation(), 0.7);
+    assert_eq!(Supportive.motivation(), 1.2);
+}
+
 #[test]
 fn quadrants_and_circuit() {
     assert_eq!(disposition(-1., -1.), Angry);

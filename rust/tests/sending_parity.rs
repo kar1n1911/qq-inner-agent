@@ -285,7 +285,7 @@ fn affect_disabled_is_identical_and_enabled_factors_change_probability() {
         (Disposition::Angry, 1.4),
         (Disposition::Supportive, 1.2),
         (Disposition::Scrutinizing, 0.7),
-        (Disposition::Withdrawn, 0.2),
+        (Disposition::Withdrawn, 0.5),
     ] {
         let b = Behavior {
             mood: -0.8,
@@ -316,4 +316,49 @@ fn affect_disabled_is_identical_and_enabled_factors_change_probability() {
         sending_probability_with_affect(&settings(), &t, &f, true, &positive).probability
             > base.probability
     );
+}
+
+#[test]
+fn addressed_disposition_has_a_floor_without_changing_other_affect_factors_or_vetoes() {
+    use qq_inner_core::{
+        engine::sending::sending_probability_with_affect,
+        persona::affect::{Behavior, Disposition},
+    };
+    let mut settings = settings();
+    settings.addressed_probability = 0.5; // Keep gains visible below the probability cap.
+    let t = timing(false, 1., 1., 1., 1.);
+    for (disposition, expected) in [
+        (Some(Disposition::Angry), 1.4),
+        (Some(Disposition::Supportive), 1.2),
+        (Some(Disposition::Scrutinizing), 1.),
+        (Some(Disposition::Withdrawn), 1.),
+        (None, 1.),
+    ] {
+        let behavior = Behavior {
+            mood: -0.5,
+            affinity: -0.5,
+            disposition,
+            burst: false,
+        };
+        let f = forecast(true, 0.1, ResponseMode::Answer);
+        let got = sending_probability_with_affect(&settings, &t, &f, true, &behavior);
+        let factors = got.factors.affect.unwrap();
+        assert!(factors.disposition >= 1.);
+        assert_eq!(factors.disposition, expected);
+        assert_eq!(factors.mood, if disposition.is_some() { 1. } else { 0.9 });
+        assert_eq!(factors.affinity, 0.9);
+        assert_eq!(got.probability, 0.5 * factors.mood * 0.9 * expected);
+        assert_eq!(
+            sending_probability_with_affect(&settings, &t, &f, false, &behavior),
+            sending_probability(&settings, &t, &f)
+        );
+        for vetoed in [
+            forecast(false, 0.1, ResponseMode::Wait),
+            forecast(true, 0.7, ResponseMode::Answer),
+        ] {
+            let got = sending_probability_with_affect(&settings, &t, &vetoed, true, &behavior);
+            assert!(got.veto.is_some());
+            assert_eq!(got.probability, 0.);
+        }
+    }
 }
