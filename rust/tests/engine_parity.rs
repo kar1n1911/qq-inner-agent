@@ -2455,13 +2455,13 @@ async fn relay_links_enter_formation_only_after_review_and_local_dedup() {
         assert_eq!(e.last_error(), None, "{mode}");
         let inputs = h.model_inputs.lock().unwrap();
         let audit = inputs.iter().find(|(stage, _)| stage == "RELAY");
-        assert_eq!(audit.is_some(), matches!(mode, "keep" | "drop" | "audit_error" | "concurrent_duplicate" | "high_risk_enabled"), "{mode}");
+        assert_eq!(audit.is_some(), matches!(mode, "keep" | "drop" | "one_author" | "audit_error" | "concurrent_duplicate" | "high_risk_enabled"), "{mode}");
         if let Some((_, payload)) = audit { assert_eq!(payload, &json!({"links":[URL]})); }
         if mode == "disabled" { assert!(inputs.is_empty()); }
         let formed = inputs.iter().find(|(stage, _)| stage == "FORM");
         let topics = formed.map(|(_, payload)| &payload["externalTopics"]);
-        assert_eq!(topics.is_some_and(|v| v.is_array()), matches!(mode, "keep" | "high_risk_enabled"), "{mode}");
-        if matches!(mode, "keep" | "high_risk_enabled") {
+        assert_eq!(topics.is_some_and(|v| v.is_array()), matches!(mode, "keep" | "one_author" | "high_risk_enabled"), "{mode}");
+        if matches!(mode, "keep" | "one_author" | "high_risk_enabled") {
             let topics = topics.unwrap();
             assert_eq!(topics[0]["item"]["url"], URL);
             assert_eq!(topics[0]["source"], URL);

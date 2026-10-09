@@ -121,7 +121,8 @@ pub fn collect(
                 self_review: SelfReview::Pending,
                 group_level: true,
             };
-            if super::independent_evidence(&origin) && seen.insert(url) {
+            // 低风险链接只要求"真实存在的证据正文包含该 URL";多作者独立证据只用于高风险升档。
+            if !origin.evidence.is_empty() && seen.insert(url) {
                 out.push(origin);
             }
         }
@@ -248,8 +249,9 @@ mod tests {
         }
     }
     #[test]
-    fn requires_real_independent_messages_in_one_other_allowed_group() {
+    fn accepts_a_single_real_message_but_never_unproved_links() {
         let db = Store::in_memory().unwrap();
+        // 低风险链接:一条真实消息即可(不再要求两位作者)。
         message(
             &db,
             "group:11",
@@ -259,47 +261,26 @@ mod tests {
             99900.,
             false,
         );
-        assert!(candidates(&db).is_empty());
+        assert_eq!(candidates(&db).len(), 1);
+        // 正文不含该 URL 的消息不能充当证据。
         message(
             &db,
             "group:11",
-            "b",
-            "20",
-            &format!("read {URL}"),
-            99901.,
-            false,
-        );
-        assert!(candidates(&db).is_empty());
-        message(
-            &db,
-            "group:11",
-            "b",
-            "21",
-            &format!("look {URL}"),
-            99901.,
-            false,
-        );
-        assert!(candidates(&db).is_empty());
-        message(
-            &db,
-            "group:11",
-            "b",
+            "c",
             "21",
             "different link https://example.org/other",
-            99901.,
+            99902.,
             false,
         );
-        assert!(candidates(&db).is_empty());
-        seed(&db);
+        // 另一个 URL 自成候选;但它不能充当上面那条链接的证据。
         let origins = candidates(&db);
-        assert_eq!(origins.len(), 1);
-        let o = &origins[0];
+        assert_eq!(origins.len(), 2);
+        let o = origins.iter().find(|o| o.source == URL).expect("url candidate");
         assert_eq!(o.kind, OriginKind::Link);
         assert_eq!(o.source_chat.as_deref(), Some("group:11"));
-        assert_eq!(o.source, URL);
         assert!(o.group_level);
         assert_eq!(o.self_review, SelfReview::Pending);
-        assert_eq!(o.evidence.len(), 2);
+        assert_eq!(o.evidence.len(), 1);
     }
     #[test]
     fn excludes_private_current_disallowed_old_bot_and_forwarded_messages() {
@@ -380,7 +361,7 @@ mod tests {
         assert_eq!(kept[0].source, URL);
         let mut unproved = candidates(&db).remove(0);
         unproved.self_review = SelfReview::Keep;
-        unproved.evidence.pop();
+        unproved.evidence.clear();
         assert!(super::super::decide(&cfg(), &unproved, &interests, &[]).is_none());
         let mut wrong_link = candidates(&db).remove(0);
         wrong_link.self_review = SelfReview::Keep;

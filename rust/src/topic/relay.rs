@@ -203,10 +203,11 @@ pub fn decide(
         (_, Some(chat)) if chat.starts_with("group:") && chat.len() > 6 => {}
         _ => return None,
     }
-    // A link's provenance must prove this exact URL, not merely two unrelated messages.
+    // A link's provenance must prove this exact URL. 低风险链接只要证据非空即可;
+    // 多作者独立证据(independent_evidence)只保留给高风险升档,见上方 classify。
     if origin.kind == OriginKind::Link
         && (origin.source != origin.item.url
-            || !independent_evidence(origin)
+            || origin.evidence.is_empty()
             || origin.evidence.iter().any(|e| !links::extract(&e.text).contains(&origin.source)))
     {
         return None;
