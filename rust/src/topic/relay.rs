@@ -262,7 +262,7 @@ mod tests {
             ..Default::default()
         }
     }
-    fn interests() -> BTreeSet<String> {
+    fn interests() -> topic::Interests {
         topic::interests("esp32", &[])
     }
     fn origin(kind: OriginKind) -> Origin {
