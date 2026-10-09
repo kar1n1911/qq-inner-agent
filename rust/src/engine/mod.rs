@@ -82,6 +82,18 @@ impl OrientationTransport for OrientationAdapter {
     fn self_id(&self) -> String {
         self.0.self_id()
     }
+    fn event_self_id(&self, event: &Value) -> String {
+        self.0.event_self_id(event)
+    }
+    fn chat_self_id(&self, chat: &str) -> String {
+        self.0.chat_self_id(chat)
+    }
+    fn can_fetch_history(&self, group_id: &str) -> bool {
+        self.0.can_fetch_history(group_id)
+    }
+    fn history_available(&self) -> bool {
+        self.0.history_available()
+    }
     fn call<'a>(&'a self, action: &'a str, params: Value) -> BoxFuture<'a, Result<Value>> {
         self.0.call(action, params)
     }
@@ -91,6 +103,15 @@ struct IdentityAdapter<'a>(&'a Engine);
 impl OrientationTransport for IdentityAdapter<'_> {
     fn self_id(&self) -> String {
         self.0.transport.self_id()
+    }
+    fn chat_self_id(&self, chat: &str) -> String {
+        self.0.transport.chat_self_id(chat)
+    }
+    fn can_fetch_history(&self, group_id: &str) -> bool {
+        self.0.transport.can_fetch_history(group_id)
+    }
+    fn history_available(&self) -> bool {
+        self.0.transport.history_available()
     }
     fn call<'a>(&'a self, action: &'a str, params: Value) -> BoxFuture<'a, Result<Value>> {
         Box::pin(async move {
@@ -386,12 +407,12 @@ impl Engine {
         let mut core = self.core();
         let a = &self.config.agent;
         let now = self.now();
-        let self_id = self.transport.self_id();
+        let event_self_id = self.transport.event_self_id(event);
         if (a.observation.enabled || a.identity.enabled)
             && event["post_type"] == "notice"
             && event["notice_type"] == "group_increase"
-            && (event["self_id"].is_null() || js_string(&event["self_id"]) == self_id)
-            && js_string(&event["user_id"]) == self_id
+            && (event["self_id"].is_null() || js_string(&event["self_id"]) == event_self_id)
+            && js_string(&event["user_id"]) == event_self_id
             && a.allowed_groups.contains(&js_string(&event["group_id"]))
         {
             let chat = format!("group:{}", js_string(&event["group_id"]));
@@ -410,9 +431,9 @@ impl Engine {
         }
         // 感知与值班解耦：离岗仍记录、观察和学习，是否发言由回复路径检查。
         let message = if backfill {
-            policy::normalize_backfill(event, &self_id, a, now)
+            policy::normalize_backfill(event, &event_self_id, a, now)
         } else {
-            policy::normalize(event, &self_id, a, now)
+            policy::normalize(event, &event_self_id, a, now)
         };
         let Some(mut m) = message else {
             return Ok(());
@@ -497,7 +518,7 @@ impl Engine {
             crate::persona::humanize::capture(&*self.db()?, &m.chat, &m.id, event)?;
         }
         if let Some(collector) = &self.collector {
-            let report = collector.ingest(&*self.db()?, event, &self_id, a, now)?;
+            let report = collector.ingest(&*self.db()?, event, &event_self_id, a, now)?;
             for code in report.failures {
                 (self.options.log)("media_collect_failed", json!({"code":code}));
             }
@@ -638,7 +659,7 @@ impl Engine {
                     .map(js_string)
                     .unwrap_or(delivery);
                 let now = self.now();
-                db.message(&json!({"chat":chat,"id":id,"sender":self.transport.self_id(),"name":a.name.text,"text":"","ts":now,"self":true}))?;
+                db.message(&json!({"chat":chat,"id":id,"sender":self.transport.chat_self_id(chat),"name":a.name.text,"text":"","ts":now,"self":true}))?;
                 db.execute(
                     "INSERT OR IGNORE INTO media_pending VALUES(?,?,?,?,?,?,?,?)",
                     rusqlite::params![
@@ -1007,7 +1028,7 @@ impl Engine {
                 json!({"group_id":group_id,"no_cache":true}),
             )
             .await?;
-        let samples = crate::persona::nickname_samples(&members, &self.transport.self_id())?;
+        let samples = crate::persona::nickname_samples(&members, &self.transport.chat_self_id(chat))?;
         let response = self
             .model(
                 crate::persona::NAME_PROMPT,
@@ -1943,7 +1964,7 @@ impl Engine {
                 } else {
                     js_string(&sent["message_id"])
                 };
-                db.message(&json!({"chat":chat,"id":id,"sender":self.transport.self_id(),"name":a.name.text,"text":content,"ts":self.now(),"self":true}))?;
+                db.message(&json!({"chat":chat,"id":id,"sender":self.transport.chat_self_id(chat),"name":a.name.text,"text":content,"ts":self.now(),"self":true}))?;
                 self.record_decision(
                     &db,
                     chat,

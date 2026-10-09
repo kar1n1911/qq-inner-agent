@@ -121,11 +121,33 @@ pub fn observation_satisfied(row: &OrientationRow, now: f64, config: &Observatio
 /// 可注入边界；真实 OneBot 与 provider 使用已有实现，测试无需外网。
 pub trait OrientationTransport: Send + Sync {
     fn self_id(&self) -> String;
+    /// 事件所属后端的身份；默认与 `self_id()` 相同，保证 OneBot 行为不变。
+    /// Gateways 用它判断事件来自哪个网关。
+    fn event_self_id(&self, _event: &Value) -> String {
+        self.self_id()
+    }
+    /// chat 所属后端的身份；默认与 `self_id()` 相同，保证 OneBot 行为不变。
+    fn chat_self_id(&self, _chat: &str) -> String {
+        self.self_id()
+    }
+    /// 指定群是否具备历史回填/采集能力。Telegram Bot API 不提供群历史，返回 false；
+    /// 默认 true 保持 OneBot 与测试传输的既有路径。
+    fn can_fetch_history(&self, _group_id: &str) -> bool {
+        true
+    }
+    /// 历史回填依赖的后端是否在线。默认 true，避免无状态注入的测试传输被误判离线；
+    /// OneBot 用自身连接状态，Gateways 用 OneBot 后端状态。
+    fn history_available(&self) -> bool {
+        true
+    }
     fn call<'a>(&'a self, action: &'a str, params: Value) -> BoxFuture<'a, Result<Value>>;
 }
 impl OrientationTransport for OneBot {
     fn self_id(&self) -> String {
         self.state().self_id
+    }
+    fn history_available(&self) -> bool {
+        self.state().connected
     }
     fn call<'a>(&'a self, action: &'a str, params: Value) -> BoxFuture<'a, Result<Value>> {
         Box::pin(async move { Ok(OneBot::call(self, action, params).await?) })
@@ -270,7 +292,7 @@ impl GroupOrientation {
                         &value,
                         group_id,
                         c,
-                        &self.transport.self_id(),
+                        &self.transport.chat_self_id(chat),
                         &self.agent.ignored_users,
                     ),
                     Err(e) => Err(e),

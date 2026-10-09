@@ -9,7 +9,11 @@ impl Engine {
         }
         let mut abort = self.aborted.subscribe();
         for group in &self.config.agent.allowed_groups {
-            if *abort.borrow() || !self.transport.state().connected {
+            // Telegram 群没有 get_group_msg_history；跳过而不是每轮产生 backfill_failed。
+            if !self.transport.can_fetch_history(group) {
+                continue;
+            }
+            if *abort.borrow() || !self.transport.history_available() {
                 return;
             }
             let result = tokio::select! {
@@ -40,7 +44,7 @@ impl Engine {
                 }
             };
             for mut event in messages {
-                if *abort.borrow() || !self.transport.state().connected {
+                if *abort.borrow() || !self.transport.history_available() {
                     return;
                 }
                 if !event.is_object() {
@@ -49,7 +53,7 @@ impl Engine {
                 event["post_type"] = json!("message");
                 event["message_type"] = json!("group");
                 event["group_id"] = json!(group);
-                event["self_id"] = json!(self.transport.self_id());
+                event["self_id"] = json!(self.transport.chat_self_id(&format!("group:{group}")));
                 let event = tokio::select! {
                     biased;
                     _ = abort.changed() => return,

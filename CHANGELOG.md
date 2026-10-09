@@ -2,6 +2,20 @@
 
 本文件按语义化版本记录 qq-inner-agent 的发布。当前版本见 `package.json` 与 `rust/Cargo.toml`。
 
+## 未发布
+
+日期:2026-10-09
+
+### 新功能
+
+- 新增 Telegram Bot 网关支持：与 OneBot 平级，两个网关可同时启用并共用同一引擎与 SQLite 记忆；未启用 Telegram 时 QQ 路径行为不变。
+
+### 降级与非目标
+
+- Telegram 不发送富媒体（`send_media` 返回 `telegram_media_unsupported`）。
+- Bot API 不提供的能力标记为不可用：群消息历史、群成员列表、合并转发解析（观察期仅 live，公告以置顶消息替代）。
+- 不实现 webhook 与交互式 UI（inline keyboard/callback），无 QQ face 等价物。
+
 ## 1.0.0 —— Rust 内核正式交付
 
 日期:2026-10-05

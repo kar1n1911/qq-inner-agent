@@ -22,6 +22,15 @@
     "requestTimeoutSeconds": 12,
     "reconnectMaxSeconds": 60
   },
+  "telegram": {
+    "enabled": false,
+    "proxy": "",
+    "pollTimeoutSeconds": 20,
+    "requestTimeoutSeconds": 30,
+    "reconnectMaxSeconds": 60,
+    "allowedGroups": [],
+    "allowedUsers": []
+  },
   "agent": {
     "ocr": {
       "enabled": false,

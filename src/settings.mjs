@@ -43,7 +43,7 @@ export function publicSettings(root) {
     return Object.fromEntries(Object.keys(shape).map(k => [k, shape[k] && typeof shape[k] === 'object' && !Array.isArray(shape[k]) && value[k] !== null ? pick(value[k], shape[k]) : value[k]]));
   }
   const secrets = readJson(path.join(root, 'secrets.json'));
-  return { config: pick(config, shape), revision: revision(root), hasApiKey: !!secrets.apiKey, hasOnebotToken: !!secrets.onebotToken };
+  return { config: pick(config, shape), revision: revision(root), hasApiKey: !!secrets.apiKey, hasOnebotToken: !!secrets.onebotToken, hasTelegramToken: !!secrets.telegramToken };
 }
 export function recoverSettings(root) {
   const journal = path.join(root, '.settings-write');
@@ -64,11 +64,12 @@ export function saveSettings(root, payload) {
   if (typeof config.provider.model !== 'string' || config.provider.model.length > 200) throw Error('Invalid model');
   const secrets = readJson(path.join(root, 'secrets.json'));
   if (new URL(config.provider.baseUrl).host !== new URL(old.config.provider.baseUrl).host && secrets.apiKey && !payload.apiKey && !payload.clearApiKey) throw Error('Enter a key for the new provider, or clear the saved key, before changing provider host.');
-  for (const k of ['apiKey', 'onebotToken']) {
+  for (const k of ['apiKey', 'onebotToken', 'telegramToken']) {
     if (payload[k] != null && (typeof payload[k] !== 'string' || payload[k].length > 8192 || /[\r\n]/.test(payload[k]))) throw Error(`Invalid ${k}`);
     if (payload[k]?.trim()) secrets[k] = payload[k].trim();
   }
   if (payload.clearApiKey === true) delete secrets.apiKey;
+  if (payload.clearTelegramToken === true) delete secrets.telegramToken;
   const lock = path.join(root, '.settings-write');
   atomicJson(lock, { config: readJson(path.join(root, 'config.json')), secrets: readJson(path.join(root, 'secrets.json')) });
   try { atomicJson(path.join(root, 'secrets.json'), secrets); atomicJson(path.join(root, 'config.json'), config); }

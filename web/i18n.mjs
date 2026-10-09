@@ -255,6 +255,25 @@ Load available models|加载可用模型
 Available models|可用模型
 Choose a model…|请选择模型…
 QQ CONNECTION|QQ 连接
+GATEWAYS|网关
+Social gateways|社交网关
+Connect the QQ / OneBot and Telegram gateways and choose which chats the agent participates in. Changes are saved with Save & apply.|连接 QQ / OneBot 与 Telegram 网关，并选择机器人参与哪些聊天。修改后点击“保存并应用”生效。
+Telegram connection|Telegram 连接
+TELEGRAM CONNECTION|Telegram 连接
+Telegram Bot|Telegram 机器人
+Connect a Telegram Bot API bot by long polling. For full group observation, disable privacy mode in BotFather (/setprivacy → Disable) or make the bot a group administrator. Requires outbound HTTPS; set a proxy when api.telegram.org is unreachable.|通过长轮询连接 Telegram Bot API 机器人。若需完整观察群消息，请在 BotFather 中关闭隐私模式（/setprivacy → Disable）或将机器人设为群管理员。需要能访问 HTTPS；无法直连 api.telegram.org 时请设置代理。
+Enable Telegram gateway|启用 Telegram 网关
+Proxy URL|代理地址
+Poll timeout (seconds)|轮询超时（秒）
+Request timeout (seconds)|请求超时（秒）
+Reconnect max (seconds)|最大重连间隔（秒）
+Enabled Telegram groups|启用的 Telegram 群组
+Enabled Telegram users|启用的 Telegram 用户
+Telegram bot token|Telegram 机器人令牌
+Remove the saved Telegram token on save|保存时删除已保存的 Telegram 令牌
+Waiting for Telegram|等待 Telegram 连接
+Comma-separated group IDs (negative for supergroups)|多个群组 ID 以逗号分隔（超级群为负数）
+Comma-separated user IDs|多个用户 ID 以逗号分隔
 Connect to a OneBot v11 WebSocket server. In NapCat, enable a WebSocket server in Network configuration with message format array. Save before loading contacts.|连接 OneBot v11 正向 WebSocket 服务。在 NapCat 的网络配置中启用 WebSocket 服务端，并选择 array 消息格式。请先保存，再加载联系人。
 OneBot WebSocket URL|OneBot WebSocket 地址
 QQ account ID|QQ 账号

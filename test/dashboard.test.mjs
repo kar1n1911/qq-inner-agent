@@ -5,8 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { once } from 'node:events';
-import { defaults } from '../src/config.mjs';
-import { publicSettings, saveSettings, recoverSettings, atomicJson } from '../src/settings.mjs';
+import { defaults, merge, validate } from '../src/config.mjs';
+import { publicSettings, saveSettings, recoverSettings, atomicJson, knownConfig } from '../src/settings.mjs';
 import { createDashboard } from '../src/dashboard.mjs';
 import { Store } from '../src/store.mjs';
 
@@ -75,14 +75,60 @@ test('HTTP dashboard authentication, CSRF, validated save, redaction and fixed s
     assert.equal((await request('/api/service', { method: 'POST', headers, body: '{"action":"restart; arbitrary shell"}' })).status, 400);
     assert.equal((await request('/api/service', { method: 'POST', headers, body: '{"action":"restart"}' })).status, 200);
     assert.deepEqual(actions, ['restart']);
+    fs.writeFileSync(path.join(root, 'data/status.json'), JSON.stringify({ updatedAt: new Date().toISOString(), telegramConnected: true, telegramOnline: true, telegramSelfId: '123456789', telegramUsername: 'example_bot', telegramLastError: '' }) + '\n');
     fs.writeFileSync(path.join(root, 'data/agent.log'), JSON.stringify({ time: new Date().toISOString(), event: 'accidental', info: 'model-secret qq-secret' }) + '\n');
     const state = await (await request('/api/state', { headers })).text();
     assert.ok(!state.includes('model-secret')); assert.ok(state.includes('[redacted]'));
+    // Telegram 状态字段必须从 status.json 原样透传，不被裁剪。
+    const stateJson = JSON.parse(state);
+    assert.equal(stateJson.status.telegramConnected, true);
+    assert.equal(stateJson.status.telegramOnline, true);
+    assert.equal(stateJson.status.telegramSelfId, '123456789');
+    assert.equal(stateJson.status.telegramUsername, 'example_bot');
+    assert.equal(stateJson.status.telegramLastError, '');
     await request('/api/logout', { method: 'POST', headers, body: '{}' });
     assert.equal((await request('/api/config', { headers })).status, 401);
   } finally { server.closeAllConnections(); await new Promise(r => server.close(r)); fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+
+test('telegram configuration validates gateway IDs, proxy and token handling', () => {
+  const root = fixture();
+  try {
+    // 与 rust/src/defaults.json 的 telegram 段逐字段一致。
+    assert.deepEqual(defaults.telegram, { enabled: false, proxy: '', pollTimeoutSeconds: 20, requestTimeoutSeconds: 30, reconnectMaxSeconds: 60, allowedGroups: [], allowedUsers: [] });
+    const s = publicSettings(root);
+    assert.equal(s.hasTelegramToken, false);
+    const c = structuredClone(s.config);
+    // 群 id 可负（超级群），数字元素按 String() 归一化。
+    c.telegram = { ...c.telegram, enabled: true, proxy: 'http://127.0.0.1:8080', allowedGroups: [-1001234567890, '10'], allowedUsers: [123456789] };
+    const saved = saveSettings(root, { revision: s.revision, config: c, telegramToken: 'bot-secret' });
+    assert.equal(saved.hasTelegramToken, true);
+    assert.deepEqual(saved.config.telegram.allowedGroups, ['-1001234567890', '10']);
+    assert.deepEqual(saved.config.telegram.allowedUsers, ['123456789']);
+    assert.ok(!JSON.stringify(saved).includes('bot-secret'));
+    const cleared = saveSettings(root, { revision: saved.revision, config: saved.config, clearTelegramToken: true });
+    assert.equal(cleared.hasTelegramToken, false);
+    for (const bad of [
+      { enabled: 'yes' },
+      { proxy: 'ftp://example.com' },
+      { proxy: 'http://user:pass@example.com' },
+      { proxy: 'http://example.com/?key=secret' },
+      { proxy: 'http://example.com/#fragment' },
+      { allowedGroups: ['abc'] },
+      { allowedGroups: 'secret' },
+      { allowedGroups: null },
+      { allowedUsers: ['-1'] },
+      { pollTimeoutSeconds: 51 },
+      { requestTimeoutSeconds: 0 },
+      { reconnectMaxSeconds: 301 },
+    ]) {
+      const invalid = structuredClone(cleared.config);
+      invalid.telegram = { ...invalid.telegram, ...bad };
+      assert.throws(() => saveSettings(root, { revision: cleared.revision, config: invalid }), /telegram/);
+    }
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
 
 test('interrupted two-file settings save rolls back before dashboard startup', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-settings-recover-'));

@@ -70,7 +70,7 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
     }
     const data = { status, decisions, thoughts, assessments, learning, memories, observations, expressions, logs, savedRevision: publicSettings(root).revision };
     let text = JSON.stringify(data);
-    for (const secret of [c.apiKey, c.onebotToken, key].filter(Boolean)) text = text.split(secret).join('[redacted]');
+    for (const secret of [c.apiKey, c.onebotToken, c.telegramToken, key].filter(Boolean)) text = text.split(secret).join('[redacted]');
     return JSON.parse(text);
   }
   async function snapshot() {
@@ -94,7 +94,7 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
     const lines = results[2].status === 'fulfilled' && results[2].value?.lines;
     if (Array.isArray(lines)) data.logs = lines.map(line => { try { return JSON.parse(line); } catch { return null; } }).filter(Boolean);
     let text = JSON.stringify(data);
-    for (const secret of [c.apiKey, c.onebotToken, key].filter(Boolean)) text = text.split(secret).join('[redacted]');
+    for (const secret of [c.apiKey, c.onebotToken, c.telegramToken, key].filter(Boolean)) text = text.split(secret).join('[redacted]');
     return JSON.parse(text);
   }
   async function receiveStatus() {
@@ -198,7 +198,7 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
       if (url.pathname === '/api/state' && req.method === 'GET') { json(res, 200, { ...await snapshot(), serviceState: await serviceStatus() }); return; }
       if (url.pathname === '/api/learning/reset' && req.method === 'POST') {
         const input = await body(req);
-        if (typeof input.chat !== 'string' || !/^(group|private):[1-9]\d{0,19}$/.test(input.chat)) throw fail(400, 'Invalid chat');
+        if (typeof input.chat !== 'string' || !/^(?:group:-?[1-9]\d{0,19}|private:[1-9]\d{0,19})$/.test(input.chat)) throw fail(400, 'Invalid chat');
         if (input.subject !== undefined && !(input.subject === 'group' && input.chat.startsWith('group:')) &&
             !(typeof input.subject === 'string' && /^person:[1-9]\d{0,19}$/.test(input.subject) &&
               (input.chat.startsWith('group:') || input.subject.slice(7) === input.chat.slice(8)))) throw fail(400, 'Invalid memory subject');
@@ -232,11 +232,23 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
         return;
       }
       if (url.pathname === '/api/contacts' && req.method === 'GET') {
+        const c = loadConfig(root);
+        // 给每条联系人打上网关标记，前端可把 Telegram 条目写回 telegram.* 而不是 QQ 白名单。
+        // 负数群 id 只可能来自 Telegram，即便尚未配置白名单也归入 Telegram 以避免写入 QQ 白名单。
+        const tag = (list, telegramIds, signed) => (Array.isArray(list) ? list : []).map(item => ({ ...item, gateway: telegramIds.has(String(item.id)) || (signed && String(item.id).startsWith('-')) ? 'telegram' : 'qq' }));
+        const telegramGroupIds = new Set((c.telegram?.allowedGroups || []).map(String));
+        const telegramUserIds = new Set((c.telegram?.allowedUsers || []).map(String));
         if (control.available) {
-          try { json(res, 200, await control.request('contacts.list', {}, { timeoutMs: 30000 })); return; }
-          catch { /* 只读联系人查询可安全回退到原连接。 */ }
+          try {
+            const data = await control.request('contacts.list', {}, { timeoutMs: 30000 });
+            json(res, 200, { groups: tag(data.groups, telegramGroupIds, true), friends: tag(data.friends, telegramUserIds, false) });
+            return;
+          } catch { /* 只读联系人查询可安全回退到原连接。 */ }
         }
-        const c = loadConfig(root), bot = new OneBot(c.onebot, c.onebotToken), stop = new AbortController();
+        // Telegram 白名单在 QQ 不可用时也能列出，避免 Telegram-only 部署收到 503。
+        const telegramGroups = (c.telegram?.allowedGroups || []).map(id => ({ id: String(id), name: '', gateway: 'telegram' }));
+        const telegramFriends = (c.telegram?.allowedUsers || []).map(id => ({ id: String(id), name: '', gateway: 'telegram' }));
+        const bot = new OneBot(c.onebot, c.onebotToken), stop = new AbortController();
         let timer;
         const ready = new Promise((resolve, reject) => {
           bot.on('status', s => { if (s === 'connected') resolve(); });
@@ -246,7 +258,13 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
         try {
           await ready;
           const groups = await bot.call('get_group_list', {}), friends = await bot.call('get_friend_list', {});
-          json(res, 200, { groups: (groups || []).map(x => ({ id: String(x.group_id), name: x.group_name })), friends: (friends || []).map(x => ({ id: String(x.user_id), name: x.nickname })) });
+          json(res, 200, {
+            groups: [...(groups || []).map(x => ({ id: String(x.group_id), name: x.group_name, gateway: 'qq' })), ...telegramGroups],
+            friends: [...(friends || []).map(x => ({ id: String(x.user_id), name: x.nickname, gateway: 'qq' })), ...telegramFriends],
+          });
+        } catch (e) {
+          if (!telegramGroups.length && !telegramFriends.length) throw e;
+          json(res, 200, { groups: telegramGroups, friends: telegramFriends });
         } finally { clearTimeout(timer); stop.abort(); await running; }
         return;
       }

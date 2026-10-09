@@ -7,7 +7,8 @@
 //! 无换行的 EOF 不执行请求。输出也限制为 1 MiB；过大事件丢弃，响应返回错误。
 use crate::{
     config::{self, Config},
-    transport::OneBot,
+    engine::EngineTransport,
+    transport::gateway::Gateways,
     transport::provider::Provider,
     store::Store,
 };
@@ -270,16 +271,32 @@ async fn dispatch(handler: &dyn Handler, line: &[u8]) -> Value {
 /// 网络边界可注入，行为测试不访问真实 QQ 或模型服务。
 pub trait Remote: Send + Sync {
     fn state(&self) -> crate::transport::State;
+    /// (OneBot self_id, Telegram self_id)；默认只有 OneBot，保持既有诊断语义。
+    fn capture_identity(&self) -> (String, String) {
+        (self.state().self_id, String::new())
+    }
     fn request<'a>(&'a self, method: &'a str) -> BoxFuture<'a, Result<Value>>;
 }
 pub struct LiveRemote {
-    pub bot: Arc<OneBot>,
+    pub gateways: Arc<Gateways>,
     pub provider: Arc<Provider>,
     pub config: Config,
 }
 impl Remote for LiveRemote {
     fn state(&self) -> crate::transport::State {
-        self.bot.state()
+        self.gateways.state()
+    }
+    fn capture_identity(&self) -> (String, String) {
+        (
+            self.gateways
+                .onebot_state()
+                .map(|state| state.self_id)
+                .unwrap_or_default(),
+            self.gateways
+                .telegram_state()
+                .map(|state| state.self_id)
+                .unwrap_or_default(),
+        )
     }
     fn request<'a>(&'a self, method: &'a str) -> BoxFuture<'a, Result<Value>> {
         Box::pin(async move {
@@ -303,22 +320,75 @@ impl Remote for LiveRemote {
                         json!({"ok":true,"latencyMs":start.elapsed().as_millis(),"model":self.config.provider.model.text}),
                     )
                 }
+                // OneBot 在线时保持既有群/好友契约；只有 Telegram 时回退到配置白名单+
+                // 本次运行见过的 chat，避免 QQ 未部署导致合并失败。
                 "contacts.list" => {
-                    let groups = self.bot.call("get_group_list", json!({})).await?;
-                    let friends = self.bot.call("get_friend_list", json!({})).await?;
-                    let map = |v: Value, id: &str, name: &str| -> Vec<Value> {
-                        v.as_array()
-                            .into_iter()
-                            .flatten()
-                            .map(|r| json!({"id":config::js_string(&r[id]),"name":r[name]}))
-                            .collect()
-                    };
-                    Ok(
-                        json!({"groups":map(groups,"group_id","group_name"),"friends":map(friends,"user_id","nickname")}),
-                    )
+                    let mut groups: Vec<Value> = Vec::new();
+                    let mut friends: Vec<Value> = Vec::new();
+                    if let Some(bot) = self.gateways.onebot() {
+                        if bot.state().connected || self.gateways.telegram().is_none() {
+                            let map = |v: Value, id: &str, name: &str| -> Vec<Value> {
+                                v.as_array()
+                                    .into_iter()
+                                    .flatten()
+                                    .map(|r| {
+                                        json!({"id":config::js_string(&r[id]),"name":r[name]})
+                                    })
+                                    .collect()
+                            };
+                            groups.extend(map(
+                                bot.call("get_group_list", json!({})).await?,
+                                "group_id",
+                                "group_name",
+                            ));
+                            friends.extend(map(
+                                bot.call("get_friend_list", json!({})).await?,
+                                "user_id",
+                                "nickname",
+                            ));
+                        }
+                    }
+                    if self.gateways.telegram().is_some() {
+                        for id in &self.config.telegram.allowed_groups {
+                            if !groups.iter().any(|g| config::js_string(&g["id"]) == *id) {
+                                groups.push(json!({"id":id,"name":""}));
+                            }
+                        }
+                        for id in &self.config.telegram.allowed_users {
+                            if !friends.iter().any(|f| config::js_string(&f["id"]) == *id) {
+                                friends.push(json!({"id":id,"name":""}));
+                            }
+                        }
+                        for seen in self.gateways.seen_chats() {
+                            let name = if seen.title.is_empty() {
+                                seen.nickname.clone()
+                            } else {
+                                seen.title.clone()
+                            };
+                            let entry = json!({"id":seen.id,"name":name});
+                            match seen.kind.as_str() {
+                                "group"
+                                    if !groups
+                                        .iter()
+                                        .any(|g| config::js_string(&g["id"]) == seen.id) =>
+                                {
+                                    groups.push(entry)
+                                }
+                                "private"
+                                    if !friends
+                                        .iter()
+                                        .any(|f| config::js_string(&f["id"]) == seen.id) =>
+                                {
+                                    friends.push(entry)
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    Ok(json!({"groups":groups,"friends":friends}))
                 }
                 "debug.send" => {
-                    let state = self.bot.state();
+                    let state = self.gateways.state();
                     ensure!(
                         state.connected && state.online && !state.self_id.is_empty(),
                         "qq_offline"
@@ -328,9 +398,26 @@ impl Remote for LiveRemote {
                         "[QQ Inner Agent diagnostic {}] Self-account send test.",
                         rand::random::<u64>()
                     );
+                    if let Some(bot) = self.gateways.onebot() {
+                        let onebot = bot.state();
+                        if onebot.connected && onebot.online && !onebot.self_id.is_empty() {
+                            let result = self
+                                .gateways
+                                .send(&format!("private:{}", onebot.self_id), &text, None)
+                                .await?;
+                            return Ok(json!({"ok":true,"messageId":result["message_id"]}));
+                        }
+                    }
+                    // OneBot 不可用时改为向首个 Telegram 白名单用户发诊断私聊。
+                    let user = self
+                        .config
+                        .telegram
+                        .allowed_users
+                        .first()
+                        .ok_or_else(|| anyhow::anyhow!("telegram_offline"))?;
                     let result = self
-                        .bot
-                        .send(&format!("private:{}", state.self_id), &text, None)
+                        .gateways
+                        .send(&format!("private:{user}"), &text, None)
                         .await?;
                     Ok(json!({"ok":true,"messageId":result["message_id"]}))
                 }
@@ -343,6 +430,7 @@ impl Remote for LiveRemote {
 struct Capture {
     until: i64,
     account: String,
+    telegram_id: String,
     events: Vec<Value>,
 }
 pub struct Backend {
@@ -374,7 +462,7 @@ impl Backend {
         *self.secrets.lock().unwrap() = secrets;
         self.capture.lock().unwrap().until = 0;
     }
-    pub fn observe(&self, event: &Value) {
+    pub fn observe(&self, event: &Value, gateway: &str) {
         let mut capture = self.capture.lock().unwrap();
         if capture.until <= chrono::Utc::now().timestamp_millis()
             || !matches!(
@@ -382,9 +470,18 @@ impl Backend {
                 Some("message" | "message_sent")
             )
             || !matches!(event["message_type"].as_str(), Some("private" | "group"))
-            || config::js_string(&event["self_id"]) != capture.account
-            || config::js_string(&event["user_id"]) != capture.account
         {
+            return;
+        }
+        // OneBot 维持自发自收匹配；Telegram 捕获非 bot 发送的入站消息。
+        let matched = if gateway == "telegram" {
+            !capture.telegram_id.is_empty()
+                && config::js_string(&event["user_id"]) != capture.telegram_id
+        } else {
+            config::js_string(&event["self_id"]) == capture.account
+                && config::js_string(&event["user_id"]) == capture.account
+        };
+        if !matched {
             return;
         }
         let mut types = Vec::new();
@@ -451,6 +548,14 @@ fn valid_id(id: &str) -> bool {
         && !id.starts_with('0')
         && id.bytes().all(|b| b.is_ascii_digit())
 }
+/// 群 id 允许为负（Telegram 超级群），私聊仍用 `valid_id` 强制正数。
+fn valid_group_id(id: &str) -> bool {
+    let digits = id.strip_prefix('-').unwrap_or(id);
+    !digits.is_empty()
+        && digits.len() <= 20
+        && !digits.starts_with('0')
+        && digits.bytes().all(|b| b.is_ascii_digit())
+}
 impl Handler for Backend {
     fn request<'a>(&'a self, method: &'a str, params: Value) -> BoxFuture<'a, Result<Value>> {
         Box::pin(async move {
@@ -464,14 +569,18 @@ impl Handler for Backend {
                     remote.request(method).await
                 }
                 "debug.receive.start" => {
-                    let state = self.remote.lock().unwrap().state();
+                    let remote = self.remote.lock().unwrap();
+                    let state = remote.state();
                     ensure!(state.connected && state.online, "qq_offline");
+                    let (account, telegram_id) = remote.capture_identity();
+                    drop(remote);
                     let mut c = self.capture.lock().unwrap();
                     let now = chrono::Utc::now().timestamp_millis();
                     ensure!(c.until <= now, "receive_test_already_running");
                     *c = Capture {
                         until: now + 60_000,
-                        account: state.self_id,
+                        account,
+                        telegram_id,
                         events: Vec::new(),
                     };
                     Ok(json!({"listening":true,"until":c.until}))
@@ -526,10 +635,12 @@ fn local(dir: &Path, store: &Mutex<Store>, method: &str, params: &Value) -> Resu
         "learning.reset" => {
             let chat = params["chat"].as_str().unwrap_or("");
             let (kind, id) = chat.split_once(':').unwrap_or(("", ""));
-            ensure!(
-                matches!(kind, "group" | "private") && valid_id(id),
-                "invalid_params"
-            );
+            let valid_chat = match kind {
+                "group" => valid_group_id(id),
+                "private" => valid_id(id),
+                _ => false,
+            };
+            ensure!(valid_chat, "invalid_params");
             let subject = params
                 .get("subject")
                 .map(|v| v.as_str().ok_or_else(|| anyhow::anyhow!("invalid_params")))
@@ -852,6 +963,9 @@ mod tests {
                 reconnects: 0,
             }
         }
+        fn capture_identity(&self) -> (String, String) {
+            ("42".into(), "77".into())
+        }
         fn request<'a>(&'a self, method: &'a str) -> BoxFuture<'a, Result<Value>> {
             Box::pin(async move {
                 Ok(match method {
@@ -938,6 +1052,12 @@ mod tests {
             .await["result"],
             json!({"ok":true})
         );
+        // Telegram 超级群为负数；群 id 允许负号，私聊仍必须为正。
+        assert_eq!(
+            c.call("reset-group", "learning.reset", json!({"chat":"group:-100"}))
+                .await["result"],
+            json!({"ok":true})
+        );
         assert_eq!(
             c.call("count", "state.get", json!({})).await["result"]["learningCounts"],
             json!({"memories":0,"expressions":1})
@@ -980,9 +1100,9 @@ mod tests {
             c.call("again", "debug.receive.start", json!({})).await["error"]["code"],
             "receive_test_already_running"
         );
-        backend.observe(&json!({"self_id":42,"user_id":99,"post_type":"message","message_type":"private","message":"not self"}));
+        backend.observe(&json!({"self_id":42,"user_id":99,"post_type":"message","message_type":"private","message":"not self"}), "onebot");
         for i in 0..35 {
-            backend.observe(&json!({"self_id":42,"user_id":42,"post_type":"message","message_type":"private","message_id":i,"message":[{"type":"text","data":{"text":"secret hello"}},{"type":"image","data":{"url":"private"}}]}));
+            backend.observe(&json!({"self_id":42,"user_id":42,"post_type":"message","message_type":"private","message_id":i,"message":[{"type":"text","data":{"text":"secret hello"}},{"type":"image","data":{"url":"private"}}]}), "onebot");
         }
         let captured = c.call("capture", "debug.receive.status", json!({})).await;
         let captured = captured["result"]["events"].as_array().unwrap();
@@ -998,6 +1118,23 @@ mod tests {
             c.call("stopped", "debug.receive.status", json!({})).await["result"]["listening"],
             false
         );
+        // Telegram 捕获：非 bot 入站消息进入；bot 自发与 OneBot 自收不自发都不受干扰。
+        assert_eq!(
+            c.call("start-tg", "debug.receive.start", json!({})).await["result"]["listening"],
+            true
+        );
+        backend.observe(&json!({"self_id":"77","user_id":"77","post_type":"message","message_type":"private","message_id":1,"message":[{"type":"text","data":{"text":"bot self"}}]}), "telegram");
+        backend.observe(&json!({"self_id":"77","user_id":"99","post_type":"message","message_type":"private","message_id":2,"message":[{"type":"text","data":{"text":"from user"}}]}), "telegram");
+        backend.observe(&json!({"self_id":"42","user_id":"42","post_type":"message","message_type":"private","message_id":3,"message":[{"type":"text","data":{"text":"onebot self"}}]}), "onebot");
+        let captured = c.call("capture-tg", "debug.receive.status", json!({})).await;
+        let captured = captured["result"]["events"].as_array().unwrap();
+        // Telegram 入站 + OneBot 自发自收各自按所属网关规则命中；Telegram 自发被忽略。
+        assert_eq!(captured.len(), 2);
+        assert_eq!(captured[0]["messageId"], "2");
+        assert_eq!(captured[0]["text"], "from user");
+        assert_eq!(captured[1]["messageId"], "3");
+        assert_eq!(captured[1]["text"], "onebot self");
+        let _ = c.call("stop-tg", "debug.receive.stop", json!({})).await;
         backend.replace(Arc::new(OfflineRemote), vec![]);
         assert!(!dir.0.join("config.json").exists());
         assert!(!dir.0.join("secrets.json").exists());

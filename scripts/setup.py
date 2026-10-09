@@ -5,6 +5,7 @@ import getpass
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -28,6 +29,15 @@ def ids(label, current):
         if all(x.isdigit() and int(x) > 0 for x in values):
             return list(dict.fromkeys(values))
         print('Please enter numeric QQ IDs.')
+
+def telegram_ids(label, current, signed=False):
+    pattern = re.compile(r'^-?\d{1,20}$' if signed else r'^\d{1,20}$')
+    while True:
+        value = ask(label + ' (comma-separated IDs; - clears)', ','.join(current))
+        values = [] if value == '-' else [x.strip() for x in value.split(',') if x.strip()]
+        if all(pattern.fullmatch(x) for x in values):
+            return list(dict.fromkeys(values))
+        print('Please enter Telegram numeric IDs' + (' (groups may be negative).' if signed else '.'))
 
 def main():
     os.umask(0o077)
@@ -70,6 +80,18 @@ def main():
     a['aliases'] = [a['name']]
     a['persona'] = ask('Persona / conversational purpose', a.get('persona', 'A helpful, concise AI participant.'))
     a['dryRun'] = ask('Preview decisions without sending messages? yes / no', 'no').lower() == 'yes'
+    # 可跳过的 Telegram 段；关闭时不碰已有 token/白名单。
+    t = config.setdefault('telegram', {})
+    print('Telegram (optional): a second gateway alongside QQ, using a Bot API token from @BotFather.')
+    enabled = ask('Enable Telegram gateway? yes / no', 'yes' if t.get('enabled') else 'no').lower() == 'yes'
+    t['enabled'] = enabled
+    if enabled:
+        value = getpass.getpass('Telegram bot token (hidden; Enter keeps existing; - clears): ').strip()
+        if value == '-': secrets.pop('telegramToken', None)
+        elif value: secrets['telegramToken'] = value
+        t['proxy'] = ask('Telegram HTTP(S) proxy (blank for direct; e.g. http://127.0.0.1:8080)', t.get('proxy', ''))
+        t['allowedGroups'] = telegram_ids('Enabled Telegram group IDs', t.get('allowedGroups', []), signed=True)
+        t['allowedUsers'] = telegram_ids('Enabled Telegram user IDs', t.get('allowedUsers', []))
     # Validate using the exact runtime validator before replacing the working config.
     node = str(ROOT / '.runtime/node') if (ROOT / '.runtime/node').exists() else 'node'
     check = subprocess.run([node, '--input-type=module', '-e',
@@ -80,12 +102,12 @@ def main():
     write_private(spath, secrets)
     print('Saved config.json and secrets.json (owner-only).')
     if not secrets.get('apiKey'): print('Waiting for an API key. You can rerun setup.')
-    if not a['allowedGroups'] and not a['allowedUsers']: print('No chats selected: no conversation will be sent to the model or QQ.')
+    if not a['allowedGroups'] and not a['allowedUsers'] and not t.get('allowedGroups', []) and not t.get('allowedUsers', []): print('No chats selected: no conversation will be sent to the model or QQ/Telegram.')
     service = Path.home() / '.config/systemd/user/qq-inner-agent.service'
     if service.exists():
         subprocess.run(['systemctl', '--user', 'restart', 'qq-inner-agent.service'], check=True)
         print('Background service restarted. Run ./agent status or ./agent logs.')
-    else: print('Next: ./agent check --api, then ./agent install-service')
+    else: print('Next: ./agent check, then ./agent install-service')
 
 if __name__ == '__main__':
     try: main()
