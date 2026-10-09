@@ -20,7 +20,7 @@ impl Identity {
     pub fn payload(&self, fallback: &str) -> Value {
         json!({"qq":self.qq,"nickname":self.nickname,"groupCard":self.card,
             "visibleName":self.visible_name(fallback),
-            "instructions":"群友讨论的那个机器人就是你,不要以第三方身份谈论自己"})
+            "instructions":format!("只有证据明确指向你时，群友讨论的那个机器人或 bot 才是你。判据包括：①消息里 @ 了你的 QQ（[@{}]）；②同一话题下有你自己发出的消息；③称呼命中你的群名片或昵称；④内容明确指向你的自身属性。群里可能有其他 bot；仅出现“机器人/bot”字样，或称呼可能指别人时，不等于你，不要以第一人称谈论别人的事。确认指向你时，不要以第三方身份谈论自己。", self.qq)})
     }
 }
 #[derive(Default)]

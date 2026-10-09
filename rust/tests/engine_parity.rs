@@ -2277,10 +2277,12 @@ async fn backfill_ingests_expired_history_without_replying() {
 async fn visible_self_identity_is_cached_scoped_and_injected() {
     for (member, expected) in [
         (
-            json!({"card":"群里的卡琳","nickname":"Kar1n1911"}),
-            "群里的卡琳",
+            json!({"card":"丹德莱","nickname":"Kar1n1911"}),
+            "丹德莱",
         ),
         (json!({"card":"","nickname":"Kar1n1911"}), "Kar1n1911"),
+        (json!({"card":"   ","nickname":"Kar1n1911"}), "Kar1n1911"),
+        (json!({"card":"","nickname":""}), "Kar1n1911"),
         (Value::Null, "Kar1n1911"),
     ] {
         let (e, h) = setup(&base(
@@ -2321,12 +2323,24 @@ async fn visible_self_identity_is_cached_scoped_and_injected() {
         assert_eq!(payload["selfIdentity"]["nickname"], "Kar1n1911");
         assert_eq!(
             payload["selfIdentity"]["groupCard"],
-            member["card"].as_str().unwrap_or("")
+            member["card"].as_str().unwrap_or("").trim()
         );
-        assert_eq!(
-            payload["selfIdentity"]["instructions"],
-            "群友讨论的那个机器人就是你,不要以第三方身份谈论自己"
-        );
+        assert_eq!(payload["selfIdentity"]["visibleName"], expected);
+        let instructions = payload["selfIdentity"]["instructions"].as_str().unwrap();
+        for constraint in [
+            "只有证据明确指向你时",
+            "消息里 @ 了你的 QQ（[@99]）",
+            "同一话题下有你自己发出的消息",
+            "称呼命中你的群名片或昵称",
+            "内容明确指向你的自身属性",
+            "群里可能有其他 bot",
+            "仅出现“机器人/bot”字样",
+            "称呼可能指别人时，不等于你",
+            "不要以第一人称谈论别人的事",
+            "确认指向你时，不要以第三方身份谈论自己",
+        ] {
+            assert!(instructions.contains(constraint), "missing: {constraint}");
+        }
         assert_eq!(
             h.identity_reads.lock().unwrap().len(),
             3,
