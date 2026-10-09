@@ -25,6 +25,7 @@ struct Harness {
     engine: Mutex<Weak<Engine>>,
     transport: Mutex<State>,
     sends: Mutex<usize>,
+    targets: Mutex<Vec<Value>>,
     orientation_reads: Mutex<Vec<String>>,
     identity_reads: Mutex<Vec<(String, Value)>>,
     budget: f64,
@@ -115,6 +116,8 @@ impl EngineTransport for Harness {
         chat: &'a str,
         text: &'a str,
         face: Option<&'a str>,
+        reply_to: Option<&'a str>,
+        mention: Option<&'a str>,
     ) -> BoxFuture<'a, std::result::Result<Value, OneBotError>> {
         Box::pin(async move {
             {
@@ -130,6 +133,10 @@ impl EngineTransport for Harness {
                 assert_eq!(pending, 1, "发送必须已有 pending 投递记录");
                 assert_eq!(db.handled(chat).unwrap().unwrap()["pause_done"], 1);
             }
+            self.targets
+                .lock()
+                .unwrap()
+                .push(json!({"replyTo":reply_to,"mention":mention}));
             self.push(json!(["send", chat, text, face]));
             let n = {
                 let mut n = self.sends.lock().unwrap();
@@ -264,7 +271,15 @@ impl OrientationProvider for Harness {
                         payload["lengthTarget"].as_str(),
                         Some("tiny" | "short" | "medium" | "long")
                     ));
-                    json!({"text":m.get("reply").unwrap_or(&json!("可以先看看盆土是否已经干透。"))})
+                    {
+                        let mut response = json!({"text":m.get("reply").unwrap_or(&json!("可以先看看盆土是否已经干透。"))});
+                        for key in ["replyTo", "mention", "bubbles"] {
+                            if let Some(value) = m.get(key) {
+                                response[key] = value.clone();
+                            }
+                        }
+                        response
+                    }
                 }
                 "ORIENT" => json!({"style":"谨慎接话","summary":"园艺讨论","topics":["园艺"]}),
                 _ => panic!("unexpected stage"),
@@ -289,6 +304,7 @@ fn setup(case: &Value) -> (Arc<Engine>, Arc<Harness>) {
             reconnects: 0,
         }),
         sends: Mutex::new(0),
+        targets: Mutex::new(vec![]),
         orientation_reads: Mutex::new(Vec::new()),
         identity_reads: Mutex::new(Vec::new()),
         budget: case["budget"].as_f64().unwrap_or(1000.),
@@ -683,6 +699,14 @@ async fn scripted_conversations_match_real_js_decision_by_decision() {
             .as_array_mut()
             .unwrap()
             .retain(|entry| entry[0] != "log" || entry[1] != "decision");
+        // Target segments are a Rust-only extension, covered by precise_reply tests.
+        for entry in result["trace"].as_array_mut().unwrap() {
+            if entry[0] == "log"
+                && matches!(entry[1].as_str(), Some("message_sent" | "delivery_error"))
+            {
+                entry[2].as_object_mut().unwrap().remove("segments");
+            }
+        }
         actual.push(result);
     }
     // 固化金标准：完整阶段 trace 与落库结果，继续使用原 equivalent 的浮点规则。
@@ -2290,7 +2314,6 @@ async fn backfill_ingests_expired_history_without_replying() {
     e.stop().await;
 }
 
-
 #[tokio::test]
 async fn visible_self_identity_is_cached_scoped_and_injected() {
     for (member, expected) in [
@@ -2678,4 +2701,79 @@ async fn screen_throttles_blocked_ticks_and_logs_only_transitions() {
     *h.now.lock().unwrap() = start + 240.;
     e.tick().unwrap();
     assert_eq!(logs(), 2);
+}
+
+#[tokio::test]
+async fn precise_reply_keeps_addressed_message_when_later_open_message_arrives() {
+    let case = base("precise_reply", json!({}), vec![]);
+    let (e, h) = setup(&case);
+    e.ingest(&h.event(&json!({"id":"called","text":"[CQ:at,qq=99]帮忙看看"})))
+        .unwrap();
+    e.ingest(&h.event(&json!({"id":"later","text":"补充一句"})))
+        .unwrap();
+    e.tick().unwrap();
+    e.wait_idle().await;
+    assert_eq!(
+        *h.targets.lock().unwrap(),
+        vec![json!({"replyTo":"called","mention":null})]
+    );
+    let trace = h.trace.lock().unwrap();
+    let event = trace
+        .iter()
+        .find(|v| v[0] == "log" && v[1] == "message_sent")
+        .unwrap();
+    assert_eq!(
+        event[2]["segments"][0][0],
+        json!({"type":"reply","data":{"id":"called"}})
+    );
+}
+
+#[tokio::test]
+async fn precise_reply_engine_applies_gate_and_private_exclusion() {
+    for (private, addressed, draw, expected) in [
+        (false, false, 0., json!({"replyTo":"m1","mention":"20"})),
+        (false, false, 0.5, json!({"replyTo":null,"mention":null})),
+        (false, true, 0.5, json!({"replyTo":"m1","mention":"20"})),
+        (true, true, 0.5, json!({"replyTo":"m1","mention":null})),
+    ] {
+        let mut case = base("precise_reply", json!({}), vec![]);
+        case["expressionDraws"] = json!(vec![draw; 64]);
+        let (e, h) = setup(&case);
+        *h.model.lock().unwrap() = json!({"replyTo":"m1","mention":"20"});
+        let mut event = h.event(
+            &json!({"id":"m1","text":if addressed { "[CQ:at,qq=99]你好" } else { "盆栽怎么养" }}),
+        );
+        if private {
+            event["message_type"] = json!("private");
+        }
+        e.ingest(&event).unwrap();
+        *h.now.lock().unwrap() += 10.;
+        e.tick().unwrap();
+        e.wait_idle().await;
+        assert_eq!(
+            *h.targets.lock().unwrap(),
+            vec![expected],
+            "private={private}, addressed={addressed}, draw={draw}"
+        );
+        e.stop().await;
+    }
+}
+
+#[tokio::test]
+async fn precise_reply_only_targets_first_bubble() {
+    let case = base("precise_reply", json!({"multiBubble":true}), vec![]);
+    let (e, h) = setup(&case);
+    *h.model.lock().unwrap() =
+        json!({"replyTo":"forged","mention":"99","bubbles":["先看看土","干了再浇水"]});
+    e.ingest(&h.event(&json!({"id":"m1"}))).unwrap();
+    e.tick().unwrap();
+    e.wait_idle().await;
+    assert_eq!(
+        *h.targets.lock().unwrap(),
+        vec![
+            json!({"replyTo":"m1","mention":null}),
+            json!({"replyTo":null,"mention":null})
+        ]
+    );
+    e.stop().await;
 }

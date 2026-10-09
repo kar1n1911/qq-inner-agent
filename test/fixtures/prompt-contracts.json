@@ -9,7 +9,7 @@
     "{\"ratings\":[{\"id\":\"候选的原始 id\",\"motivation\":1.0,\"relevance\":1.0,\"originality\":1.0,\"for\":[\"relevance\"],\"against\":[\"balance\"]}]}"
   ],
   "articulation": [
-    "{\"text\":\"最终发送的消息\",\"emoji\":null,\"faceId\":null,\"bubbles\":[]}"
+    "{\"text\":\"最终发送的消息\",\"emoji\":null,\"faceId\":null,\"bubbles\":[],\"replyTo\":null,\"mention\":null}"
   ],
   "forecast": [
     "{\"shouldSend\":true,\"outcomes\":{\"reply\":0.5,\"silence\":0.4,\"negative\":0.1},\"responseMode\":\"answer|ask|acknowledge|wait\",\"plan\":\"一句简短行动计划：本次如何表达；若对方回应如何接续，若沉默则等待\"}"

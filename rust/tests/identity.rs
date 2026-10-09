@@ -118,6 +118,8 @@ impl EngineTransport for Mock {
         _: &'a str,
         _: &'a str,
         _: Option<&'a str>,
+        _reply_to: Option<&'a str>,
+        _mention: Option<&'a str>,
     ) -> BoxFuture<'a, std::result::Result<Value, OneBotError>> {
         Box::pin(async { Ok(json!({"message_id":1})) })
     }
