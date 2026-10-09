@@ -84,23 +84,44 @@ async fn main() -> Result<()> {
         Command::Check => {
             let c = config::load_config(&root)?.config;
             let token = if c.onebot_token.is_truthy {
-                c.onebot_token.text
+                c.onebot_token.text.clone()
             } else {
                 String::new()
             };
-            let (bot, _notices) = qq_inner_core::transport::OneBot::new(c.onebot, token);
-            match bot.check().await {
-                Ok(state) => {
-                    println!(
-                        "authentication = ok\nselfId = {}\nonline = {}",
-                        state.self_id, state.online
-                    );
-                    anyhow::ensure!(state.online, "qq_offline");
+            let (bot, _notices) = OneBot::new(c.onebot.clone(), token);
+            let onebot = bot.check().await;
+            match &onebot {
+                Ok(state) => println!(
+                    "authentication = ok\nselfId = {}\nonline = {}",
+                    state.self_id, state.online
+                ),
+                Err(_) => println!("authentication = failed\nonline = false"),
+            }
+            // Telegram 启用时额外做一次 getMe；两者可并存。OneBot 未部署不再让 check 失败。
+            if c.telegram.enabled {
+                let (telegram, _rx) = Telegram::new(
+                    c.telegram.clone(),
+                    c.telegram_token.text.clone(),
+                    c.data_dir.clone(),
+                );
+                match telegram.check().await {
+                    Ok(state) => {
+                        println!(
+                            "telegram = ok username={} selfId={}",
+                            state.username, state.self_id
+                        );
+                        return Ok(());
+                    }
+                    Err(error) => {
+                        println!("telegram = failed ({})", error.code);
+                        return Err(error.into());
+                    }
                 }
-                Err(e) => {
-                    println!("authentication = failed\nonline = false");
-                    return Err(e.into());
-                }
+            }
+            // 仅 OneBot：保持既有退出语义。
+            match onebot {
+                Ok(state) => anyhow::ensure!(state.online, "qq_offline"),
+                Err(error) => return Err(error.into()),
             }
         }
         Command::Config => {
@@ -147,7 +168,11 @@ use qq_inner_core::{
     engine::{Clock, Engine, Logger, Options},
     persona::expression::ExpressionMemory,
     memory::LayeredMemory,
-    transport::{Notification, OneBot},
+    transport::{
+        gateway::{GatewayNotice, Gateways},
+        telegram::Telegram,
+        Notification, OneBot,
+    },
     transport::provider::Provider,
     settings,
     store::Store,
@@ -218,8 +243,8 @@ struct Runtime {
     raw: Value,
     store: Arc<Mutex<Store>>,
     provider: Arc<Provider>,
-    bot: Arc<OneBot>,
-    notices: mpsc::UnboundedReceiver<Notification>,
+    gateways: Arc<Gateways>,
+    notices: mpsc::UnboundedReceiver<GatewayNotice>,
     engine: Arc<Engine>,
     connection: Option<JoinHandle<()>>,
     backfill: Option<JoinHandle<()>>,
@@ -239,7 +264,7 @@ impl Runtime {
         applied: String,
         now: Clock,
         log: Logger,
-        existing_bot: Option<Arc<OneBot>>,
+        existing: Option<Arc<Gateways>>,
     ) -> Result<Self> {
         let c = loaded.config;
         let provider = Arc::new(Provider::new(
@@ -247,13 +272,16 @@ impl Runtime {
             c.api_key.text.clone(),
             store.clone(),
         ));
-        let (bot, notices) = OneBot::new(c.onebot.clone(), c.onebot_token.text.clone());
-        let bot = existing_bot.unwrap_or_else(|| Arc::new(bot));
+        // 热重载不重连时复用同一个 Gateways，保持既有 QQ 连接不断开。
+        let (gateways, notices) = match existing {
+            Some(gateways) => Gateways::reuse(gateways),
+            None => Gateways::new(&c, c.data_dir.clone(), log.clone()),
+        };
         let engine = Engine::new_with_media(
             c.clone(),
             store.clone(),
             provider.clone(),
-            bot.clone(),
+            gateways.clone(),
             Options {
                 now: now.clone(),
                 log: log.clone(),
@@ -279,7 +307,7 @@ impl Runtime {
             raw: loaded.raw,
             store,
             provider,
-            bot,
+            gateways,
             notices,
             engine,
             connection: None,
@@ -294,16 +322,16 @@ impl Runtime {
         })
     }
     fn connect(&mut self) {
-        let bot = self.bot.clone();
+        let gateways = self.gateways.clone();
         let signal = self.abort.subscribe();
-        self.connection = Some(tokio::spawn(async move { bot.run(signal).await }));
+        self.connection = Some(tokio::spawn(async move { gateways.run(signal).await }));
     }
     fn schedule_backfill(&mut self, connected: bool) {
         if connected {
             self.next_backfill = Instant::now();
         }
         if !self.config.agent.backfill.enabled
-            || !self.bot.state().connected
+            || !self.gateways.onebot_connected()
             || *self.abort.borrow()
             || self.backfill.as_ref().is_some_and(|task| !task.is_finished())
             || Instant::now() < self.next_backfill
@@ -320,35 +348,51 @@ impl Runtime {
             let _ = task.await;
         }
     }
-    async fn notice(&mut self, notice: Notification) {
+    async fn notice(&mut self, notice: GatewayNotice) {
         match notice {
-            Notification::Status(state) => {
+            GatewayNotice::OneBot(Notification::Status(state)) => {
                 (self.log)("onebot", json!({"state":state}));
                 // Both statuses are emitted by a successful handshake, including reconnects.
                 if matches!(state.as_str(), "connected" | "qq_offline") {
                     self.schedule_backfill(true);
                 }
             }
-            Notification::Event(event) => {
-                if let Some(control) = &self.control {
-                    control.observe(&event);
-                }
-                let event = qq_inner_core::engine::policy::resolve_forwards(
-                    &event,
-                    &self.bot,
-                    &self.config.agent,
-                    (self.now)(),
-                )
-                .await;
-                // 入站采集含同步文件/下载 I/O；单个顺序阻塞任务，不阻塞 Tokio worker。
-                let engine = self.engine.clone();
-                if !matches!(
-                    tokio::task::spawn_blocking(move || engine.ingest(&event)).await,
-                    Ok(Ok(()))
-                ) {
-                    (self.log)("event_rejected", json!({}));
-                }
+            GatewayNotice::Telegram(Notification::Status(state)) => {
+                (self.log)("telegram", json!({"state":state}));
             }
+            GatewayNotice::OneBot(Notification::Event(event)) => {
+                self.ingest_event(event, "onebot").await
+            }
+            GatewayNotice::Telegram(Notification::Event(event)) => {
+                self.ingest_event(event, "telegram").await
+            }
+        }
+    }
+    /// 入站事件共用同一引擎；日志与诊断按 gateway 区分。
+    async fn ingest_event(&mut self, event: Value, gateway: &str) {
+        if let Some(control) = &self.control {
+            control.observe(&event, gateway);
+        }
+        // 转发解析走路由器：Telegram 事件无 forward 段，等价 no-op。
+        let event = qq_inner_core::engine::policy::resolve_forwards_router(
+            &event,
+            &*self.gateways,
+            &self.config.agent,
+            (self.now)(),
+            self.config.onebot.forward_enabled,
+        )
+        .await;
+        // 入站采集含同步文件/下载 I/O；单个顺序阻塞任务，不阻塞 Tokio worker。
+        let engine = self.engine.clone();
+        match tokio::task::spawn_blocking(move || engine.ingest(&event)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                (self.log)("event_rejected", json!({"gateway":gateway, "error":error.to_string()}))
+            }
+            Err(error) => (self.log)(
+                "event_rejected",
+                json!({"gateway":gateway, "joinError":error.to_string()}),
+            ),
         }
     }
     fn status(&self, now: f64, pid: u32) -> Result<Value> {
@@ -359,15 +403,18 @@ impl Runtime {
             ActivityRhythm::new(&db, &c.agent.schedule, &c.agent.rhythm, rand::random::<f64>)
                 .snapshot(now)?;
         drop(db);
-        let bot = self.bot.state();
+        let bot = self.gateways.status();
         // Exactly src/main.mjs status(): nulls are retained and cycle timestamps are seconds.
         Ok(json!({"updatedAt":iso(now), "pid":pid, "mode":mode(c),
             "appliedRevision":self.applied, "reloading":self.reloading, "reloadError":self.reload_error,
             "scheduleActive":active, "activityRhythm":activity, "missing":config::readiness(c),
-            "onebotConnected":bot.connected, "qqOnline":bot.online, "selfId":bot.self_id,
-            "reconnects":bot.reconnects, "activeChats":self.engine.chats().len(),
+            "onebotConnected":bot["onebotConnected"], "qqOnline":bot["qqOnline"], "selfId":bot["selfId"],
+            "reconnects":bot["reconnects"], "activeChats":self.engine.chats().len(),
             "model":self.raw["provider"]["model"], "provider":c.provider.kind, "apiCallsThisRun":self.provider.calls(),
-            "lastCycleAt":self.engine.last_cycle(), "lastError":self.engine.last_error()}))
+            "lastCycleAt":self.engine.last_cycle(), "lastError":self.engine.last_error(),
+            "telegramConnected":bot["telegramConnected"], "telegramOnline":bot["telegramOnline"],
+            "telegramSelfId":bot["telegramSelfId"], "telegramUsername":bot["telegramUsername"],
+            "telegramReconnects":bot["telegramReconnects"], "telegramLastError":bot["telegramLastError"]}))
     }
     fn report(&self) -> Result<()> {
         settings::atomic_json(
@@ -418,7 +465,9 @@ impl Runtime {
             "data_directory_change"
         );
         let reconnect = next.raw["onebot"] != self.raw["onebot"]
-            || next.raw["onebotToken"] != self.raw["onebotToken"];
+            || next.raw["onebotToken"] != self.raw["onebotToken"]
+            || next.raw["telegram"] != self.raw["telegram"]
+            || next.raw["telegramToken"] != self.raw["telegramToken"];
         let engine = self.engine.clone();
         let stop = engine.stop();
         tokio::pin!(stop);
@@ -447,7 +496,7 @@ impl Runtime {
             revision,
             self.now.clone(),
             self.log.clone(),
-            (!reconnect).then(|| self.bot.clone()),
+            (!reconnect).then(|| self.gateways.clone()),
         )?;
         replacement.engine.inherit_chats(self.engine.chats());
         replacement.maintain(false)?;
@@ -462,13 +511,14 @@ impl Runtime {
         if let Some(control) = &replacement.control {
             control.replace(
                 Arc::new(LiveRemote {
-                    bot: replacement.bot.clone(),
+                    gateways: replacement.gateways.clone(),
                     provider: replacement.provider.clone(),
                     config: replacement.config.clone(),
                 }),
                 vec![
                     replacement.config.api_key.text.clone(),
                     replacement.config.onebot_token.text.clone(),
+                    replacement.config.telegram_token.text.clone(),
                 ],
             );
         }
@@ -553,13 +603,14 @@ async fn run(root: PathBuf) -> Result<()> {
         rt.config.data_dir.clone(),
         rt.store.clone(),
         Arc::new(LiveRemote {
-            bot: rt.bot.clone(),
+            gateways: rt.gateways.clone(),
             provider: rt.provider.clone(),
             config: rt.config.clone(),
         }),
         vec![
             rt.config.api_key.text.clone(),
             rt.config.onebot_token.text.clone(),
+            rt.config.telegram_token.text.clone(),
         ],
     ));
     let control = Server::bind(&rt.config.data_dir, backend.clone(), events)?;
@@ -677,7 +728,7 @@ mod tests {
         let mut rt = dir.runtime();
         let store = rt.store.clone();
         let old_engine = rt.engine.clone();
-        let old_bot = rt.bot.clone();
+        let old_gateways = rt.gateways.clone();
         let mut state = qq_inner_core::engine::ChatState {
             busy: true,
             last_think: 99.,
@@ -697,7 +748,7 @@ mod tests {
             .unwrap();
         assert!(Arc::ptr_eq(&store, &rt.engine.store));
         assert!(!Arc::ptr_eq(&old_engine, &rt.engine));
-        assert!(Arc::ptr_eq(&old_bot, &rt.bot));
+        assert!(Arc::ptr_eq(&old_gateways, &rt.gateways));
         assert_eq!(rt.applied, revision);
         let chats = rt.engine.chats();
         assert_eq!(chats.len(), 1);
@@ -742,7 +793,7 @@ mod tests {
         let dir = Temp::new();
         dir.config(json!({}));
         let mut rt = dir.runtime();
-        let bot = rt.bot.clone();
+        let gateways = rt.gateways.clone();
         let store = Arc::downgrade(&rt.store);
         let mut abort = rt.abort.subscribe();
         rt.connection = Some(tokio::spawn(async move {
@@ -759,8 +810,8 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(!Arc::ptr_eq(&bot, &rt.bot));
-        assert_eq!(rt.bot.state().self_id, "123");
+        assert!(!Arc::ptr_eq(&gateways, &rt.gateways));
+        assert_eq!(rt.gateways.onebot_state().unwrap().self_id, "123");
         assert!(Arc::ptr_eq(&store.upgrade().unwrap(), &rt.store));
         rt.disconnect().await;
         let applied = rt.applied.clone();
@@ -796,7 +847,7 @@ mod tests {
             let mut reads = 0;
             while reader_running.load(std::sync::atomic::Ordering::Relaxed) {
                 let v: Value = serde_json::from_slice(&fs::read(&reader_file).unwrap()).unwrap();
-                assert_eq!(v.as_object().unwrap().len(), 19);
+                assert_eq!(v.as_object().unwrap().len(), 25);
                 reads += 1;
                 if reads == 1 {
                     ready.send(()).unwrap();

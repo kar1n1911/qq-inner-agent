@@ -1,6 +1,8 @@
 //! OneBot v11 正向连接。通知采用单消费者 mpsc，状态与事件共用队列以保持顺序。
+pub mod gateway;
 pub mod provider;
 pub mod provider_transport;
+pub mod telegram;
 
 use crate::config::{js_string, truthy, Onebot};
 use futures_util::{SinkExt, StreamExt};

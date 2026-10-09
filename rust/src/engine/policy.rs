@@ -396,6 +396,18 @@ pub async fn resolve_forwards(
     resolve_forwards_core(event, bot, agent, now, false, bot.forward_enabled()).await
 }
 
+/// 网关路由版转发解析：`self_id`/`call` 由传输（Gateways）决定。
+/// Telegram 事件没有 forward 段，等价于 no-op；OneBot 事件仍照常解析。
+pub async fn resolve_forwards_router<T: crate::engine::OrientationTransport + ?Sized>(
+    event: &serde_json::Value,
+    transport: &T,
+    agent: &Agent,
+    now: f64,
+    forward_enabled: bool,
+) -> serde_json::Value {
+    resolve_forwards_core(event, transport, agent, now, false, forward_enabled).await
+}
+
 /// 历史转发跳过活跃窗口限制，其他准入条件与 normalize_backfill 一致。
 /// 走 `OrientationTransport`（self_id + call），因为回填手上是 `Arc<dyn EngineTransport>`。
 pub async fn resolve_forwards_backfill<T: crate::engine::OrientationTransport + ?Sized>(
