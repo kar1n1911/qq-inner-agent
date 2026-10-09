@@ -177,6 +177,16 @@ impl OneBot {
             .await
     }
     pub async fn send(&self, chat: &str, text: &str, face_id: Option<&str>) -> Reply {
+        self.send_targeted(chat, text, face_id, None, None).await
+    }
+    pub async fn send_targeted(
+        &self,
+        chat: &str,
+        text: &str,
+        face_id: Option<&str>,
+        reply_to: Option<&str>,
+        mention: Option<&str>,
+    ) -> Reply {
         let s = self.state();
         if !s.connected || !s.online {
             return Err(OneBotError::new("qq_offline", false));
@@ -193,15 +203,7 @@ impl OneBot {
         {
             return Err(OneBotError::new("invalid_face", false));
         }
-        // P6c：空正文且有 face 时只发 face 段；默认引擎仍拒绝空正文。
-        let mut message = if text.is_empty() && face_id.is_some() {
-            vec![]
-        } else {
-            vec![json!({"type":"text","data":{"text":text}})]
-        };
-        if let Some(id) = face_id {
-            message.push(json!({"type":"face","data":{"id":id}}));
-        }
+        let message = message_segments(chat, text, face_id, reply_to, mention);
         // 数组文本段与 auto_escape 同时保留，模型生成的 CQ 码只能作为惰性文本。
         let mut params = json!({"message":message,"auto_escape":true});
         params[if kind == "group" {
@@ -606,6 +608,30 @@ pub(crate) fn js_number(v: &Value) -> f64 {
             }
         }
     }
+}
+
+/// Typed segments only: model text (including CQ codes) stays inert.
+pub fn message_segments(
+    chat: &str,
+    text: &str,
+    face: Option<&str>,
+    reply_to: Option<&str>,
+    mention: Option<&str>,
+) -> Vec<Value> {
+    let mut parts = Vec::new();
+    if let Some(id) = reply_to {
+        parts.push(json!({"type":"reply","data":{"id":id}}));
+    }
+    if let Some(qq) = mention.filter(|_| chat.starts_with("group:")) {
+        parts.push(json!({"type":"at","data":{"qq":qq}}));
+    }
+    if !text.is_empty() || face.is_none() {
+        parts.push(json!({"type":"text","data":{"text":text}}));
+    }
+    if let Some(id) = face {
+        parts.push(json!({"type":"face","data":{"id":id}}));
+    }
+    parts
 }
 
 #[cfg(test)]

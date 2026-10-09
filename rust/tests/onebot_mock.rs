@@ -297,6 +297,39 @@ async fn sending_format_and_validation() {
             .unwrap();
         assert_eq!(call.await.unwrap().unwrap()["message_id"], 9);
     }
+    // All target combinations retain exact segment order and inert CQ text.
+    for chat in ["group:123", "private:123"] {
+        for (reply_to, mention) in [
+            (None, None),
+            (Some("-42"), None),
+            (None, Some("20")),
+            (Some("-42"), Some("20")),
+        ] {
+            let a = b.clone();
+            let call = tokio::spawn(async move {
+                a.send_targeted(chat, "[CQ:at,qq=all]", Some("14"), reply_to, mention)
+                    .await
+            });
+            let req = next(&mut m.requests).await;
+            let mut expected = vec![];
+            if let Some(id) = reply_to {
+                expected.push(json!({"type":"reply","data":{"id":id}}));
+            }
+            if chat.starts_with("group:") {
+                if let Some(qq) = mention {
+                    expected.push(json!({"type":"at","data":{"qq":qq}}));
+                }
+            }
+            expected.push(json!({"type":"text","data":{"text":"[CQ:at,qq=all]"}}));
+            expected.push(json!({"type":"face","data":{"id":"14"}}));
+            assert_eq!(req["params"]["message"], json!(expected));
+            assert_eq!(req["params"]["auto_escape"], true);
+            m.frames
+                .send(response(&req, json!({"message_id":9}), json!(0), "ok"))
+                .unwrap();
+            call.await.unwrap().unwrap();
+        }
+    }
     // 单 face 的传输不允许夹带空 text 段。
     let a = b.clone();
     let call = tokio::spawn(async move { a.send("group:123", "", Some("14")).await });

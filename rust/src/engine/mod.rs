@@ -8,6 +8,7 @@ pub mod orientation;
 pub mod policy;
 mod self_identity;
 pub mod sending;
+pub mod targeting;
 
 use crate::{
     config::{js_string, readiness, truthy, Config},
@@ -54,6 +55,8 @@ pub trait EngineTransport: OrientationTransport {
         chat: &'a str,
         text: &'a str,
         face: Option<&'a str>,
+        reply_to: Option<&'a str>,
+        mention: Option<&'a str>,
     ) -> BoxFuture<'a, std::result::Result<Value, OneBotError>>;
 }
 impl EngineTransport for OneBot {
@@ -72,8 +75,12 @@ impl EngineTransport for OneBot {
         chat: &'a str,
         text: &'a str,
         face: Option<&'a str>,
+        reply_to: Option<&'a str>,
+        mention: Option<&'a str>,
     ) -> BoxFuture<'a, std::result::Result<Value, OneBotError>> {
-        Box::pin(OneBot::send(self, chat, text, face))
+        Box::pin(OneBot::send_targeted(
+            self, chat, text, face, reply_to, mention,
+        ))
     }
 }
 // 不依赖 trait upcasting（保持仓库 MSRV）；与 orientation 共用同一个传输实例。
@@ -158,6 +165,8 @@ pub struct ChatState {
     pub last_human: f64,
     pub last_id: String,
     pub hint: Hint,
+    #[serde(skip)]
+    pub addressed_id: Option<String>,
     pub pending: bool,
     pub pause_done: bool,
     pub last_think: f64,
@@ -173,6 +182,7 @@ impl Default for ChatState {
             last_human: 0.,
             last_id: String::new(),
             hint: Hint::Open,
+            addressed_id: None,
             pending: false,
             pause_done: true,
             last_think: 0.,
@@ -248,6 +258,7 @@ struct Turn {
     orientation_epoch: Option<i64>,
     profile: Value,
     hint: Hint,
+    addressed_id: Option<String>,
     history: Vec<Value>,
     last: Value,
     counts: Value,
@@ -544,6 +555,11 @@ impl Engine {
         // 只有去重成功的新消息递增 version；批内 self 优先于后续开放消息。
         s.version += 1;
         s.last_human = now;
+        if m.hint == Hint::SelfChat {
+            s.addressed_id = Some(m.id.clone());
+        } else if !s.pending {
+            s.addressed_id = None;
+        }
         s.last_id = m.id;
         if !(s.pending && s.hint == Hint::SelfChat) {
             s.hint = m.hint;
@@ -873,7 +889,7 @@ impl Engine {
                         return;
                     }
                 };
-                let result = engine.transport.send(&chat, &reply, None).await;
+                let result = engine.transport.send(&chat, &reply, None, None, None).await;
                 let finish = engine.db().and_then(|db| match result {
                     Ok(sent) => db.finish_delivery(&delivery, "sent", sent.get("message_id")),
                     Err(e) => db.finish_delivery(
@@ -1228,6 +1244,7 @@ impl Engine {
                 orientation_epoch: db.orientation_state(chat)?.map(|r| r.epoch),
                 profile: Value::Null,
                 hint: Hint::Open,
+                addressed_id: None,
                 history: vec![],
                 last: Value::Null,
                 counts: Value::Null,
@@ -1246,6 +1263,7 @@ impl Engine {
             };
             core.get_mut(chat).unwrap().last_think = now;
             core.last_cycle = now;
+            t.addressed_id = core.get(chat).unwrap().addressed_id.clone();
             t.profile = db.learning_state(chat)?;
             // 11–16：历史、最后人类消息、小时配额、学习门控、检索 query。
             t.history = if a.observation.backlog_digest.enabled {
@@ -1878,7 +1896,7 @@ impl Engine {
                 return Err(error);
             }
         };
-        let (delivery_id, decorated) = {
+        let (delivery_id, decorated, targeting) = {
             let mut core = self.core();
             let db = self.db()?;
             // 38–43：正文、作废、离线、重复/静默、dry-run，顺序不可换。
@@ -1950,6 +1968,19 @@ impl Engine {
             if behavior.burst {
                 crate::persona::affect::reserve_burst(&db, chat, text(&t.last, "id"))?;
             }
+            let targeting = targeting::validate(
+                &db,
+                chat,
+                &self.transport.self_id(),
+                &response,
+                if t.hint == Hint::SelfChat {
+                    t.addressed_id.as_deref()
+                } else {
+                    None
+                },
+                t.hint,
+                || (self.options.expression_random)(),
+            )?;
             let delivery_id = db.delivery(chat, proactive, self.now())?;
             if a.emoji.face_only && face_only {
                 db.execute(
@@ -1959,7 +1990,7 @@ impl Engine {
             }
             db.r#use(&selected.candidate.id)?;
             self.finish(&mut core, &db, &t, true)?;
-            (delivery_id, decorated)
+            (delivery_id, decorated, targeting)
         };
         // 46：与 JS 一样，发送不受模型取消信号中断；stop 等待实际投递结果。
         let content = text(&decorated, "text");
@@ -1982,6 +2013,7 @@ impl Engine {
         };
         let n = seq.len();
         let mut sent = None;
+        let mut sent_segments = Vec::new();
         for (i, bubble) in seq.iter().enumerate() {
             if i > 0 {
                 // 打字延迟：与长度成比例（15ms/字符）+ 固定间隔 700ms + 抖动。
@@ -2007,7 +2039,30 @@ impl Engine {
                 break;
             }
             let bubble_face = if i == n - 1 { face } else { None };
-            sent = Some(self.transport.send(chat, bubble, bubble_face).await);
+            let reply_to = if i == 0 {
+                targeting.reply_to.as_deref()
+            } else {
+                None
+            };
+            let mention = if i == 0 {
+                targeting.mention.as_deref()
+            } else {
+                None
+            };
+            let result = self
+                .transport
+                .send(chat, bubble, bubble_face, reply_to, mention)
+                .await;
+            if result.is_ok() {
+                sent_segments.push(crate::transport::message_segments(
+                    chat,
+                    bubble,
+                    bubble_face,
+                    reply_to,
+                    mention,
+                ));
+            }
+            sent = Some(result);
         }
         let sent = sent.expect("at least one bubble");
         let mut core = self.core();
@@ -2060,7 +2115,7 @@ impl Engine {
                 core.last_error = None;
                 (self.options.log)(
                     "message_sent",
-                    json!({"chat":chat,"proactive":proactive,"lengthTarget":length_target}),
+                    json!({"chat":chat,"proactive":proactive,"lengthTarget":length_target,"segments":sent_segments}),
                 );
             }
             Err(error) => {
@@ -2088,7 +2143,10 @@ impl Engine {
                     self.now(),
                 )?;
                 core.last_error = Some(error.code.clone());
-                (self.options.log)("delivery_error", json!({"chat":chat,"code":error.code}));
+                (self.options.log)(
+                    "delivery_error",
+                    json!({"chat":chat,"code":error.code,"segments":sent_segments}),
+                );
             }
         }
         Ok(())

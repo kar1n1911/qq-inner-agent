@@ -31,7 +31,8 @@ decorations 是本轮允许的可选装饰，可返回 emoji（symbols 中一项
 lengthTarget 指定本轮的目标长度档位；多气泡时档位描述的是所有气泡合起来的长度，不是每条气泡的长度，必须严格遵守：tiny 不超过 12 字（"哈哈""确实""我也觉得"这类轻松附和）；short 为 13 到 40 字；medium 为 41 到 90 字；long 为 91 到 200 字。长度均匀是最明显的机器味，不同轮次之间应明显不同。tiny 只能用于轻松附和，绝不能拿来回答提问、求助或技术问题，这些情况至少用 short。
 只把选中的候选表达成简短自然的 QQ 消息。被直接提问时直接回答问题。遵守 maxCharacters；assertiveTone 为 false 时语气轻松自然，否则更直接。
 当 multiBubble 为 true 且内容适合拆分时（例如先接一句再补一句、带吐槽的补充），必须拆成 2–3 条短句放入 bubbles，每条是独立消息，合起来与 text 意思一致、总长度相当，并共同遵守 lengthTarget 和 maxCharacters。严肃回答、求助或技术问题不适合拆分，不要拆；multiBubble 不为 true 或内容不适合拆分时 bubbles 为 []。
-返回 {"text":"最终发送的消息","emoji":null,"faceId":null,"bubbles":[]}；拆分时 bubbles 为包含 2–3 条短句的字符串数组。`;
+replyTo（消息 id）与 mention（QQ 号）是可省略或为 null 的字符串字段，只能使用当前聊天上下文里真实出现过的 id / QQ，不能凭空填写；不确定时留空。开放讨论里 @ 人或引用会显吵，只在确有必要时低概率使用，不要频繁 @ 人或每条引用；私聊不填 mention。被点名时引擎会自动引用叫你的那条消息，无需模型填写。不要在正文里用 CQ 码构造引用或 @。
+返回 {"text":"最终发送的消息","emoji":null,"faceId":null,"bubbles":[],"replyTo":null,"mention":null}；拆分时 bubbles 为包含 2–3 条短句的字符串数组。`;
 
 export const forecast = `TASK: FORECAST
 发送前分别判断：现在是否值得发言，以及发言后可能发生什么。结合 selectedIdea、聊天内容、timing 中的等待时间、近期消息密度与上次发言间隔，不能只依据表达动机。priorExpectation 是上次发言的预测及实际观察（有人发言不等于回答了你），应据当前内容调整，不能把预测当成事实。沉默不代表同意，也不构成追问的理由。
