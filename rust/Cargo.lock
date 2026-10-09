@@ -737,6 +737,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "ureq",
+ "url",
 ]
 
 [[package]]

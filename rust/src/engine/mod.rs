@@ -281,6 +281,7 @@ impl Engine {
         if media_config.enabled
             || config.agent.three_layer_decision
             || config.agent.topic_source.enabled()
+            || config.agent.relay.enabled
         {
             media_select::enable(
                 &*store
@@ -1275,7 +1276,10 @@ impl Engine {
             t.payload = payload;
             t
         };
-        if trigger == "topic" && chat.starts_with("group:") && a.topic_source.enabled() {
+        if trigger == "topic"
+            && chat.starts_with("group:")
+            && (a.topic_source.enabled() || a.relay.enabled)
+        {
             let eligible = {
                 let db = self.db()?;
                 let activity = media_select::group_activity(&db, chat, now, a.pause_seconds)?;
@@ -1297,6 +1301,7 @@ impl Engine {
                     .map(|m| text(m, "text").to_owned())
                     .collect::<Vec<_>>();
                 let interests = crate::topic::interests(&traits, &messages);
+                let relay_interests = interests.clone();
                 let cfg = a.topic_source.clone();
                 let sources = self.topic_sources.clone();
                 let group = chat.to_owned();
@@ -1341,6 +1346,54 @@ impl Engine {
                         )?;
                         if !kept.is_empty() {
                             t.payload["externalTopics"] = json!(kept);
+                        }
+                    }
+                }
+                if a.relay.enabled {
+                    use crate::topic::relay::links;
+                    let origins = {
+                        let db = self.db()?;
+                        let short_term = links::short_term(&db, chat, self.now())?;
+                        links::shortlist(
+                            links::collect(&db, &a.relay, &a.allowed_groups, chat, now)?,
+                            &a.relay,
+                            &relay_interests,
+                            &short_term,
+                        )
+                    };
+                    if !origins.is_empty() {
+                        let urls: Vec<_> = origins.iter().map(|o| &o.source).collect();
+                        let audit = self
+                            .model(
+                                &prompts::compose_prompt(links::REVIEW, &[]),
+                                json!({"links": urls}),
+                            )
+                            .await;
+                        if !self.fresh(&self.core(), &*self.db()?, &t)? {
+                            return Ok(());
+                        }
+                        if let Ok(audit) = audit {
+                            // Re-read after the asynchronous audit, including newly captured links.
+                            let short_term = links::short_term(&*self.db()?, chat, self.now())?;
+                            let kept = links::reviewed(
+                                &a.relay,
+                                origins,
+                                &audit,
+                                &relay_interests,
+                                &short_term,
+                            );
+                            if !kept.is_empty() {
+                                let topics = t
+                                    .payload
+                                    .as_object_mut()
+                                    .expect("topic payload")
+                                    .entry("externalTopics")
+                                    .or_insert_with(|| json!([]));
+                                topics
+                                    .as_array_mut()
+                                    .expect("topic candidates")
+                                    .extend(kept.into_iter().map(|item| json!(item)));
+                            }
                         }
                     }
                 }

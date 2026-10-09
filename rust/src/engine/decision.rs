@@ -71,6 +71,7 @@ pub fn screen(db: &Store, chat: &str, s: &ChatState, a: &Agent, now: f64) -> Res
             )?
             .is_empty()
             && !a.topic_source.enabled()
+            && !a.relay.enabled
         {
             topic = Some("empty_thoughts");
         } else {

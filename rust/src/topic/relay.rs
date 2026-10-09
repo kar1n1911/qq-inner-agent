@@ -3,6 +3,7 @@
 use crate::topic::{self, Item};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
+pub mod links;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
@@ -201,6 +202,9 @@ pub fn decide(
         (OriginKind::External, Some(_)) => return None,
         (_, Some(chat)) if chat.starts_with("group:") && chat.len() > 6 => {}
         _ => return None,
+    }
+    if origin.kind == OriginKind::Link && !independent_evidence(origin) {
+        return None;
     }
     let body = format!(
         "{} {} {}",

@@ -143,6 +143,11 @@ impl EngineTransport for Harness {
 impl OrientationProvider for Harness {
     fn json<'a>(&'a self, system: &'a str, payload: Value) -> BoxFuture<'a, Result<Value>> {
         Box::pin(async move {
+            if system.contains(qq_inner_core::topic::relay::links::REVIEW) {
+                self.model_inputs.lock().unwrap().push(("RELAY".into(), payload));
+                anyhow::ensure!(self.model.lock().unwrap()["relayError"] != true, "audit unavailable");
+                return Ok(self.model.lock().unwrap().get("relayAudit").cloned().unwrap_or(json!({"keep":[]})));
+            }
             let stage = system
                 .split("TASK: ")
                 .nth(1)
@@ -2416,5 +2421,49 @@ async fn self_chat_wakes_off_duty_but_other_hints_preserve_backlog() {
                 e.stop().await;
             }
         }
+    }
+}
+
+#[tokio::test]
+async fn relay_links_enter_formation_only_after_review_and_local_dedup() {
+    const URL: &str = "https://example.org/esp32";
+    for mode in ["keep", "drop", "duplicate", "disabled", "one_author", "audit_error"] {
+        let (e, h) = topic_setup(json!({"relay":{"enabled":mode != "disabled"}}));
+        *h.model.lock().unwrap() = json!({"relayError":mode == "audit_error","relayAudit":{"keep":if mode == "drop" {json!([])} else {json!([0])}},"empty":true});
+        {
+            let db = h.store.lock().unwrap();
+            // No reservoir needed: relay independently makes the topic path eligible.
+            db.execute("DELETE FROM thoughts", []).unwrap();
+            for (id, author, body) in [("r1", "30", "look"), ("r2", if mode == "one_author" {"30"} else {"31"}, "read")] {
+                db.message(&json!({"chat":"group:11","id":id,"sender":author,"name":"PRIVATE_NAME","text":format!("{body} {URL}"),"ts":h.now()-60.,"self":false})).unwrap();
+            }
+            for i in 0..2 {
+                db.message(&json!({"chat":"group:10","id":format!("interest{i}"),"sender":"20","text":"esp32","ts":h.now()-700.-i as f64,"self":false})).unwrap();
+            }
+            if mode == "duplicate" {
+                db.execute("INSERT INTO memory_layers(id,chat,subject,layer,slot,text,sources,expires) VALUES('relay-duplicate','group:10','group','short_term','relay',?,'[]',?)", rusqlite::params![URL,h.now()+100.]).unwrap();
+            }
+        }
+        e.tick().unwrap();
+        e.wait_idle().await;
+        assert_eq!(e.last_error(), None, "{mode}");
+        let inputs = h.model_inputs.lock().unwrap();
+        let audit = inputs.iter().find(|(stage, _)| stage == "RELAY");
+        assert_eq!(audit.is_some(), matches!(mode, "keep" | "drop" | "audit_error"), "{mode}");
+        if let Some((_, payload)) = audit { assert_eq!(payload, &json!({"links":[URL]})); }
+        let formed = inputs.iter().find(|(stage, _)| stage == "FORM");
+        let topics = formed.map(|(_, payload)| &payload["externalTopics"]);
+        assert_eq!(topics.is_some_and(|v| v.is_array()), mode == "keep", "{mode}");
+        if mode == "keep" {
+            let topics = topics.unwrap();
+            assert_eq!(topics[0]["item"]["url"], URL);
+            assert_eq!(topics[0]["source"], URL);
+            let serialized = topics.to_string();
+            for secret in ["PRIVATE_NAME", "group:11", "r1", "r2", "look", "read"] {
+                assert!(!serialized.contains(secret), "{serialized}");
+            }
+        }
+        // FORM returns no ideas: relay must never bypass the existing pipeline to send.
+        assert_eq!(*h.sends.lock().unwrap(), 0, "{mode}");
     }
 }
