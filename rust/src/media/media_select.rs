@@ -1,10 +1,10 @@
 //! P6b：默认关闭的素材选择；群温度与自身 activity 完全独立。
 use crate::{
-    persona::conversation::{self, Classification, Relation, Stage},
     engine::policy::Message,
     media::media_source::{self, SourceTier},
-    store::Store,
     memory::text::{similarity, terms},
+    persona::conversation::{self, Classification, Relation, Stage},
+    store::Store,
 };
 use anyhow::{ensure, Result};
 use rusqlite::params;
@@ -127,6 +127,8 @@ impl Config {
 pub struct GroupActivity {
     pub rate: f64,
     pub since_human: f64,
+    /// 连续活跃度；quiet 只供冷场安全门槛和学习分桶使用。
+    pub activity: f64,
     pub quiet: bool,
     pub awake: bool,
     pub short_density: f64,
@@ -165,50 +167,71 @@ pub fn group_activity(db: &Store, chat: &str, now: f64, silence: f64) -> Result<
         && hours[hour] >= 2
         && hours[hour] as f64 >= *hours.iter().max().unwrap() as f64 * 0.1;
     let n=db.first("SELECT count(DISTINCT r.message_id) AS n FROM media_receipts r JOIN messages m ON m.chat=r.chat AND m.id=r.message_id WHERE r.chat=? AND m.self=0 AND m.ts<=? AND m.ts>=?",params![chat,now,now-30.*86400.])?.unwrap()["n"].as_f64().unwrap_or(0.);
+    let activity = activity_level(rate, since, silence);
     Ok(GroupActivity {
+        activity,
         rate,
         since_human: since,
-        quiet: rate < 0.5 || since >= silence * 6.,
+        quiet: activity <= 1. / 3.,
         awake,
         short_density: short as f64 / rows.len().max(1) as f64,
         media_rate: (n / (rows.len() as f64 + 20.)).clamp(0., 1.),
     })
 }
+/// 速率饱和与距上次发言的衰减相乘；旧的 0.5 不再是开关。
+pub fn activity_level(rate: f64, since: f64, silence: f64) -> f64 {
+    let rate = rate.max(0.);
+    rate / (rate + 0.5) * (-since.max(0.) / (6. * silence)).exp()
+}
+#[derive(Debug, PartialEq)]
+pub struct AttentionProfile {
+    pub drift_level: Drift,
+    pub anchor_policy: Anchor,
+    pub reaction_style: Reaction,
+    /// 枚举仅用于描述，选靶消费插值后的值，避免二次量化。
+    pub target: f64,
+    pub reaction_weight: f64,
+}
+fn interpolate(values: &[f64], position: f64) -> f64 {
+    let position = position.clamp(0., (values.len() - 1) as f64);
+    let i = position.floor() as usize;
+    let j = (i + 1).min(values.len() - 1);
+    values[i] + (values[j] - values[i]) * (position - i as f64)
+}
 pub fn attention(
     a: &GroupActivity,
     c: &Attention,
     accepted_wild: bool,
-) -> Option<(Drift, Anchor, Reaction)> {
+) -> Option<AttentionProfile> {
     if !c.enabled {
         return None;
     }
-    let mut drift = c.drift_level.unwrap_or(if a.quiet {
-        Drift::Scattered
+    let quietness = 1. - a.activity.clamp(0., 1.);
+    let ceiling = if accepted_wild {
+        2. + ((quietness - 2. / 3.) * 3.).clamp(0., 1.)
     } else {
-        Drift::Subtle
-    });
-    if drift == Drift::Wild && !(a.quiet && accepted_wild) {
-        drift = if a.quiet {
-            Drift::Scattered
-        } else {
-            Drift::Active
-        };
-    }
-    Some((
-        drift,
-        c.anchor_policy.unwrap_or(if a.quiet {
-            Anchor::Loose
-        } else {
-            Anchor::Strict
-        }),
-        c.reaction_style.unwrap_or(if a.short_density < 0.25 {
-            Reaction::Reserved
-        } else if a.short_density > 0.7 {
-            Reaction::Lively
-        } else {
-            Reaction::Natural
-        }),
-    ))
+        2.
+    };
+    let drift = c
+        .drift_level
+        .map_or(3. * quietness, |d| d as usize as f64)
+        .min(ceiling);
+    let anchor = c
+        .anchor_policy
+        .map_or(2. * quietness, |a| a as usize as f64);
+    let reaction = c
+        .reaction_style
+        .map_or(2. * a.short_density.clamp(0., 1.), |r| r as usize as f64);
+    Some(AttentionProfile {
+        drift_level: [Drift::Subtle, Drift::Active, Drift::Scattered, Drift::Wild]
+            [drift.round() as usize],
+        anchor_policy: [Anchor::Strict, Anchor::Balanced, Anchor::Loose][anchor.round() as usize],
+        reaction_style: [Reaction::Reserved, Reaction::Natural, Reaction::Lively]
+            [reaction.round() as usize],
+        target: interpolate(&[0.85, 0.65, 0.3, 0.15], drift)
+            .max(interpolate(&[0.65, 0.4, 0.], anchor)),
+        reaction_weight: interpolate(&[0.5, 1., 1.5], reaction),
+    })
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -414,12 +437,9 @@ pub fn probability(a: &GroupActivity, stage: &Classification, c: &Config, waitin
     {
         return 0.;
     }
-    let p = if a.quiet {
-        (c.p_quiet * a.since_human / c.silence_seconds).min(c.quiet_cap)
-    } else {
-        c.p_active
-    };
-    p * a.media_rate * if stage.confident { 1. } else { 0.05 }
+    let rescue = (c.p_quiet * a.since_human / c.silence_seconds).min(c.quiet_cap);
+    let p = a.activity * c.p_active + (1. - a.activity) * rescue;
+    p * a.media_rate * (0.05 + 0.95 * stage.confidence.clamp(0., 1.))
 }
 pub struct Selection {
     pub candidate: Candidate,
@@ -457,26 +477,20 @@ pub fn select(
         .first("SELECT accepted FROM media_wild WHERE chat=?", [chat])?
         .is_some_and(|r| r["accepted"].as_i64().unwrap_or(0) > 0);
     let att = attention(&a, c.groups.get(chat).unwrap_or(&c.attention), accepted);
-    let mut target: f64 = if a.quiet { 0.3 } else { 0.8 };
-    if let Some((drift, anchor, _)) = att {
-        target = match drift {
-            Drift::Subtle => 0.85,
-            Drift::Active => 0.65,
-            Drift::Scattered => 0.3,
-            Drift::Wild => 0.15,
-        };
-        target = match anchor {
-            Anchor::Strict => target.max(0.65),
-            Anchor::Balanced => target.max(0.4),
-            Anchor::Loose => target,
-        };
-    }
+    let target = att.as_ref().map_or(0.3 + 0.5 * a.activity, |a| a.target);
+    let reaction_weight = att.as_ref().map_or(1., |a| a.reaction_weight);
     let mut items = candidates(db, chat, &last.text, now, c, a.quiet)?;
-    items.sort_by(|x, y| {
-        (x.score - target)
-            .abs()
-            .total_cmp(&(y.score - target).abs())
-    });
+    // face 是明确的短反应；图片没有风格标注，不能臆测其内容。
+    // 先过相关度、来源、温和硬门槛，再按连续风格权重排序。
+    let rank = |item: &Candidate| {
+        let weight = if item.kind == "face" {
+            reaction_weight
+        } else {
+            1.
+        };
+        weight * (1. - (item.score - target).abs())
+    };
+    items.sort_by(|x, y| rank(y).total_cmp(&rank(x)));
     // 所有硬门槛先于抽签，检索无匹配绝不补一个随机素材。
     if !draw.is_finite() || draw < 0. || draw >= p {
         return Ok(None);
@@ -485,7 +499,7 @@ pub fn select(
         candidate,
         classification: stage,
         bucket: if a.quiet { "quiet_rescue" } else { "active" },
-        wild: att.is_some_and(|(d, _, _)| d == Drift::Wild),
+        wild: att.is_some_and(|a| a.drift_level == Drift::Wild),
     }))
 }
 fn messages(db: &Store, chat: &str) -> Result<Vec<Message>> {

@@ -41,7 +41,10 @@ pub enum Relation {
 pub struct Classification {
     pub stage: Stage,
     pub relation: Relation,
+    /// 学习资格仍保留离散判据；行为概率只消费 confidence。
     pub confident: bool,
+    #[serde(default)]
+    pub confidence: f64,
     pub evidence: Evidence,
 }
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -51,6 +54,23 @@ pub struct Evidence {
     pub alternating_turns: usize,
     pub silent_seconds: f64,
     pub closing_marker: bool,
+    #[serde(default)]
+    pub weighted_turns: f64,
+    #[serde(default)]
+    pub previous_gap_seconds: f64,
+    #[serde(default)]
+    pub following_similarity: f64,
+}
+impl Evidence {
+    /// 不消费 linked、硬截断的 turns 或阶段枚举，阈值两侧行为保持连续。
+    pub fn confidence(&self, c: &Config) -> f64 {
+        let link = self.previous_similarity / (self.previous_similarity + c.overlap);
+        let turns = self.weighted_turns / (self.weighted_turns + c.min_turns as f64);
+        let proximity = (-self.previous_gap_seconds / c.gap_seconds).exp();
+        let observed = 1. - (-self.silent_seconds / c.gap_seconds).exp();
+        let resumed = self.following_similarity / (self.following_similarity + c.overlap);
+        (link * (0.5 + 0.5 * turns) * proximity * observed * (1. - resumed)).clamp(0., 1.)
+    }
 }
 /// target 指待分类消息；后续消息和观察时间用于反推，刚到的消息不假装已有后续证据。
 pub fn classify(messages: &[Message], target: usize, now: f64, c: &Config) -> Classification {
@@ -58,6 +78,7 @@ pub fn classify(messages: &[Message], target: usize, now: f64, c: &Config) -> Cl
         stage: Stage::NaturalEnd,
         relation: Relation::Unrelated,
         confident: false,
+        confidence: 0.,
         evidence: Evidence::default(),
     };
     let Some(m) = messages.get(target) else {
@@ -100,13 +121,30 @@ pub fn classify(messages: &[Message], target: usize, now: f64, c: &Config) -> Cl
             turns += 1;
         }
     }
+    let mut weighted_turns = 0.;
+    let mut continuity = 1.;
+    for pair in messages[..=target].windows(2).rev() {
+        let overlap = similarity(&pair[0].text, &pair[1].text);
+        continuity *=
+            overlap / (overlap + c.overlap) * (-(pair[1].ts - pair[0].ts) / c.gap_seconds).exp();
+        if pair[0].sender != pair[1].sender {
+            weighted_turns += continuity;
+        }
+    }
     r.evidence = Evidence {
+        weighted_turns,
+        previous_gap_seconds: previous.map_or(0., |p| m.ts - p.ts),
+        following_similarity: messages[target + 1..]
+            .iter()
+            .map(|p| similarity(&p.text, &m.text))
+            .fold(0., f64::max),
         previous_similarity: prev,
         next_similarity: after,
         alternating_turns: turns,
         silent_seconds: now - m.ts,
         closing_marker: marker,
     };
+    r.confidence = r.evidence.confidence(c);
     r.relation = if linked {
         Relation::Continuation
     } else if prev > 0. {

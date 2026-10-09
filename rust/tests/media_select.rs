@@ -1,8 +1,8 @@
 //! 设计不变量精确断言；估计值只验范围、单调性，不从实现生成期望。
 use qq_inner_core::{
-    persona::conversation::{Classification, Evidence, Relation, Stage},
     media::media_select::{self as ms, Attention, Config, Drift, Feedback, GroupActivity, Outcome},
     media::media_source::Override,
+    persona::conversation::{Classification, Evidence, Relation, Stage},
     store::Store,
 };
 use rusqlite::params;
@@ -25,6 +25,7 @@ fn classified(stage: Stage, relation: Relation, confident: bool) -> Classificati
         stage,
         relation,
         confident,
+        confidence: if confident { 1. } else { 0. },
         evidence: Evidence::default(),
     }
 }
@@ -400,6 +401,7 @@ fn group_history_is_independent_of_own_activity_and_other_groups() {
 }
 fn activity(quiet: bool, since: f64) -> GroupActivity {
     GroupActivity {
+        activity: ms::activity_level(if quiet { 0.01 } else { 2. }, since, 300.),
         rate: if quiet { 0.01 } else { 2. },
         since_human: since,
         quiet,
@@ -447,7 +449,7 @@ fn attention_bounds_and_group_override_are_explicit() {
     let c = Attention::default();
     let active = ms::attention(&activity(false, 300.), &c, false).unwrap();
     let quiet = ms::attention(&activity(true, 900.), &c, false).unwrap();
-    assert!(quiet.0 >= active.0);
+    assert!(quiet.drift_level >= active.drift_level);
     let wild = Attention {
         drift_level: Some(Drift::Wild),
         ..c.clone()
@@ -455,17 +457,19 @@ fn attention_bounds_and_group_override_are_explicit() {
     assert_ne!(
         ms::attention(&activity(false, 300.), &wild, true)
             .unwrap()
-            .0,
+            .drift_level,
         Drift::Wild
     );
     assert_ne!(
         ms::attention(&activity(true, 900.), &wild, false)
             .unwrap()
-            .0,
+            .drift_level,
         Drift::Wild
     );
     assert_eq!(
-        ms::attention(&activity(true, 900.), &wild, true).unwrap().0,
+        ms::attention(&activity(true, 900.), &wild, true)
+            .unwrap()
+            .drift_level,
         Drift::Wild
     );
     assert_eq!(
@@ -548,4 +552,215 @@ fn disabled_selector_does_not_touch_database_schema() {
     }
     .validate()
     .is_err());
+}
+
+#[test]
+fn continuous_attention_visits_every_level_without_skipping() {
+    for accepted in [false, true] {
+        let mut a = activity(false, 0.);
+        a.activity = 1.;
+        let mut previous = ms::attention(&a, &Attention::default(), accepted).unwrap();
+        let mut drifts = HashSet::new();
+        let mut anchors = HashSet::new();
+        for i in 0..=10000 {
+            a.activity = 1. - i as f64 / 10000.;
+            let current = ms::attention(&a, &Attention::default(), accepted).unwrap();
+            let d = current.drift_level as usize;
+            let b = current.anchor_policy as usize;
+            drifts.insert(d);
+            anchors.insert(b);
+            assert!(d >= previous.drift_level as usize && d <= previous.drift_level as usize + 1);
+            assert!(
+                b >= previous.anchor_policy as usize && b <= previous.anchor_policy as usize + 1
+            );
+            assert!(current.target <= previous.target + 1e-12);
+            assert!((current.target - previous.target).abs() < 0.001);
+            if current.drift_level == Drift::Wild {
+                assert!(accepted && a.activity <= 1. / 3.);
+            }
+            previous = current;
+        }
+        assert_eq!(drifts.len(), if accepted { 4 } else { 3 });
+        assert_eq!(anchors.len(), 3);
+    }
+    // 真实输入的旧切点（速率 .5、间隔 6*silence）不再造成选靶/概率跳变。
+    let c = config();
+    let stage = classified(Stage::Closing, Relation::Continuation, true);
+    for (rate, since) in [(0.5, 600.), (2., 1800.)] {
+        let mut values = Vec::new();
+        for delta in [-1e-7, 1e-7] {
+            let mut a = activity(false, since + delta);
+            a.activity = ms::activity_level(rate + delta, since + delta, 300.);
+            values.push((
+                ms::attention(&a, &c.attention, true).unwrap().target,
+                ms::probability(&a, &stage, &c, false),
+            ));
+        }
+        assert!((values[0].0 - values[1].0).abs() < 1e-6);
+        assert!((values[0].1 - values[1].1).abs() < 1e-6);
+    }
+    for i in 1..10000 {
+        let rate = i as f64 / 1000.;
+        assert!(
+            ms::activity_level(rate, 300., 300.) >= ms::activity_level(rate - 0.001, 300., 300.)
+        );
+        assert!(ms::activity_level(rate, 301., 300.) < ms::activity_level(rate, 300., 300.));
+    }
+}
+
+#[test]
+fn reaction_density_is_continuous_and_changes_actual_selection() {
+    let mut a = activity(true, 600.);
+    let mut previous = 0.5;
+    for i in 0..=10000 {
+        a.short_density = i as f64 / 10000.;
+        let current = ms::attention(&a, &Attention::default(), false).unwrap();
+        assert!(current.reaction_weight >= previous);
+        assert!(current.reaction_weight - previous < 0.001);
+        previous = current.reaction_weight;
+    }
+    let db = db();
+    history(&db, "group:10");
+    for hash in ["face", "image"] {
+        asset(&db, "group:10", hash, "unknown", "猫猫 好的");
+        train(
+            &db,
+            "group:10",
+            "group:10",
+            hash,
+            "quiet_rescue",
+            Outcome::Positive,
+        );
+    }
+    db.execute(
+        "UPDATE media_assets SET kind='image' WHERE hash='image'",
+        [],
+    )
+    .unwrap();
+    let mut c = config();
+    assert_eq!(
+        ms::select(&db, "group:10", NOW, &c, 0.)
+            .unwrap()
+            .unwrap()
+            .candidate
+            .hash,
+        "face"
+    );
+    db.execute(
+        "UPDATE messages SET text=? WHERE id LIKE 'day-%'",
+        ["这是一条用于学习群内人类短消息密度的长消息，长度明确超过二十四个字。"],
+    )
+    .unwrap();
+    assert_eq!(
+        ms::select(&db, "group:10", NOW, &c, 0.)
+            .unwrap()
+            .unwrap()
+            .candidate
+            .hash,
+        "image"
+    );
+    c.groups.insert(
+        "group:10".into(),
+        Attention {
+            reaction_style: Some(ms::Reaction::Reserved),
+            ..Default::default()
+        },
+    );
+    assert_eq!(
+        ms::select(&db, "group:10", NOW, &c, 0.)
+            .unwrap()
+            .unwrap()
+            .candidate
+            .hash,
+        "image"
+    );
+    c.groups.get_mut("group:10").unwrap().reaction_style = Some(ms::Reaction::Lively);
+    assert_eq!(
+        ms::select(&db, "group:10", NOW, &c, 0.)
+            .unwrap()
+            .unwrap()
+            .candidate
+            .hash,
+        "face"
+    );
+}
+
+#[test]
+fn structural_confidence_is_monotone_continuous_and_drives_probability() {
+    let c = config();
+    let mut e = Evidence {
+        weighted_turns: 3.,
+        previous_gap_seconds: 10.,
+        silent_seconds: 600.,
+        ..Default::default()
+    };
+    let mut previous = 0.;
+    let mut p_previous = 0.;
+    for i in 0..=10000 {
+        e.previous_similarity = i as f64 / 10000.;
+        let confidence = e.confidence(&c.classification);
+        assert!((0. ..=1.).contains(&confidence));
+        assert!(confidence >= previous && confidence - previous < 0.001);
+        let mut stage = classified(Stage::Closing, Relation::Continuation, i >= 2500);
+        stage.confidence = confidence;
+        let p = ms::probability(&activity(true, 600.), &stage, &c, false);
+        assert!(p >= p_previous && p - p_previous < 0.001);
+        previous = confidence;
+        p_previous = p;
+    }
+    let baseline = e.confidence(&c.classification);
+    e.weighted_turns += 1.;
+    assert!(e.confidence(&c.classification) > baseline);
+    e.previous_gap_seconds += 100.;
+    assert!(e.confidence(&c.classification) < baseline);
+    // 老 pending JSON 没有连续证据时，以零置信度保守读取。
+    let old: Classification = serde_json::from_value(json!({
+        "stage":"closing", "relation":"continuation", "confident":true,
+        "evidence":{"previous_similarity":1., "next_similarity":0.,
+        "alternating_turns":2, "silent_seconds":600., "closing_marker":true}
+    }))
+    .unwrap();
+    assert_eq!(old.confidence, 0.);
+}
+
+#[test]
+fn classifier_confidence_does_not_inherit_hard_link_or_turn_boundaries() {
+    use qq_inner_core::persona::conversation;
+    let mut c = conversation::Config {
+        closing_markers: vec!["好的".into()],
+        ..Default::default()
+    };
+    let mut messages: Vec<qq_inner_core::engine::policy::Message> = (0..4)
+        .map(|i| {
+            serde_json::from_value(json!({"chat":"group:10", "id":i.to_string(),
+            "sender":(i % 2).to_string(), "name":"test", "text":"猫猫 好的",
+            "ts":i as f64 * 10., "self":false, "hint":"open"}))
+            .unwrap()
+        })
+        .collect();
+    // 间隔跨过阶段判定的硬阈值，离散 turns 会跳变，连续证据不得跳变。
+    let mut results = Vec::new();
+    for gap in [c.gap_seconds - 1e-7, c.gap_seconds + 1e-7] {
+        messages[3].ts = messages[2].ts + gap;
+        results.push(conversation::classify(&messages, 3, 1000., &c));
+    }
+    assert_ne!(
+        results[0].evidence.alternating_turns,
+        results[1].evidence.alternating_turns
+    );
+    assert_ne!(results[0].confident, results[1].confident);
+    assert!(results[0].confidence > results[1].confidence);
+    assert!((results[0].confidence - results[1].confidence).abs() < 1e-6);
+    messages[3].ts = 30.;
+    messages[3].text = "猫猫 好的 收到".into();
+    let similarity = conversation::classify(&messages, 3, 1000., &c)
+        .evidence
+        .previous_similarity;
+    let mut results = Vec::new();
+    for overlap in [similarity - 1e-7, similarity + 1e-7] {
+        c.overlap = overlap;
+        results.push(conversation::classify(&messages, 3, 1000., &c));
+    }
+    assert_ne!(results[0].confident, results[1].confident);
+    assert!((results[0].confidence - results[1].confidence).abs() < 1e-6);
 }
