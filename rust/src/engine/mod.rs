@@ -159,6 +159,8 @@ pub struct ChatState {
     pub last_think: f64,
     pub busy: bool,
     pub due: f64,
+    #[serde(skip)]
+    pub last_screen: Option<(Option<&'static str>, Option<&'static str>)>,
 }
 impl Default for ChatState {
     fn default() -> Self {
@@ -172,6 +174,7 @@ impl Default for ChatState {
             last_think: 0.,
             busy: false,
             due: 0.,
+            last_screen: None,
         }
     }
 }
@@ -893,22 +896,29 @@ impl Engine {
             {
                 continue;
             }
-            if now - s.last_think < a.min_think_interval_seconds && s.hint != Hint::SelfChat {
+            if now - s.last_think < a.min_think_interval_seconds
+                && (a.three_layer_decision || s.hint != Hint::SelfChat)
+            {
                 continue;
             }
             // 开关关闭整个新分支都不执行，不增加抽样、查询或改变 JS 状态。
             let trigger = if a.three_layer_decision {
                 let db = self.db()?;
                 let screened = crate::engine::decision::screen(&db, chat, s, a, now)?;
-                (self.options.log)(
-                    "decision_screen",
-                    json!({"chat":chat,"reply":screened.reply,"topic":screened.topic}),
-                );
+                let reasons = (screened.reply, screened.topic);
+                if s.last_screen != Some(reasons) {
+                    (self.options.log)(
+                        "decision_screen",
+                        json!({"chat":chat,"reply":screened.reply,"topic":screened.topic}),
+                    );
+                    s.last_screen = Some(reasons);
+                }
+                // 所有初筛结果共用节奏，包括回复、落签和双重阻断。
+                s.last_think = now;
+                s.due = now + a.min_think_interval_seconds.max(60.);
                 if screened.reply.is_none() {
                     "message"
                 } else if screened.topic.is_none() {
-                    // 主动尝试也有节奏，落签后推迟，防止每个 tick 重抽。
-                    s.due = now + a.min_think_interval_seconds.max(60.);
                     if (self.options.random)() >= screened.probability {
                         continue;
                     }
@@ -1151,7 +1161,7 @@ impl Engine {
                     return Ok(());
                 }
                 let screened =
-                    crate::engine::decision::screen(&*self.db()?, chat, state, a, self.now())?;
+                    crate::engine::decision::recheck(&*self.db()?, chat, state, a, self.now())?;
                 if (trigger == "topic" && screened.topic.is_some())
                     || (trigger == "message" && screened.reply.is_some())
                 {

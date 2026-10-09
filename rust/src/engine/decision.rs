@@ -17,6 +17,28 @@ pub struct Screen {
 
 /// 集中列出确定性闸门；每层独立得出阻断原因，调度器只负责回复优先。
 pub fn screen(db: &Store, chat: &str, s: &ChatState, a: &Agent, now: f64) -> Result<Screen> {
+    screen_inner(db, chat, s, a, now, true)
+}
+
+/// 已获 tick 准入的同版本任务复核其余闸门，不被自身刚设置的冷却拦截。
+pub(super) fn recheck(
+    db: &Store,
+    chat: &str,
+    s: &ChatState,
+    a: &Agent,
+    now: f64,
+) -> Result<Screen> {
+    screen_inner(db, chat, s, a, now, false)
+}
+
+fn screen_inner(
+    db: &Store,
+    chat: &str,
+    s: &ChatState,
+    a: &Agent,
+    now: f64,
+    cooldown: bool,
+) -> Result<Screen> {
     let counts = db.counts(chat, now)?;
     let common = if policy::quiet(now, a.quiet_hours.as_ref()) {
         // 静默
@@ -24,7 +46,7 @@ pub fn screen(db: &Store, chat: &str, s: &ChatState, a: &Agent, now: f64) -> Res
     } else if num(&counts, "total") >= a.max_messages_per_hour {
         // 总配额
         Some("quota")
-    } else if now - s.last_think < a.min_think_interval_seconds {
+    } else if cooldown && now - s.last_think < a.min_think_interval_seconds {
         // 思考冷却
         Some("cooldown")
     } else {

@@ -44,7 +44,40 @@ impl Store {
                 ))?;
             }
         }
+        store.initialize_group_hours()?;
         Ok(store)
+    }
+    /// 独立 UTC 绝对小时桶；消息容量裁剪不回减计数。事务保证迁移只回填一次。
+    fn initialize_group_hours(&self) -> Result<()> {
+        let tx = self.immediate()?;
+        let exists: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='group_hours')",
+            [],
+            |r| r.get(0),
+        )?;
+        if !exists {
+            self.db.execute_batch(
+                "CREATE TABLE group_hours(
+                chat TEXT NOT NULL, hour INTEGER NOT NULL, count INTEGER NOT NULL,
+                updated REAL NOT NULL, PRIMARY KEY(chat,hour));",
+            )?;
+            let now = chrono::Utc::now().timestamp() as f64;
+            self.execute(
+                "INSERT INTO group_hours SELECT chat,CAST(ts/3600 AS INTEGER),count(*),max(ts)
+                FROM messages WHERE self=0 AND chat IS NOT NULL AND ts>=? AND ts<=?
+                GROUP BY chat,CAST(ts/3600 AS INTEGER)",
+                rusqlite::params![now - 30. * 86400., now],
+            )?;
+        }
+        // INSERT OR IGNORE 的重复消息不触发；批量写入和单条写入均原子更新。
+        self.db.execute_batch("CREATE TRIGGER IF NOT EXISTS messages_group_hours
+            AFTER INSERT ON messages WHEN NEW.self=0 AND NEW.ts IS NOT NULL AND NEW.chat IS NOT NULL BEGIN
+            INSERT INTO group_hours(chat,hour,count,updated)
+            VALUES(NEW.chat,CAST(NEW.ts/3600 AS INTEGER),1,NEW.ts)
+            ON CONFLICT(chat,hour) DO UPDATE SET count=count+1,updated=max(updated,excluded.updated);
+            END;")?;
+        tx.commit()?;
+        Ok(())
     }
     /// 供后续共享连接的模块使用；查询应使用 prepare_cached。
     pub fn connection(&self) -> &Connection {

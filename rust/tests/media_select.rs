@@ -764,3 +764,53 @@ fn classifier_confidence_does_not_inherit_hard_link_or_turn_boundaries() {
     assert_ne!(results[0].confident, results[1].confident);
     assert!((results[0].confidence - results[1].confidence).abs() < 1e-6);
 }
+
+#[test]
+fn schedule_survives_capacity_pruning_and_distinguishes_cold_start() {
+    let db = db();
+    for (chat, count, days) in [
+        ("busy", 700, 1),
+        ("sparse", 10, 3),
+        ("new", 30, 1),
+        ("established", 30, 2),
+    ] {
+        for i in 0..count {
+            message(
+                &db,
+                chat,
+                &i.to_string(),
+                NOW - (i % days) as f64 * 86400. - (i / days) as f64,
+                "hello",
+                false,
+            );
+        }
+    }
+    let before = db
+        .rows("SELECT * FROM group_hours ORDER BY chat,hour", [])
+        .unwrap();
+    db.prune(NOW, 30., 500).unwrap();
+    assert_eq!(db.history("busy", Some(1000)).unwrap().len(), 500);
+    assert_eq!(
+        db.rows("SELECT * FROM group_hours ORDER BY chat,hour", [])
+            .unwrap(),
+        before
+    );
+    for (chat, awake) in [
+        ("busy", true),
+        ("sparse", false),
+        ("new", false),
+        ("established", true),
+    ] {
+        assert_eq!(
+            ms::group_activity(&db, chat, NOW, 300.).unwrap().awake,
+            awake,
+            "{chat}"
+        );
+    }
+    // Old retained counters do not keep a group's schedule awake forever.
+    assert!(
+        !ms::group_activity(&db, "busy", NOW + 31. * 86400., 300.)
+            .unwrap()
+            .awake
+    );
+}

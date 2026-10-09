@@ -146,7 +146,6 @@ pub fn group_activity(db: &Store, chat: &str, now: f64, silence: f64) -> Result<
     for r in &rows {
         let ts = r["ts"].as_f64().unwrap_or(0.);
         let age = now - ts;
-        hours[(ts / 3600.).floor().rem_euclid(24.) as usize] += 1;
         if age <= 1800. {
             rate += 0.7 * (-age / 300.).exp() / 5. + 0.3 * (-age / 1800.).exp() / 30.;
         }
@@ -158,12 +157,23 @@ pub fn group_activity(db: &Store, chat: &str, now: f64, silence: f64) -> Result<
         .last()
         .map_or(f64::INFINITY, |r| now - r["ts"].as_f64().unwrap_or(now));
     let hour = (now / 3600.).floor().rem_euclid(24.) as usize;
-    let span = rows
-        .first()
-        .map_or(0., |r| now - r["ts"].as_f64().unwrap_or(now));
-    // 冷启动没有作息证据就不开话题；至少三天、二十条人类记录。
-    let awake = rows.len() >= 20
-        && span >= 3. * 86400.
+    let mut days = HashSet::new();
+    let mut samples = 0usize;
+    for bucket in db.rows(
+        "SELECT hour,count FROM group_hours WHERE chat=? AND hour>=? AND hour<=?",
+        params![chat, ((now - 30. * 86400.) / 3600.).floor() as i64,
+            (now / 3600.).floor() as i64],
+    )? {
+        let h = bucket["hour"].as_i64().unwrap();
+        let count = bucket["count"].as_u64().unwrap() as usize;
+        hours[h.rem_euclid(24) as usize] += count;
+        samples += count;
+        days.insert(h.div_euclid(24));
+    }
+    // 二十条、两个 UTC 日排除稀疏冷启动；单日二百条已有充足证据，
+    // 不强迫高流量群等待跨日（旧库的 500 条可能只覆盖数小时）。
+    let awake = samples >= 20
+        && (days.len() >= 2 || samples >= 200)
         && hours[hour] >= 2
         && hours[hour] as f64 >= *hours.iter().max().unwrap() as f64 * 0.1;
     let n=db.first("SELECT count(DISTINCT r.message_id) AS n FROM media_receipts r JOIN messages m ON m.chat=r.chat AND m.id=r.message_id WHERE r.chat=? AND m.self=0 AND m.ts<=? AND m.ts>=?",params![chat,now,now-30.*86400.])?.unwrap()["n"].as_f64().unwrap_or(0.);

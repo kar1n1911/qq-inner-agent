@@ -27,7 +27,7 @@ fn schema_migration_and_constraints() -> Result<()> {
         .execute("INSERT INTO activity_rhythm(id) VALUES(1)", [])
         .is_err());
     let again = Store::initialize(s.db)?;
-    assert_eq!(again.schema()?["tables"].as_object().unwrap().len(), 17);
+    assert_eq!(again.schema()?["tables"].as_object().unwrap().len(), 18);
     Ok(())
 }
 
@@ -314,5 +314,66 @@ fn prune_all_nine_categories_and_boundaries() -> Result<()> {
     s.prune(now, 1., 0)?;
     assert!(s.history("g", None)?.is_empty());
     assert!(s.handled("g")?.is_none());
+    Ok(())
+}
+
+#[test]
+fn group_hours_migrates_once_and_ingests_atomically() -> Result<()> {
+    let legacy = Connection::open_in_memory()?;
+    legacy.execute_batch(include_str!("schema.sql"))?;
+    let now = chrono::Utc::now().timestamp() as f64;
+    for (id, age, own) in [
+        ("a", 100., 0),
+        ("b", 200., 0),
+        ("c", 86400., 0),
+        ("old", 31. * 86400., 0),
+        ("future", -86400., 0),
+        ("self", 100., 1),
+    ] {
+        legacy.execute(
+            "INSERT INTO messages VALUES('g',?,'u','n','text',?,?)",
+            rusqlite::params![id, now - age, own],
+        )?;
+    }
+    // Existing retention-limited active group must be awake immediately after upgrade.
+    for i in 0..507 {
+        legacy.execute(
+            "INSERT INTO messages VALUES('busy',?,'u','n','text',?,0)",
+            rusqlite::params![i.to_string(), now - (i - 20).max(0) as f64 * 40.],
+        )?;
+    }
+    let s = Store::initialize(legacy)?;
+    crate::media::media_select::enable(&s)?;
+    assert!(crate::media::media_select::group_activity(&s, "busy", now, 300.)?.awake);
+    let expected = s.rows(
+        "SELECT chat,CAST(ts/3600 AS INTEGER) AS hour,count(*) AS count,max(ts) AS updated
+        FROM messages WHERE self=0 AND ts>=? AND ts<=? GROUP BY chat,hour ORDER BY chat,hour",
+        rusqlite::params![now - 30. * 86400., now],
+    )?;
+    assert_eq!(
+        s.rows("SELECT * FROM group_hours ORDER BY chat,hour", [])?,
+        expected
+    );
+    let s = Store::initialize(s.db)?;
+    assert_eq!(
+        s.rows("SELECT * FROM group_hours ORDER BY chat,hour", [])?,
+        expected
+    );
+    let m = json!({"chat":"g","id":"new","ts":now,"self":false});
+    assert!(s.message(&m)?);
+    assert!(!s.message(&m)?);
+    assert_eq!(
+        s.first("SELECT sum(count) AS n FROM group_hours WHERE chat='g'", [])?
+            .unwrap()["n"],
+        4
+    );
+    let tx = s.immediate()?;
+    s.message(&json!({"chat":"g","id":"rollback","ts":now}))?;
+    tx.rollback()?;
+    assert_eq!(
+        s.first("SELECT sum(count) AS n FROM group_hours WHERE chat='g'", [])?
+            .unwrap()["n"],
+        4
+    );
     Ok(())
 }

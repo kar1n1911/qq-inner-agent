@@ -1640,7 +1640,7 @@ async fn independent_topic_gates_and_probability() {
                     db.execute("DELETE FROM thoughts", []).unwrap();
                 }
                 "outside_group_schedule" => {
-                    db.execute("DELETE FROM messages WHERE id != 'last'", [])
+                    db.execute("DELETE FROM group_hours", [])
                         .unwrap();
                 }
                 "group_active" => {
@@ -1732,10 +1732,18 @@ async fn topic_probability_rejection_and_reply_priority() {
     e.wait_idle().await;
     assert!(!h.trace.lock().unwrap().iter().any(|v| v[0] == "model"));
     assert!(e.chats()[0].1.due > h.now());
-    // 新消息优先走①，②的空池/作息条件不阻止被点名的正常回复。
+    let screened_at = h.now();
+    assert_eq!(e.chats()[0].1.last_think, screened_at);
+    // 新消息仍遵守初筛冷却；冷却后优先走①，②不阻止正常回复。
     e.ingest(&h.event(&json!({"id":"new"}))).unwrap();
     h.model.lock().unwrap()["decisionDraw"] = json!(0.);
     e.tick().unwrap();
+    assert!(!h.trace.lock().unwrap().iter().any(|v| v[0] == "model"));
+    *h.now.lock().unwrap() += e.config.agent.min_think_interval_seconds;
+    e.tick().unwrap();
+    // reply.is_none() reserves the interval before the asynchronous cycle starts.
+    assert_eq!(e.chats()[0].1.last_think, h.now());
+    assert_eq!(e.chats()[0].1.due, h.now()+60.);
     e.wait_idle().await;
     let trace = h.trace.lock().unwrap();
     assert!(trace.iter().any(|v| v[0] == "model" && v[3] == "message"));
@@ -2617,4 +2625,57 @@ async fn existing_member_list_calls_cache_other_bots_without_extra_requests() {
         );
         e.stop().await;
     }
+}
+
+#[tokio::test]
+async fn screen_throttles_blocked_ticks_and_logs_only_transitions() {
+    let (e, h) = topic_setup(json!({"minThinkIntervalSeconds":60}));
+    h.store
+        .lock()
+        .unwrap()
+        .execute("DELETE FROM group_hours", [])
+        .unwrap();
+    let start = h.now();
+    e.tick().unwrap();
+    let state = e.chats()[0].1.clone();
+    assert_eq!(state.last_think, start);
+    assert_eq!(state.due, start + 60.);
+    // If screen runs during cooldown, its reservoir query now fails.
+    h.store
+        .lock()
+        .unwrap()
+        .execute("ALTER TABLE thoughts RENAME TO hidden_thoughts", [])
+        .unwrap();
+    for second in 1..60 {
+        *h.now.lock().unwrap() = start + second as f64;
+        e.tick().unwrap();
+        assert_eq!(e.chats()[0].1.last_think, start);
+    }
+    h.store
+        .lock()
+        .unwrap()
+        .execute("ALTER TABLE hidden_thoughts RENAME TO thoughts", [])
+        .unwrap();
+    for second in [60., 120., 180.] {
+        *h.now.lock().unwrap() = start + second;
+        e.tick().unwrap();
+        assert_eq!(e.chats()[0].1.last_think, start + second);
+    }
+    let logs = || {
+        h.trace
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|v| v[0] == "log" && v[1] == "decision_screen")
+            .count()
+    };
+    assert_eq!(logs(), 1);
+    h.store
+        .lock()
+        .unwrap()
+        .execute("DELETE FROM thoughts", [])
+        .unwrap();
+    *h.now.lock().unwrap() = start + 240.;
+    e.tick().unwrap();
+    assert_eq!(logs(), 2);
 }

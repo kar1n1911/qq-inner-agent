@@ -15,6 +15,10 @@ fn expected(mode: &str) -> Value {
     golden::expected(include_str!("golden/store.json"), &json!({"mode":mode}))
 }
 fn normalize(mut schema: Value) -> Value {
+    // Rust-only schedule aggregates extend the shared legacy schema.
+    schema["objects"].as_array_mut().unwrap().retain(|r|
+        r["name"] != "group_hours" && r["name"] != "messages_group_hours");
+    schema["tables"].as_object_mut().unwrap().remove("group_hours");
     for row in schema["objects"].as_array_mut().unwrap() {
         if let Some(sql) = row["sql"].as_str() {
             row["sql"] = json!(sql
@@ -59,7 +63,7 @@ fn shared_js_database_schema_and_json_roundtrip() {
         normalize(s.schema().unwrap()),
         normalize(js["schema"].clone())
     );
-    assert_eq!(s.schema().unwrap()["tables"].as_object().unwrap().len(), 17);
+    assert_eq!(s.schema().unwrap()["tables"].as_object().unwrap().len(), 18);
     assert_eq!(
         normalize(Store::in_memory().unwrap().schema().unwrap()),
         normalize(js["schema"].clone())
