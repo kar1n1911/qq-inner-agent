@@ -77,13 +77,24 @@ impl EngineTransport for OneBot {
     }
 }
 // 不依赖 trait upcasting（保持仓库 MSRV）；与 orientation 共用同一个传输实例。
-struct OrientationAdapter(Arc<dyn EngineTransport>);
+struct OrientationAdapter(Arc<dyn EngineTransport>, Arc<self_identity::Cache>, Clock);
 impl OrientationTransport for OrientationAdapter {
     fn self_id(&self) -> String {
         self.0.self_id()
     }
     fn call<'a>(&'a self, action: &'a str, params: Value) -> BoxFuture<'a, Result<Value>> {
         self.0.call(action, params)
+    }
+    fn titled_members<'a>(&'a self, chat: &'a str) -> BoxFuture<'a, Vec<Value>> {
+        Box::pin(async move {
+            let Some(group) = chat.strip_prefix("group:") else {
+                return vec![];
+            };
+            match self.1.members(self.0.as_ref(), group, (self.2)()).await {
+                Ok(members) => self_identity::titled_members(&members),
+                Err(_) => vec![],
+            }
+        })
     }
 }
 // 身份网络操作每一步都检查停机/离线状态，避免热重载后继续修改账号。
@@ -99,20 +110,13 @@ impl OrientationTransport for IdentityAdapter<'_> {
                 !*self.0.aborted.borrow() && state.connected && state.online,
                 "identity_transport_stopped"
             );
-            let qq = self.0.transport.self_id();
-            let group = params.get("group_id").map(crate::config::js_string);
-            let result = self.0.transport.call(action, params).await?;
-            // Reuse both existing member-list paths (nickname samples and persona
-            // automation); this observer performs no additional network requests.
-            if action == "get_group_member_list" && self.0.transport.self_id() == qq {
-                if let Some(group) = group {
-                    self.0.self_identity.observe_members(
-                        &qq,
-                        &format!("group:{group}"),
-                        &result,
-                    );
-                }
+            if action == "get_group_member_list" {
+                let group = crate::config::js_string(&params["group_id"]);
+                return self.0.self_identity
+                    .members(self.0.transport.as_ref(), &group, self.0.now())
+                    .await;
             }
+            let result = self.0.transport.call(action, params).await?;
             Ok(result)
         })
     }
@@ -224,7 +228,7 @@ pub struct Engine {
     ocr: Option<crate::media::ocr::Worker>,
     topic_sources: Arc<Mutex<crate::topic::Sources>>,
     core: Mutex<Core>,
-    self_identity: self_identity::Cache,
+    self_identity: Arc<self_identity::Cache>,
     aborted: watch::Sender<bool>,
     // 多个 stop/wait_idle 调用者不能各自拿走任务后提前报告空闲。
     joining: tokio::sync::Mutex<()>,
@@ -315,11 +319,16 @@ impl Engine {
             .enabled
             .then(|| crate::media::Collector::new(&config.data_dir, collection));
         let (aborted, signal) = watch::channel(false);
+        let self_identity = Arc::new(self_identity::Cache::default());
         let orientation = GroupOrientation::new(
             store.clone(),
             config.agent.clone(),
             provider.clone(),
-            Arc::new(OrientationAdapter(transport.clone())),
+            Arc::new(OrientationAdapter(
+                transport.clone(),
+                self_identity.clone(),
+                options.now.clone(),
+            )),
             options.now.clone(),
             signal,
         )?;
@@ -335,7 +344,7 @@ impl Engine {
             topic_sources: Arc::new(Mutex::new(Default::default())),
             orientation,
             core: Mutex::new(Core::default()),
-            self_identity: self_identity::Cache::default(),
+            self_identity,
             aborted,
             joining: tokio::sync::Mutex::new(()),
         }))
@@ -1298,7 +1307,14 @@ impl Engine {
             let prompt_history = digest.as_ref().map_or(&t.history, |d| &d.messages);
             let identity = self.self_identity.identity(&self.transport.self_id(), chat);
             let mut payload = json!({"personality":personality_context(a,|| (self.options.expression_random)()),"persona":crate::persona::persona(&db, chat, &a.persona.text, &a.identity)?,"name":a.name.text,"trigger":trigger,"addressedHint":t.hint,"groupOrientation":orientation_profile,
-                "history":prompt_history.iter().map(|m|json!({"id":m["id"],"sender":m["sender"],"self":truthy(&m["self"]),"timestamp":m["ts"],"speaker":if truthy(&m["self"]) {identity.visible_name(&a.name.text)} else {text(m,"name")},"text":m["text"]})).collect::<Vec<_>>(),
+                "history":prompt_history.iter().map(|m| { let mut entry = json!({"id":m["id"],"sender":m["sender"],"self":truthy(&m["self"]),"timestamp":m["ts"],"speaker":if truthy(&m["self"]) {identity.visible_name(&a.name.text)} else {text(m,"name")},"text":m["text"]});
+                    if truthy(&m["self"]) {
+                        identity.member.annotate(&mut entry);
+                    } else {
+                        self.self_identity.member(&identity.qq, chat, text(m, "sender")).annotate(&mut entry);
+                    }
+                    entry
+                }).collect::<Vec<_>>(),
                 "retainedIdeas":self.reservoir(&db,&t)?,"priorExpectation":db.expectation(chat,now)?});
             if let Some(digest) = digest {
                 payload["backlogDigest"] = digest.context;

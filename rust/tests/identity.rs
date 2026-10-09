@@ -294,7 +294,7 @@ async fn switches_collision_and_unavailable_originals_fail_closed() {
         tick(&e).await;
         // Visible identity reads are independent of automatic identity mutations.
         assert!(m.calls.lock().unwrap().iter().all(|(action, _)| {
-            matches!(action.as_str(), "get_login_info" | "get_group_member_info")
+            matches!(action.as_str(), "get_login_info" | "get_group_member_info" | "get_group_member_list")
         }));
         assert!(db
             .lock()
@@ -459,12 +459,9 @@ async fn signature_only_uses_grown_persona_and_restores_even_empty_original() {
         assert!(signature.chars().count() <= 50);
         assert!(signature.contains("灵感") && signature.contains("求真"));
         assert!(!signature.contains("冒充"));
-        assert!(!m
-            .calls
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|(action, _)| action == "get_group_member_list"));
+        // Public context refresh reads the roster once; signature automation adds none.
+        assert_eq!(m.calls.lock().unwrap().iter()
+            .filter(|(action, _)| action == "get_group_member_list").count(), 1);
         assert_eq!(
             identity::backup(&db.lock().unwrap())
                 .unwrap()

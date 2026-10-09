@@ -2295,7 +2295,7 @@ async fn backfill_ingests_expired_history_without_replying() {
 async fn visible_self_identity_is_cached_scoped_and_injected() {
     for (member, expected) in [
         (
-            json!({"card":"丹德莱","nickname":"Kar1n1911"}),
+            json!({"card":"丹德莱","nickname":"Kar1n1911","role":"owner","title":"总督","level":"100"}),
             "丹德莱",
         ),
         (json!({"card":"","nickname":"Kar1n1911"}), "Kar1n1911"),
@@ -2311,7 +2311,7 @@ async fn visible_self_identity_is_cached_scoped_and_injected() {
         *h.model.lock().unwrap() = json!({"allocation":"self","loginInfo":{"nickname":"Kar1n1911"},"memberInfo":{"10":member,"11":{"card":"别群名片","nickname":"Kar1n1911"}}});
         e.tick().unwrap();
         e.wait_idle().await;
-        assert_eq!(h.identity_reads.lock().unwrap().len(), 3);
+        assert_eq!(h.identity_reads.lock().unwrap().len(), 5);
         for (i, name) in ["Kar1n1911", expected, "Luma"].iter().enumerate() {
             e.ingest(&h.event(&json!({"id":format!("alias{i}"),"text":format!("{name}：你好")})))
                 .unwrap();
@@ -2337,6 +2337,10 @@ async fn visible_self_identity_is_cached_scoped_and_injected() {
             .find(|m| m["self"] == true)
             .unwrap();
         assert_eq!(own["speaker"], expected);
+        for field in ["role", "title"] {
+            assert_eq!(own.get(field), member.get(field));
+            assert_eq!(payload["selfIdentity"].get(field), member.get(field));
+        }
         assert_eq!(payload["selfIdentity"]["qq"], "99");
         assert_eq!(payload["selfIdentity"]["nickname"], "Kar1n1911");
         assert_eq!(
@@ -2361,7 +2365,7 @@ async fn visible_self_identity_is_cached_scoped_and_injected() {
         }
         assert_eq!(
             h.identity_reads.lock().unwrap().len(),
-            3,
+            5,
             "turns reuse cached identity"
         );
         e.ingest(&h.event(&json!({"id":"other-card","text":"别群名片：你好"})))
@@ -2376,7 +2380,7 @@ async fn visible_self_identity_is_cached_scoped_and_injected() {
         e.wait_idle().await;
         assert_eq!(
             h.identity_reads.lock().unwrap().len(),
-            6,
+            10,
             "failed refresh is also cached"
         );
         e.ingest(&h.event(&json!({"id":"fallback","text":"Luma：你好"})))
@@ -2581,13 +2585,13 @@ async fn existing_member_list_calls_cache_other_bots_without_extra_requests() {
                 .lock()
                 .unwrap()
                 .iter()
-                .filter(|(action, _)| action == "get_group_member_list")
+                .filter(|(action, params)| action == "get_group_member_list" && params["group_id"] == "10")
                 .count()
         };
         assert_eq!(
             list_calls(),
-            2,
-            "only nickname sampling and persona automation fetch the list"
+            1,
+            "nickname sampling and persona automation reuse the shared roster"
         );
         // A subsequent turn reads the cache, after both existing paths have finished.
         *h.now.lock().unwrap() += 2.;
@@ -2620,7 +2624,7 @@ async fn existing_member_list_calls_cache_other_bots_without_extra_requests() {
         }
         assert_eq!(
             list_calls(),
-            2,
+            1,
             "payload construction never fetches a roster"
         );
         e.stop().await;
@@ -2678,4 +2682,67 @@ async fn screen_throttles_blocked_ticks_and_logs_only_transitions() {
     *h.now.lock().unwrap() = start + 240.;
     e.tick().unwrap();
     assert_eq!(logs(), 2);
+}
+
+#[tokio::test]
+async fn public_member_metadata_reaches_context_orientation_and_self_without_memory_writes() {
+    for supported in [true, false] {
+        let (e,h) = setup(&base("public-member-metadata", json!({
+            "allowedGroups":["10"],
+            "observation":{"enabled":true,"minSeconds":1,"minMessages":1}
+        }), vec![]));
+        let members = if supported { json!([
+            {"user_id":99,"card":"自己名片","role":"member","title":"bot","level":"10","is_robot":true},
+            {"user_id":20,"card":"群友名片","role":"admin","title":"奶淇琳","level":"100","is_robot":false}
+        ]) } else { json!([{"user_id":99}, {"user_id":20}]) };
+        *h.model.lock().unwrap() = json!({"allocation":"self", "memberList":{"10":members}});
+        e.ingest(&h.event(&ingest("metadata-msg", "[CQ:at,qq=99]你好"))).unwrap();
+        *h.now.lock().unwrap() += 2.;
+        e.tick().unwrap();
+        e.wait_idle().await;
+        let inputs = h.model_inputs.lock().unwrap().clone();
+        let form = &inputs.iter().find(|(stage,_)| stage == "FORM").unwrap().1;
+        let orient = &inputs.iter().find(|(stage,_)| stage == "ORIENT").unwrap().1;
+        let message = form["history"].as_array().unwrap().iter().find(|m| m["id"] == "metadata-msg").unwrap();
+        assert_eq!(message["speaker"], "Human");
+        if supported {
+            assert_eq!(message["role"], "admin");
+            assert_eq!(message["title"], "奶淇琳");
+            assert_eq!(form["selfIdentity"]["role"], "member");
+            assert_eq!(form["selfIdentity"]["title"], "bot");
+            assert_eq!(form["selfIdentity"]["otherBots"], json!([]));
+            assert_eq!(orient["sources"]["titledMembers"], json!([
+                {"qq":"99","name":"自己名片","role":"member","title":"bot"},
+                {"qq":"20","name":"群友名片","role":"admin","title":"奶淇琳"}
+            ]));
+        } else {
+            for value in [message, &form["selfIdentity"]] {
+                assert!(value.get("role").is_none());
+                assert!(value.get("title").is_none());
+            }
+            assert!(orient["sources"].get("titledMembers").is_none());
+        }
+        *h.now.lock().unwrap() += 2.;
+        e.ingest(&h.event(&ingest("metadata-followup", "[CQ:at,qq=99]继续"))).unwrap();
+        e.tick().unwrap();
+        e.wait_idle().await;
+        let later = h.model_inputs.lock().unwrap().clone();
+        let form = &later.iter().rev().find(|(stage,_)| stage == "FORM").unwrap().1;
+        let own = form["history"].as_array().unwrap().iter().find(|m| m["self"] == true).unwrap();
+        if supported {
+            assert_eq!(own["role"], "member");
+            assert_eq!(own["title"], "bot");
+        } else {
+            assert!(own.get("role").is_none());
+            assert!(own.get("title").is_none());
+        }
+        assert_eq!(h.identity_reads.lock().unwrap().iter().filter(|(action,_)| action == "get_group_member_list").count(), 1);
+        {
+        let db = h.store.lock().unwrap();
+        let raw = db.history("group:10",None).unwrap();
+        assert!(raw.iter().all(|m| m.get("title").is_none() && m.get("role").is_none()));
+        assert!(db.rows("SELECT * FROM memory_layers", []).unwrap().is_empty());
+        }
+        e.stop().await;
+    }
 }

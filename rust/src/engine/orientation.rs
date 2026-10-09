@@ -121,6 +121,9 @@ pub fn observation_satisfied(row: &OrientationRow, now: f64, config: &Observatio
 /// 可注入边界；真实 OneBot 与 provider 使用已有实现，测试无需外网。
 pub trait OrientationTransport: Send + Sync {
     fn self_id(&self) -> String;
+    fn titled_members<'a>(&'a self, _chat: &'a str) -> BoxFuture<'a, Vec<Value>> {
+        Box::pin(async { vec![] })
+    }
     fn call<'a>(&'a self, action: &'a str, params: Value) -> BoxFuture<'a, Result<Value>>;
 }
 impl OrientationTransport for OneBot {
@@ -324,7 +327,15 @@ impl GroupOrientation {
             return Ok(false);
         }
         let recent = self.db()?.history(chat,Some(c.history_limit as i64))?.into_iter().filter(|m| !truthy(&m["self"])).map(|m| json!({"id":m["id"],"sender":m["sender"],"name":m["name"],"time":m["ts"],"text":clip(&m["text"],800)})).collect::<Vec<_>>();
-        let payload = json!({"persona":crate::persona::persona(&*self.db()?, chat, &self.agent.persona.text, &self.agent.identity)?,"group":chat,"observedSeconds":(self.now)()-r.started,"observedMessages":r.message_count,"sources":r.sources,"recentMessages":recent});
+        let mut payload = json!({"persona":crate::persona::persona(&*self.db()?, chat, &self.agent.persona.text, &self.agent.identity)?,"group":chat,"observedSeconds":(self.now)()-r.started,"observedMessages":r.message_count,"sources":r.sources,"recentMessages":recent});
+        // Public culture reference, capped at 40; never added to message evidence.
+        let titled = self.transport.titled_members(chat).await;
+        if !self.fresh(chat, epoch)? {
+            return Ok(false);
+        }
+        if !titled.is_empty() {
+            payload["sources"]["titledMembers"] = json!(titled);
+        }
         let result = self.provider.json(ORIENTATION, payload).await;
         if !self.fresh(chat, epoch)? {
             return Ok(false);

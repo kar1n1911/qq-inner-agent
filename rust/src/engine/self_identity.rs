@@ -10,6 +10,7 @@ pub(super) struct Identity {
     pub nickname: String,
     pub card: String,
     other_bots: Option<Vec<OtherBot>>,
+    pub member: Member,
 }
 impl Identity {
     pub fn visible_name<'a>(&'a self, fallback: &'a str) -> &'a str {
@@ -25,6 +26,7 @@ impl Identity {
         if let Some(bots) = &self.other_bots {
             payload["otherBots"] = json!(bots);
         }
+        self.member.annotate(&mut payload);
         payload
     }
 }
@@ -34,12 +36,88 @@ struct OtherBot {
     name: String,
 }
 
-// Independent from the login/card refresh so that it cannot overwrite a roster
-// received concurrently through either existing persona member-list call.
+/// Public roster metadata only; never stored in person memory or learning evidence.
+#[derive(Clone, Default, serde::Serialize)]
+pub(super) struct Member {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    role: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    level: Option<Value>,
+}
+impl Member {
+    fn parse(value: &Value) -> Self {
+        Self {
+            role: value["role"]
+                .as_str()
+                .filter(|s| matches!(*s, "owner" | "admin" | "member"))
+                .map(str::to_owned),
+            title: value["title"]
+                .as_str()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned),
+            level: match &value["level"] {
+                Value::String(s) if !s.trim().is_empty() => Some(json!(s.trim())),
+                Value::Number(n) => Some(json!(n)),
+                _ => None,
+            },
+        }
+    }
+    pub fn annotate(&self, value: &mut Value) {
+        if let Some(role) = &self.role {
+            value["role"] = json!(role);
+        }
+        if let Some(title) = &self.title {
+            value["title"] = json!(title);
+        }
+    }
+}
+#[derive(Default)]
+struct Roster {
+    members: HashMap<String, Member>,
+    other_bots: Option<Vec<OtherBot>>,
+}
 #[derive(Default)]
 struct BotSnapshot {
     qq: String,
-    groups: HashMap<String, Vec<OtherBot>>,
+    groups: HashMap<String, Roster>,
+}
+#[derive(Default)]
+struct RosterReads {
+    qq: String,
+    groups: HashMap<String, (f64, Option<Value>)>,
+}
+
+pub(super) fn titled_members(members: &Value) -> Vec<Value> {
+    members
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|m| {
+            let member = Member::parse(m);
+            member.title.as_ref()?;
+            let id = member_id(m)?;
+            let mut value = json!({"qq":id, "name":member_name(m, &id)});
+            member.annotate(&mut value);
+            Some(value)
+        })
+        .take(40)
+        .collect()
+}
+fn member_id(m: &Value) -> Option<String> {
+    match &m["user_id"] {
+        Value::String(id) if !id.trim().is_empty() => Some(id.trim().into()),
+        Value::Number(id) => Some(id.to_string()),
+        _ => None,
+    }
+}
+fn member_name(m: &Value, id: &str) -> String {
+    [field(m, "card"), field(m, "nickname")]
+        .into_iter()
+        .find(|s| !s.is_empty())
+        .unwrap_or_else(|| id.into())
 }
 
 #[derive(Default)]
@@ -47,12 +125,13 @@ struct Snapshot {
     qq: String,
     checked: Option<f64>,
     nickname: String,
-    groups: HashMap<String, (String, String)>,
+    groups: HashMap<String, (String, String, Member)>,
 }
 #[derive(Default)]
 pub(super) struct Cache {
     snapshot: Mutex<Snapshot>,
     bots: Mutex<BotSnapshot>,
+    roster_reads: tokio::sync::Mutex<RosterReads>,
     refreshing: tokio::sync::Mutex<()>,
 }
 impl Cache {
@@ -64,41 +143,79 @@ impl Cache {
                 ..BotSnapshot::default()
             };
         }
-        // 实测：群 65840633 有一名成员的头衔就叫 bot，所以“群内bot”绝不能等于自己。
-        // Only is_robot is evidence for this list; titles/names never classify robots.
-        let Some(members) = members
-            .as_array()
-            .filter(|members| members.iter().any(|m| m["is_robot"].is_boolean()))
-        else {
-            // Unsupported ports omit is_robot: omit otherBots, including any older cache.
-            bots.groups.remove(chat);
-            return;
+        let rows = members.as_array().map(Vec::as_slice).unwrap_or_default();
+        let roster = Roster {
+            members: rows
+                .iter()
+                .filter_map(|m| Some((member_id(m)?, Member::parse(m))))
+                .collect(),
+            // A title named "bot" is not evidence that the member is a robot.
+            other_bots: rows.iter().any(|m| m["is_robot"].is_boolean()).then(|| {
+                rows.iter()
+                    .filter(|m| m["is_robot"] == true)
+                    .filter_map(|m| {
+                        let id = member_id(m)?;
+                        (id != qq).then(|| OtherBot {
+                            name: member_name(m, &id),
+                            qq: id,
+                        })
+                    })
+                    .collect()
+            }),
         };
-        let others = members
-            .iter()
-            .filter(|m| m["is_robot"] == true)
-            .filter_map(|m| {
-                let id = match &m["user_id"] {
-                    Value::String(id) if !id.trim().is_empty() => id.trim().to_owned(),
-                    Value::Number(id) => id.to_string(),
-                    _ => return None,
-                };
-                if id == qq {
-                    return None;
-                }
-                let card = field(m, "card");
-                let nickname = field(m, "nickname");
-                let name = if !card.is_empty() {
-                    card
-                } else if !nickname.is_empty() {
-                    nickname
-                } else {
-                    id.clone()
-                };
-                Some(OtherBot { qq: id, name })
-            })
-            .collect();
-        bots.groups.insert(chat.into(), others);
+        bots.groups.insert(chat.into(), roster);
+    }
+
+    pub fn member(&self, qq: &str, chat: &str, sender: &str) -> Member {
+        let bots = self.bots.lock().unwrap();
+        if bots.qq != qq {
+            return Member::default();
+        }
+        bots.groups
+            .get(chat)
+            .and_then(|r| r.members.get(sender))
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// One shared 300s refresh for all consumers, including concurrent calls.
+    /// Cache failures too so unsupported ports are not retried within the same tick.
+    pub async fn members<T: OrientationTransport + ?Sized>(
+        &self,
+        transport: &T,
+        group: &str,
+        now: f64,
+    ) -> anyhow::Result<Value> {
+        let qq = transport.self_id();
+        let mut reads = self.roster_reads.lock().await;
+        if reads.qq != qq {
+            *reads = RosterReads {
+                qq: qq.clone(),
+                ..Default::default()
+            };
+        }
+        if let Some((checked, value)) = reads.groups.get(group) {
+            if now >= *checked && now - checked < 300. {
+                return value
+                    .clone()
+                    .ok_or_else(|| anyhow::anyhow!("members_unavailable"));
+            }
+        }
+        let result = transport
+            .call(
+                "get_group_member_list",
+                json!({"group_id":group,"no_cache":true}),
+            )
+            .await;
+        anyhow::ensure!(transport.self_id() == qq, "identity_account_changed");
+        let value = result.ok().filter(Value::is_array);
+        self.observe_members(
+            &qq,
+            &format!("group:{group}"),
+            value.as_ref().unwrap_or(&Value::Null),
+        );
+        reads.groups.insert(group.into(), (now, value.clone()));
+        value.ok_or_else(|| anyhow::anyhow!("members_unavailable"))
     }
 
     pub fn due(&self, qq: &str, now: f64) -> bool {
@@ -113,8 +230,9 @@ impl Cache {
         };
         if s.qq == qq {
             identity.nickname.clone_from(&s.nickname);
-            if let Some((card, nickname)) = s.groups.get(chat) {
+            if let Some((card, nickname, member)) = s.groups.get(chat) {
                 identity.card.clone_from(card);
+                identity.member = member.clone();
                 if !nickname.is_empty() {
                     identity.nickname.clone_from(nickname);
                 }
@@ -122,7 +240,14 @@ impl Cache {
         }
         let bots = self.bots.lock().unwrap();
         if bots.qq == qq {
-            identity.other_bots = bots.groups.get(chat).cloned();
+            if let Some(roster) = bots.groups.get(chat) {
+                identity.other_bots = roster.other_bots.clone();
+                if let Some(member) = roster.members.get(qq) {
+                    identity.member.role = member.role.clone().or(identity.member.role);
+                    identity.member.title = member.title.clone().or(identity.member.title);
+                    identity.member.level = member.level.clone().or(identity.member.level);
+                }
+            }
         }
         identity
     }
@@ -143,6 +268,12 @@ impl Cache {
             next.nickname = field(&login, "nickname");
         }
         for group in &engine.config.agent.allowed_groups {
+            let _ = transport
+                .call(
+                    "get_group_member_list",
+                    json!({"group_id":group,"no_cache":true}),
+                )
+                .await;
             if let Ok(member) = transport
                 .call(
                     "get_group_member_info",
@@ -152,7 +283,11 @@ impl Cache {
             {
                 next.groups.insert(
                     format!("group:{group}"),
-                    (field(&member, "card"), field(&member, "nickname")),
+                    (
+                        field(&member, "card"),
+                        field(&member, "nickname"),
+                        Member::parse(&member),
+                    ),
                 );
             }
         }
@@ -169,6 +304,91 @@ fn field(value: &Value, key: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn public_metadata_is_optional_scoped_and_bounded() {
+        let cache = Cache::default();
+        let rows = json!([
+            {"user_id":99,"role":"member","title":"bot","level":"100"},
+            {"user_id":20,"role":"owner","title":"总督","level":100},
+            {"user_id":21,"role":"invalid","title":"  ","level":null}
+        ]);
+        cache.observe_members("99", "group:10", &rows);
+        let payload = cache.identity("99", "group:10").payload("");
+        assert_eq!(payload["role"], "member");
+        assert_eq!(payload["title"], "bot");
+        assert!(payload.get("otherBots").is_none());
+        assert_eq!(
+            serde_json::to_value(cache.member("99", "group:10", "20")).unwrap(),
+            json!({"role":"owner","title":"总督","level":100})
+        );
+        assert_eq!(
+            cache.member("99", "group:10", "99").level,
+            Some(json!("100"))
+        );
+        for (account, chat, sender) in [
+            ("99", "group:11", "20"),
+            ("100", "group:10", "20"),
+            ("99", "group:10", "21"),
+        ] {
+            assert_eq!(
+                serde_json::to_value(cache.member(account, chat, sender)).unwrap(),
+                json!({})
+            );
+        }
+        let many = json!((0..60)
+            .map(|n| json!({"user_id":n,"title":"总督"}))
+            .collect::<Vec<_>>());
+        assert_eq!(titled_members(&many).len(), 40);
+        assert_eq!(titled_members(&rows).len(), 2);
+        cache.observe_members("99", "group:10", &json!([{"user_id":99}]));
+        let payload = cache.identity("99", "group:10").payload("");
+        assert!(payload.get("role").is_none());
+        assert!(payload.get("title").is_none());
+        assert!(titled_members(&json!([{"user_id":99}])).is_empty());
+    }
+
+    #[tokio::test]
+    async fn roster_refresh_coalesces_concurrent_reads_and_caches_failures() {
+        struct Transport(std::sync::atomic::AtomicUsize);
+        impl OrientationTransport for Transport {
+            fn self_id(&self) -> String {
+                "99".into()
+            }
+            fn call<'a>(
+                &'a self,
+                action: &'a str,
+                _: Value,
+            ) -> futures_util::future::BoxFuture<'a, anyhow::Result<Value>> {
+                Box::pin(async move {
+                    assert_eq!(action, "get_group_member_list");
+                    let n = self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    tokio::task::yield_now().await;
+                    anyhow::ensure!(n == 0, "unsupported");
+                    Ok(json!([{"user_id":99,"role":"admin","title":"奶淇琳","is_robot":true}]))
+                })
+            }
+        }
+        let cache = Cache::default();
+        let transport = Transport(Default::default());
+        let (a, b) = tokio::join!(
+            cache.members(&transport, "10", 100.),
+            cache.members(&transport, "10", 100.)
+        );
+        assert_eq!(a.unwrap(), b.unwrap());
+        assert_eq!(transport.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(cache.members(&transport, "10", 399.).await.is_ok());
+        assert!(cache.members(&transport, "10", 400.).await.is_err());
+        assert!(cache.members(&transport, "10", 400.).await.is_err());
+        assert_eq!(transport.0.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert!(cache
+            .identity("99", "group:10")
+            .payload("")
+            .get("title")
+            .is_none());
+        assert!(cache.members(&transport, "10", 99.).await.is_err());
+        assert_eq!(transport.0.load(std::sync::atomic::Ordering::SeqCst), 3);
+    }
 
     #[test]
     fn other_bots_are_explicit_group_scoped_and_exclude_self() {
