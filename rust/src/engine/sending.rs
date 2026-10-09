@@ -270,8 +270,9 @@ pub fn sending_probability_with_affect(
             1. + 0.2 * behavior.mood.clamp(-1., 1.)
         },
         affinity: 1. + 0.2 * behavior.affinity.clamp(-1., 1.),
-        disposition: behavior.disposition.map_or(1., |d| {
-            let motivation = d.motivation();
+        disposition: behavior.disposition.map_or(1., |_| {
+            let motivation =
+                crate::persona::affect::motivation(behavior.mood, behavior.rationality);
             if timing.proactive {
                 motivation
             } else {

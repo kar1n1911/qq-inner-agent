@@ -367,19 +367,19 @@ fn turns_silent_raises_the_score_but_is_capped() {
 fn length_buckets_never_give_the_throwaway_bucket_to_an_addressed_turn() {
     for i in 0..=1000 {
         let draw = i as f64 / 1000.0;
-        assert_ne!(pick_length_target("self", || draw), "tiny");
+        assert_ne!(pick_length_target("self", None, || draw), "tiny");
         assert!(matches!(
-            pick_length_target("open", || draw),
+            pick_length_target("open", None, || draw),
             "tiny" | "short" | "medium" | "long"
         ));
     }
-    assert_eq!(pick_length_target("open", || 0.149), "tiny");
-    assert_eq!(pick_length_target("open", || 0.15), "short");
-    assert_eq!(pick_length_target("open", || 0.55), "medium");
-    assert_eq!(pick_length_target("open", || 0.93), "long");
-    assert_eq!(pick_length_target("self", || 0.0), "short");
-    assert_eq!(pick_length_target("self", || 0.50), "medium");
-    assert_eq!(pick_length_target("self", || 0.92), "long");
+    assert_eq!(pick_length_target("open", None, || 0.149), "tiny");
+    assert_eq!(pick_length_target("open", None, || 0.15), "short");
+    assert_eq!(pick_length_target("open", None, || 0.55), "medium");
+    assert_eq!(pick_length_target("open", None, || 0.93), "long");
+    assert_eq!(pick_length_target("self", None, || 0.0), "short");
+    assert_eq!(pick_length_target("self", None, || 0.50), "medium");
+    assert_eq!(pick_length_target("self", None, || 0.92), "long");
 }
 
 #[test]

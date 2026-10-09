@@ -2474,3 +2474,44 @@ async fn relay_links_enter_formation_only_after_review_and_local_dedup() {
         assert_eq!(*h.sends.lock().unwrap(), 0, "{mode}");
     }
 }
+
+#[tokio::test]
+async fn continuous_affect_length_flows_from_stored_coordinates() {
+    for (mood, rationality, expected) in [
+        (0., 0., "short"),
+        (-0.0026, 0.0008, "short"),
+        (-1., -1., "short"),
+        (1., 1., "medium"),
+    ] {
+        let mut case = base(
+            "continuous_affect_length",
+            json!({
+                "affect":{"enabled":true}, "personality":{"variants":[]},
+                "emoji":{"enabled":true,"probability":1}
+            }),
+            vec![],
+        );
+        case["expressionDraws"] = json!([0.1, 0.49]);
+        let (e, h) = setup(&case);
+        {
+            let db = h.store.lock().unwrap();
+            for (dimension, value) in [("mood", mood), ("rationality", rationality)] {
+                db.execute(
+                    "INSERT INTO affect_state VALUES('group:10','person:20',?,?,0,1,?,'[]')",
+                    rusqlite::params![dimension, value, h.now()],
+                )
+                .unwrap();
+            }
+        }
+        e.ingest(&h.event(&ingest("m1", "[CQ:at,qq=99]怎么浇水？")))
+            .unwrap();
+        e.tick().unwrap();
+        e.wait_idle().await;
+        let payloads = h.payloads.lock().unwrap();
+        let payload = payloads
+            .last()
+            .expect("addressed affect must reach articulation");
+        assert_eq!(payload["lengthTarget"], expected, "{mood}, {rationality}");
+        assert_eq!(*h.sends.lock().unwrap(), 1);
+    }
+}

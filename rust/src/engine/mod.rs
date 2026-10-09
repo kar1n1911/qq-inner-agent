@@ -1744,17 +1744,18 @@ impl Engine {
                 (self.options.expression_random)()
             })?
         };
+        let length_bias = behavior.disposition.map(|_| {
+            crate::persona::affect::LengthBias::from_affect(behavior.mood, behavior.rationality)
+        });
         let length_target = policy::pick_length_target(
             if t.hint == Hint::SelfChat {
                 "self"
             } else {
                 "open"
             },
+            length_bias.as_ref(),
             || (self.options.expression_random)(),
         );
-        let length_target = behavior.disposition.map_or(length_target, |d| {
-            d.adjust_length(length_target, t.hint == Hint::SelfChat)
-        });
         let face_only_allowed = a.emoji.face_only
             && length_target != "long"
             && crate::persona::humanize::face_only_allowed(

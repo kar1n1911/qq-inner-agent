@@ -1,4 +1,4 @@
-//! 三指标正交：评分不是奖励，也不进入内容；只导出离散行为。
+//! 三指标正交：评分不是奖励，也不进入内容；连续调节行为，语气、熔断及诊断保留离散分类。
 use crate::{
     memory::{num, text},
     store::Store,
@@ -21,51 +21,72 @@ pub enum Disposition {
     Scrutinizing,
     Supportive,
 }
-// 情绪值域目前只有 ±0.01 量级，用符号决定象限等于用噪声决定要不要说话。
-const DISPOSITION_DEAD_ZONE: f64 = 0.05;
+/// Intensity reaches 100% at S; Gaussian direction remains continuous across axes.
+const INTENSITY_SCALE: f64 = 0.15;
+const DIRECTION_SIGMA: f64 = 0.6;
+const LENGTH_GAMMA: f64 = 0.6;
+// Order also defines ties: neutral / positive axes prefer Scrutinizing.
+const REFERENCES: [(Disposition, f64, f64, f64, f64); 4] = [
+    (Disposition::Scrutinizing, 1., 1., 0.7, 1.),
+    (Disposition::Withdrawn, -1., 1., 0.5, 0.),
+    (Disposition::Supportive, 1., -1., 1.2, 0.),
+    (Disposition::Angry, -1., -1., 1.4, -1.),
+];
 
-/// 死区内坐标先归零，零归入正轴；二维坐标独立，agreement 不参与四象限。
+fn direction(valence: f64, rationality: f64) -> (f64, [f64; 4]) {
+    let v = valence.clamp(-1., 1.);
+    let r = rationality.clamp(-1., 1.);
+    let intensity = (v.hypot(r) / INTENSITY_SCALE).min(1.);
+    let weights = REFERENCES.map(|(_, vi, ri, _, _)| {
+        (-((v - vi).powi(2) + (r - ri).powi(2)) / (2. * DIRECTION_SIGMA.powi(2))).exp()
+    });
+    let total: f64 = weights.iter().sum();
+    (intensity, weights.map(|w| w / total))
+}
+
+/// Dominant Gaussian reference, used only for rules, burst control and diagnostics.
 pub fn disposition(valence: f64, rationality: f64) -> Disposition {
-    let valence = if valence.abs() < DISPOSITION_DEAD_ZONE {
-        0.
-    } else {
-        valence
-    };
-    let rationality = if rationality.abs() < DISPOSITION_DEAD_ZONE {
-        0.
-    } else {
-        rationality
-    };
-    match (valence < 0., rationality < 0.) {
-        (true, true) => Disposition::Angry,
-        (true, false) => Disposition::Withdrawn,
-        (false, false) => Disposition::Scrutinizing,
-        (false, true) => Disposition::Supportive,
+    let (_, weights) = direction(valence, rationality);
+    let mut dominant = 0;
+    for i in 1..weights.len() {
+        if weights[i] > weights[dominant] {
+            dominant = i;
+        }
+    }
+    REFERENCES[dominant].0
+}
+
+/// Zero intensity is exactly neutral; direction blends all four reference gains.
+/// Finite Gaussian overlap means corner gains approximate their references (within 0.005).
+pub fn motivation(valence: f64, rationality: f64) -> f64 {
+    let (intensity, weights) = direction(valence, rationality);
+    let directional: f64 = weights
+        .iter()
+        .zip(REFERENCES)
+        .map(|(w, point)| w * point.3)
+        .sum();
+    1. + intensity * (directional - 1.)
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LengthBias(f64);
+impl LengthBias {
+    pub fn from_affect(valence: f64, rationality: f64) -> Self {
+        let (intensity, weights) = direction(valence, rationality);
+        let directional: f64 = weights
+            .iter()
+            .zip(REFERENCES)
+            .map(|(w, point)| w * point.4)
+            .sum();
+        Self(intensity * directional)
+    }
+
+    pub(crate) fn multiplier(self, index: usize) -> f64 {
+        (self.0 * LENGTH_GAMMA * index as f64).exp()
     }
 }
+
 impl Disposition {
-    pub fn motivation(self) -> f64 {
-        match self {
-            Self::Angry => 1.4,
-            Self::Withdrawn => 0.5,
-            Self::Scrutinizing => 0.7,
-            Self::Supportive => 1.2,
-        }
-    }
-    /// 情绪只微调抽样档位：愤怒少说一档，审慎多一档以容纳解释；
-    /// 支持与退缩保留长度多样性（退缩已通过 motivation 降低发言概率）。
-    /// 被点名不能因降档退化为 tiny。
-    pub fn adjust_length(self, length: &'static str, addressed: bool) -> &'static str {
-        match (self, length) {
-            (Self::Angry, "long") => "medium",
-            (Self::Angry, "medium") => "short",
-            (Self::Angry, "short") if !addressed => "tiny",
-            (Self::Scrutinizing, "tiny") => "short",
-            (Self::Scrutinizing, "short") => "medium",
-            (Self::Scrutinizing, "medium") => "long",
-            _ => length,
-        }
-    }
     pub fn rule(self) -> &'static str {
         match self {
             Self::Angry => "直接、少修饰，不编造事实，不泄露内部信息。",
@@ -311,6 +332,7 @@ pub fn content_allowed(text: &str) -> bool {
 #[derive(Default)]
 pub struct Behavior {
     pub mood: f64,
+    pub rationality: f64,
     pub affinity: f64,
     pub disposition: Option<Disposition>,
     pub burst: bool,
@@ -334,6 +356,7 @@ pub fn behavior(
         disposition == Some(Disposition::Angry) && burst_allowed(store, chat, text(last, "id"))?;
     Ok(Behavior {
         mood,
+        rationality,
         affinity,
         disposition,
         burst,

@@ -305,16 +305,34 @@ const LENGTH_BUCKETS_OPEN: [(&str, f64); 4] = [
     ("long", 0.07),
 ];
 
-pub fn pick_length_target(hint: &str, random: impl FnOnce() -> f64) -> &'static str {
+pub fn pick_length_target(
+    hint: &str,
+    bias: Option<&crate::persona::affect::LengthBias>,
+    random: impl FnOnce() -> f64,
+) -> &'static str {
     let buckets: &[(&str, f64)] = if hint == "self" {
         &LENGTH_BUCKETS_ADDRESSED
     } else {
         &LENGTH_BUCKETS_OPEN
     };
+    let tilted = |i: usize, weight: f64| {
+        // Addressed buckets start at short (index 1), not tiny (index 0).
+        weight * bias.map_or(1., |b| b.multiplier(i + usize::from(hint == "self")))
+    };
+    // Preserve existing exact boundary draws when affect is absent or neutral.
+    let total: f64 = if bias.is_none_or(|b| b.multiplier(1) == 1.) {
+        1.
+    } else {
+        buckets
+            .iter()
+            .enumerate()
+            .map(|(i, (_, w))| tilted(i, *w))
+            .sum()
+    };
     let draw = random();
     let mut cumulative = 0.0;
-    for (name, weight) in buckets {
-        cumulative += weight;
+    for (i, (name, weight)) in buckets.iter().enumerate() {
+        cumulative += tilted(i, *weight) / total;
         if draw < cumulative {
             return name;
         }
@@ -817,6 +835,38 @@ mod length_tests {
     use super::*;
 
     #[test]
+    fn tilted_expected_length_is_strictly_monotone() {
+        use crate::persona::affect::LengthBias;
+        for buckets in [
+            LENGTH_BUCKETS_OPEN.as_slice(),
+            LENGTH_BUCKETS_ADDRESSED.as_slice(),
+        ] {
+            for sign in [-1., 1.] {
+                let mut previous = None;
+                for step in 0..=1000 {
+                    let coordinate = sign * step as f64 / 1000.;
+                    let bias = LengthBias::from_affect(coordinate, coordinate);
+                    let weights: Vec<f64> = buckets
+                        .iter()
+                        .enumerate()
+                        .map(|(i, (_, w))| w * bias.multiplier(i))
+                        .collect();
+                    let mean = weights
+                        .iter()
+                        .enumerate()
+                        .map(|(i, w)| i as f64 * w)
+                        .sum::<f64>()
+                        / weights.iter().sum::<f64>();
+                    if let Some(last) = previous {
+                        assert!(sign * (mean - last) > 0.);
+                    }
+                    previous = Some(mean);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn normalized_weights_and_distribution() {
         for (hint, buckets, expected) in [
             (
@@ -830,14 +880,21 @@ mod length_tests {
             assert!((buckets.iter().map(|(_, w)| w).sum::<f64>() - 1.0).abs() < 1e-12);
             let mut counts = [0; 4];
             for i in 0..1000 {
-                let length = pick_length_target(hint, || (i as f64 + 0.5) / 1000.0);
+                let length = pick_length_target(hint, None, || (i as f64 + 0.5) / 1000.0);
                 counts[["tiny", "short", "medium", "long"]
                     .iter()
                     .position(|x| *x == length)
                     .unwrap()] += 1;
             }
             assert_eq!(counts, expected);
-            assert_eq!(pick_length_target(hint, || 1.0), "long");
+            let neutral = crate::persona::affect::LengthBias::default();
+            for draw in [0., 0.15, 0.5, 0.55, 0.92, 0.93, 1.] {
+                assert_eq!(
+                    pick_length_target(hint, Some(&neutral), || draw),
+                    pick_length_target(hint, None, || draw)
+                );
+            }
+            assert_eq!(pick_length_target(hint, None, || 1.0), "long");
         }
     }
 }

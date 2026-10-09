@@ -275,22 +275,26 @@ fn the_decimal_float_round_trip_is_why_the_matrix_transfers_bits() {
 #[test]
 fn affect_disabled_is_identical_and_enabled_factors_change_probability() {
     use qq_inner_core::{
-        persona::affect::{Behavior, Disposition},
         engine::sending::sending_probability_with_affect,
+        persona::affect::{disposition, motivation, Behavior},
     };
     let t = timing(true, 15., 300., 6., 5.);
     let f = forecast(true, 0.1, ResponseMode::Answer);
     let base = sending_probability(&settings(), &t, &f);
-    for (d, multiplier) in [
-        (Disposition::Angry, 1.4),
-        (Disposition::Supportive, 1.2),
-        (Disposition::Scrutinizing, 0.7),
-        (Disposition::Withdrawn, 0.5),
+    for (mood, rationality) in [
+        (-1., -1.),
+        (1., -1.),
+        (1., 1.),
+        (-1., 1.),
+        (0., 0.),
+        (-0.0026, 0.0008),
     ] {
+        let multiplier = motivation(mood, rationality);
         let b = Behavior {
-            mood: -0.8,
+            mood,
+            rationality,
             affinity: 0.,
-            disposition: Some(d),
+            disposition: Some(disposition(mood, rationality)),
             burst: false,
         };
         let off = sending_probability_with_affect(&settings(), &t, &f, false, &b);
@@ -322,20 +326,26 @@ fn affect_disabled_is_identical_and_enabled_factors_change_probability() {
 fn addressed_disposition_has_a_floor_without_changing_other_affect_factors_or_vetoes() {
     use qq_inner_core::{
         engine::sending::sending_probability_with_affect,
-        persona::affect::{Behavior, Disposition},
+        persona::affect::{disposition, motivation, Behavior},
     };
     let mut settings = settings();
     settings.addressed_probability = 0.5; // Keep gains visible below the probability cap.
     let t = timing(false, 1., 1., 1., 1.);
-    for (disposition, expected) in [
-        (Some(Disposition::Angry), 1.4),
-        (Some(Disposition::Supportive), 1.2),
-        (Some(Disposition::Scrutinizing), 1.),
-        (Some(Disposition::Withdrawn), 1.),
-        (None, 1.),
+    for coordinates in [
+        Some((-1., -1.)),
+        Some((1., -1.)),
+        Some((1., 1.)),
+        Some((-1., 1.)),
+        Some((-0.0026, 0.0008)),
+        Some((0., 0.)),
+        None,
     ] {
+        let (mood, rationality) = coordinates.unwrap_or((-0.5, 0.));
+        let disposition = coordinates.map(|(v, r)| disposition(v, r));
+        let expected = coordinates.map_or(1., |(v, r)| motivation(v, r).max(1.));
         let behavior = Behavior {
-            mood: -0.5,
+            mood,
+            rationality,
             affinity: -0.5,
             disposition,
             burst: false,
