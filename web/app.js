@@ -31,7 +31,7 @@ function changed() { dirty = true; $('dirty-dot').hidden = false; applyStatus('U
 function page(name) {
   for (const p of document.querySelectorAll('.page')) p.hidden = p.id !== name;
   for (const b of document.querySelectorAll('.nav')) b.classList.toggle('active', b.dataset.page === name);
-  $('page-title').textContent = { overview: 'Overview', config: 'Configuration', activity: 'Activity & logs', advanced: 'Advanced' }[name];
+  $('page-title').textContent = { overview: 'Overview', gateways: 'Social gateways', config: 'Configuration', activity: 'Activity & logs', advanced: 'Advanced' }[name];
 }
 function populate(data) {
   saved = data;
@@ -46,7 +46,9 @@ function populate(data) {
   $('quiet-enabled').checked = !!q; $('quiet-start').value = q?.start ?? 23;
   $('quiet-end').value = q?.end ?? 8; $('quiet-timezone').value = q?.timezone || 'Europe/Stockholm';
   $('key-status').textContent = data.hasApiKey ? 'Saved securely' : 'Not configured';
+  $('telegram-token-status').textContent = data.hasTelegramToken ? 'Saved securely' : 'Not configured';
   $('api-key').value = ''; $('onebot-token').value = ''; $('clear-api-key').checked = false;
+  $('telegram-token').value = ''; $('clear-telegram-token').checked = false;
   $('advanced-json').value = JSON.stringify(data.config, null, 2);
   $('use-advanced').checked = false; $('threshold-output').textContent = data.config.agent.threshold.toFixed(2);
   dirty = false; $('dirty-dot').hidden = true; applyStatus('No pending changes');
@@ -83,9 +85,12 @@ async function refresh() {
     $('service-detail').textContent = fresh ? `${s.activeChats} active conversations` : 'No recent agent heartbeat';
     $('qq-value').textContent = fresh && s.qqOnline ? 'Online' : 'Disconnected';
     $('qq-detail').textContent = fresh && s.onebotConnected ? `Account ${s.selfId}` : 'Waiting for NapCat / SnowLuma';
+    $('telegram-value').textContent = fresh && s.telegramOnline ? 'Online' : 'Disconnected';
+    $('telegram-detail').textContent = fresh && s.telegramConnected ? (s.telegramUsername ? `@${s.telegramUsername}` : `Bot ${s.telegramSelfId || ''}`.trim()) : 'Waiting for Telegram';
     $('model-value').textContent = s?.model || saved?.config.provider.model || 'Not set';
     $('provider-detail').textContent = s?.provider === 'anthropic' ? 'Anthropic-compatible API' : 'OpenAI-compatible API';
-    $('chat-value').textContent = saved ? saved.config.agent.allowedGroups.length + saved.config.agent.allowedUsers.length : '—';
+    $('chat-value').textContent = saved ? saved.config.agent.allowedGroups.length + saved.config.agent.allowedUsers.length
+      + (saved.config.telegram?.allowedGroups?.length || 0) + (saved.config.telegram?.allowedUsers?.length || 0) : '—';
     $('mode-badge').textContent = state.serviceState !== 'active' ? 'Service stopped' : s?.mode === 'waiting_for_setup' ? 'Setup needed' : s?.scheduleActive === false ? 'Inactive hours' : s?.mode === 'dry_run' ? 'Preview mode' : 'Agent active';
     $('readiness').textContent = s?.missing?.length ? 'Complete setup: ' + s.missing.join(' + ') + '.' : s?.scheduleActive === false ? 'AI participation is paused by the activity schedule or rest block.' : 'The agent is ready to participate in enabled conversations.';
     const rhythm = s?.activityRhythm;
@@ -200,7 +205,7 @@ $('config-form').addEventListener('input', () => { changed(); $('threshold-outpu
 $('config-form').addEventListener('submit', async e => {
   e.preventDefault(); document.querySelectorAll('[data-save]').forEach(b => b.disabled = true);
   try {
-    const result = await api('/api/config', { method: 'PUT', body: JSON.stringify({ revision: saved.revision, config: formConfig(), apiKey: $('api-key').value, onebotToken: $('onebot-token').value, clearApiKey: $('clear-api-key').checked }) });
+    const result = await api('/api/config', { method: 'PUT', body: JSON.stringify({ revision: saved.revision, config: formConfig(), apiKey: $('api-key').value, onebotToken: $('onebot-token').value, telegramToken: $('telegram-token').value, clearApiKey: $('clear-api-key').checked, clearTelegramToken: $('clear-telegram-token').checked }) });
     populate(result); notice('Settings saved. The agent is applying them now.'); await refresh();
   } catch (e) { notice(e.message, true); }
   finally { document.querySelectorAll('[data-save]').forEach(b => b.disabled = false); }
@@ -226,14 +231,16 @@ $('load-contacts').addEventListener('click', async () => {
   $('load-contacts').disabled = true;
   try {
     const list = await api('/api/contacts'); $('contacts').replaceChildren(); $('contacts').hidden = false;
-    for (const [title, items, field] of [['Groups', list.groups, 'agent.allowedGroups'], ['Private contacts', list.friends, 'agent.allowedUsers']]) {
+    for (const [title, items, qqField, telegramField] of [['Groups', list.groups, 'agent.allowedGroups', 'telegram.allowedGroups'], ['Private contacts', list.friends, 'agent.allowedUsers', 'telegram.allowedUsers']]) {
       const section = element('div'); section.append(element('h3', title));
-      const target = document.querySelector(`[data-config="${field}"]`);
       if (!items.length) section.append(element('p', 'No contacts returned.', 'hint'));
       for (const item of items) {
+        // Telegram 群 id 为负数且命名空间不同，按网关写回对应面板，避免写入 QQ 白名单后校验失败。
+        const field = item.gateway === 'telegram' ? telegramField : qqField;
+        const target = document.querySelector(`[data-config="${field}"]`);
         const label = element('label', null, 'check'), input = document.createElement('input'); input.type = 'checkbox'; input.checked = ids(target.value).includes(item.id);
         input.addEventListener('change', () => { const values = new Set(ids(target.value)); if (input.checked) values.add(item.id); else values.delete(item.id); target.value = [...values].join(', '); changed(); });
-        label.append(input, element('span', `${item.name || item.id} · ${item.id}`)); section.append(label);
+        label.append(input, element('span', `${item.name || item.id} · ${item.id}${item.gateway === 'telegram' ? ' · Telegram' : ''}`)); section.append(label);
       }
       $('contacts').append(section);
     }
