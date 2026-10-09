@@ -35,15 +35,21 @@ pub(crate) fn unit(v: &Value) -> bool {
     v.as_f64().is_some_and(|n| (0. ..=1.).contains(&n))
 }
 pub fn memory_subjects(chat: &str, sender: &str) -> Result<Vec<String>> {
-    let id = |s: &str| {
+    let positive = |s: &str| {
         s.starts_with(|c: char| ('1'..='9').contains(&c)) && s.bytes().all(|b| b.is_ascii_digit())
+    };
+    // Telegram 超级群 id 为负数；群 chat_id 允许前导 `-`，用户/私聊 id 仍为正数。
+    let group = |s: &str| {
+        s.strip_prefix('-')
+            .map_or_else(|| positive(s), positive)
     };
     let (kind, chat_id) = chat.split_once(':').unwrap_or(("", ""));
     ensure!(
-        matches!(kind, "group" | "private")
-            && id(chat_id)
-            && id(sender)
-            && (kind != "private" || chat_id == sender),
+        match kind {
+            "group" => group(chat_id) && positive(sender),
+            "private" => positive(chat_id) && chat_id == sender,
+            _ => false,
+        },
         "invalid_memory_scope"
     );
     Ok(if kind == "group" {
@@ -662,5 +668,46 @@ impl<'a> LayeredMemory<'a> {
         )?;
         self.refresh_people(chat, 0., false)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::memory_subjects;
+
+    #[test]
+    fn memory_scope_accepts_qq_groups_telegram_supergroups_and_private() {
+        assert_eq!(
+            memory_subjects("group:123", "456").unwrap(),
+            vec!["group".to_string(), "person:456".to_string()]
+        );
+        // Telegram 超级群 id 为负数。
+        assert_eq!(
+            memory_subjects("group:-1001234567890", "123456789").unwrap(),
+            vec!["group".to_string(), "person:123456789".to_string()]
+        );
+        assert_eq!(
+            memory_subjects("private:123456789", "123456789").unwrap(),
+            vec!["person:123456789".to_string()]
+        );
+    }
+
+    #[test]
+    fn memory_scope_rejects_invalid_negative_and_mismatched_ids() {
+        for (chat, sender) in [
+            ("group:-0", "1"),
+            ("group:--1", "1"),
+            ("group:-100abc", "1"),
+            ("group:0123", "1"),
+            ("private:-123456789", "-123456789"),
+            ("private:1", "2"),
+            ("channel:1", "1"),
+            ("group:-1001234567890", "-1"),
+        ] {
+            assert!(
+                memory_subjects(chat, sender).is_err(),
+                "{chat} / {sender} must be rejected"
+            );
+        }
     }
 }
