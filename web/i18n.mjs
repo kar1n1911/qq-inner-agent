@@ -111,6 +111,7 @@ Group name unavailable|群名称尚不可用
 Style selected|已选择初始风格
 Observing before first message|观察中，首次发言暂缓
 Elapsed seconds|已观察秒数
+Observation duration|观察用时
 New messages|新消息数
 Group information|群资料
 Group announcements|群公告

@@ -134,7 +134,11 @@ async function refresh() {
     for (const o of state.observations || []) {
       const box = element('article', null, 'thought');
       box.append(element('h3', `${o.chat} · ${o.sources.info?.name || translate('Group name unavailable')}`));
-      box.append(element('p', `${translate(o.status === 'ready' ? 'Style selected' : 'Observing before first message')} · ${translate('Elapsed seconds')}: ${Math.max(0, Math.floor(Date.now()/1000-o.started))} · ${translate('New messages')}: ${o.message_count}`));
+      // 观察完成后冻结用时:用 analysis.analyzedAt 而不是实时累加的 now-started,
+      // 否则已 ready 的群看起来像还在观察。
+      const frozen = o.status === 'ready' && o.analysis?.analyzedAt;
+      const observed = Math.max(0, Math.floor((frozen ? o.analysis.analyzedAt : Date.now() / 1000) - o.started));
+      box.append(element('p', `${translate(o.status === 'ready' ? 'Style selected' : 'Observing before first message')} · ${translate(frozen ? 'Observation duration' : 'Elapsed seconds')}: ${observed} · ${translate('New messages')}: ${o.message_count}`));
       box.append(element('p', ['info','notices','history'].map(k => `${translate({info:'Group information',notices:'Group announcements',history:'Group history'}[k])}: ${translate(o.sources.availability?.[k] || 'pending')}`).join(' · ')));
       if (o.analysis.style) box.append(element('p', `${translate('Initial speaking style')}: ${o.analysis.style}`), element('p', o.analysis.summary));
       if (o.error) box.append(element('p', 'Analysis failed; waiting to retry. No group message will be sent.', 'hint'));
