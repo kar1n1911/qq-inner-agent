@@ -7,6 +7,7 @@ A persistent conversational agent for one QQ account, connected through NapCat o
 ## Overview
 
 - One QQ account, with explicitly enabled groups and private contacts.
+- Optional Telegram bot support alongside the QQ bridge, sharing the same engine, memory and participation policies.
 - An observation period before first group participation, followed by a model-selected initial style.
 - Candidate generation, evaluation, sending probability and response expectations.
 - Isolated long-term notebooks, short-term details and traits for groups and people.
