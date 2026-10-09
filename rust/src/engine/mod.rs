@@ -99,7 +99,21 @@ impl OrientationTransport for IdentityAdapter<'_> {
                 !*self.0.aborted.borrow() && state.connected && state.online,
                 "identity_transport_stopped"
             );
-            self.0.transport.call(action, params).await
+            let qq = self.0.transport.self_id();
+            let group = params.get("group_id").map(crate::config::js_string);
+            let result = self.0.transport.call(action, params).await?;
+            // Reuse both existing member-list paths (nickname samples and persona
+            // automation); this observer performs no additional network requests.
+            if action == "get_group_member_list" && self.0.transport.self_id() == qq {
+                if let Some(group) = group {
+                    self.0.self_identity.observe_members(
+                        &qq,
+                        &format!("group:{group}"),
+                        &result,
+                    );
+                }
+            }
+            Ok(result)
         })
     }
 }

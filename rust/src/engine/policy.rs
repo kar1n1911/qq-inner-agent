@@ -239,8 +239,8 @@ pub struct Selected {
 
 /// 主动候选按连续参与概率选择；显式点名与 proactive 开关仍是事实性路由。
 /// 文档 prompt-and-learning-design.md §10.4 不二值化相关度，§18 将相关度视为启发式。
-/// 评分最低端 1 表示没有参与价值；原来的 3 / threshold 改为权重饱和点，
-/// 平方爬坡让低端趋零。最终抽样是离散动作，但其概率不会在旧阈值处跳变。
+/// 相关度与动机最低端 1 的权重为零；新颖性仅作弱加权，不作为发言前提。
+/// 线性爬坡减轻中低分惩罚，最终抽样的概率不会在饱和点处跳变。
 pub fn select(
     rated: &[Candidate],
     allocation: Allocation,
@@ -301,9 +301,7 @@ fn rating_weight(score: f64, full_at: f64) -> f64 {
     if !score.is_finite() || !full_at.is_finite() {
         return 0.0;
     }
-    ((score - 1.0) / (full_at - 1.0).max(f64::EPSILON))
-        .clamp(0.0, 1.0)
-        .powi(2)
+    ((score - 1.0) / (full_at - 1.0).max(f64::EPSILON)).clamp(0.0, 1.0)
 }
 
 fn participation_probability(
@@ -312,8 +310,10 @@ fn participation_probability(
     agent: &Agent,
     threshold: f64,
 ) -> f64 {
-    let quality = rating_weight(selected.candidate.relevance, 3.0)
-        * rating_weight(selected.candidate.originality, 3.0);
+    // 相关度 2.5 即饱和；新颖性 2 即饱和，缺少新颖性最多减半。
+    // 允许贴合话题的普通回应，不要求每句话都提供增量或建议。
+    let quality = rating_weight(selected.candidate.relevance, 2.5)
+        * (0.5 + 0.5 * rating_weight(selected.candidate.originality, 2.0));
     let motivation = rating_weight(selected.adjusted, threshold);
     let fallback =
         if allocation == Allocation::Open && selected.candidate.kind == CandidateKind::System1 {
@@ -964,8 +964,25 @@ mod threshold_tests {
     use super::*;
 
     #[test]
+    fn rating_weight_is_linear_and_clamped() {
+        for full_at in [2.0, 2.5, 3.0, 4.8] {
+            for fraction in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                let score = 1.0 + fraction * (full_at - 1.0);
+                assert!((rating_weight(score, full_at) - fraction).abs() < 1e-12);
+            }
+            assert_eq!(rating_weight(0.0, full_at), 0.0);
+            assert_eq!(rating_weight(5.0, full_at), 1.0);
+            assert_eq!(rating_weight(f64::NAN, full_at), 0.0);
+            assert_eq!(rating_weight(f64::INFINITY, full_at), 0.0);
+        }
+        assert_eq!(rating_weight(2.0, 3.0), 0.5);
+        assert!((rating_weight(2.0, 2.5) - 2.0 / 3.0).abs() < 1e-12);
+        assert_eq!(rating_weight(2.0, f64::NAN), 0.0);
+    }
+
+    #[test]
     fn continuous_weights_are_monotone_and_vanish_at_low_end() {
-        for full_at in [3.0, 3.01, 4.8] {
+        for full_at in [2.0, 2.5, 3.0, 3.01, 4.8] {
             let mut last = 0.0;
             for i in 0..=1000 {
                 let weight = rating_weight(1.0 + 4.0 * i as f64 / 1000.0, full_at);
@@ -974,7 +991,7 @@ mod threshold_tests {
                 last = weight;
             }
             assert_eq!(rating_weight(1.0, full_at), 0.0);
-            assert!(rating_weight(1.0001, full_at) < 1e-8);
+            assert!(rating_weight(1.0001, full_at) < 1e-4);
             let jump =
                 rating_weight(full_at + 1e-7, full_at) - rating_weight(full_at - 1e-7, full_at);
             assert!(jump < 1e-6);

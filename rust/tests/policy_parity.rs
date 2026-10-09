@@ -289,7 +289,7 @@ fn selection_honours_probability_saturation_and_allocation() {
     let rated = vec![
         candidate("a", CandidateKind::System2, 5.0, 5.0, 5.0),
         candidate("b", CandidateKind::System2, 4.5, 3.0, 3.0),
-        candidate("c", CandidateKind::System2, 4.0, 2.0, 5.0), // relevance 太低
+        candidate("c", CandidateKind::System2, 4.0, 2.0, 5.0), // relevance 降低参与概率
     ];
 
     // 被点名时一定选最高分，不看阈值。
@@ -447,7 +447,7 @@ fn selection_probability_is_continuous_in_every_degree() {
             }
             c
         };
-        let boundary = if axis == 0 { 3.01 } else { 3.0 };
+        let boundary = [3.01, 2.5, 2.0][axis];
         let below = rate(&with_score(boundary - 0.0001), Allocation::Open, &agent);
         let above = rate(&with_score(boundary + 0.0001), Allocation::Open, &agent);
         assert!((above - below).abs() < 0.001);
@@ -457,7 +457,9 @@ fn selection_probability_is_continuous_in_every_degree() {
             assert!(current >= previous);
             previous = current;
         }
-        assert_eq!(rate(&with_score(1.0001), Allocation::Open, &agent), 0.0);
+        let low_end = if axis == 2 { 0.5 } else { 0.0 };
+        assert_eq!(rate(&with_score(1.0), Allocation::Open, &agent), low_end);
+        assert!((rate(&with_score(1.0001), Allocation::Open, &agent) - low_end).abs() < 0.001);
     }
     let c = candidate("one", CandidateKind::System2, 2.5, 3.0, 3.0);
     assert!(rate(&c, Allocation::Other, &agent) < rate(&c, Allocation::Open, &agent));
@@ -466,7 +468,7 @@ fn selection_probability_is_continuous_in_every_degree() {
         ..agent.clone()
     };
     let weak = candidate("weak", CandidateKind::System1, 1.0, 1.0001, 5.0);
-    assert_eq!(rate(&weak, Allocation::Open, &fallback), 0.0);
+    assert!((rate(&weak, Allocation::Open, &fallback) - 0.0001).abs() < 1e-12);
     assert!(select(&[weak], Allocation::Other, &fallback, 0.0, || 0.0).is_none());
     let duplicated = vec![c.clone(); 100];
     for draw in [0.1, 0.9] {
@@ -520,4 +522,39 @@ fn repetition_penalty_controls_suppression_without_count_amplification() {
     assert!(suppress_repetition(" x ", &["x".into()], || panic!(
         "exact repeats need no draw"
     )));
+}
+
+#[test]
+fn ordinary_relevant_replies_keep_a_nonzero_selection_probability() {
+    use qq_inner_core::engine::policy::select;
+    let agent = config_with(json!({"agent": {
+        "proactive": true, "threshold": 3.0, "system1Probability": 1.0
+    }}))
+    .agent;
+    // Saturated motivation (or System1 fallback) isolates quality.
+    for (kind, motivation) in [(CandidateKind::System2, 5.0), (CandidateKind::System1, 1.0)] {
+        for (relevance, originality, probability) in [
+            (2.5, 1.0, 0.5),
+            (2.0, 1.0, 1.0 / 3.0),
+            (2.0, 2.0, 2.0 / 3.0),
+            (2.5, 1.5, 0.75),
+            (2.5, 2.0, 1.0),
+            (1.0, 5.0, 0.0),
+        ] {
+            let rated = [candidate(
+                "ordinary",
+                kind,
+                motivation,
+                relevance,
+                originality,
+            )];
+            for draw in [0.0, 0.25, 0.49, 0.5, 0.66, 0.67, 0.74, 0.75, 0.99] {
+                assert_eq!(
+                    select(&rated, Allocation::Open, &agent, 0.0, || draw).is_some(),
+                    draw < probability,
+                    "relevance={relevance}, originality={originality}, draw={draw}, kind={kind:?}"
+                );
+            }
+        }
+    }
 }
