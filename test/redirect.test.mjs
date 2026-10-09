@@ -106,7 +106,10 @@ test('redirect connections release resources without opening upstream sockets or
   } finally { await proxy.close(); upstream.close(); }
 });
 
-test('real TLS requests retain distinct login limits and shutdown closes idle connections', { timeout: 10000 }, async () => {
+test('real TLS requests retain distinct login limits and shutdown closes idle connections', {
+  timeout: 10000,
+  skip: process.platform === 'darwin' && 'macOS does not configure the second loopback address 127.0.0.2 by default',
+}, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-proxy-test-'));
   let proxy, upstream, dashboard, idle, encrypted;
   try {
