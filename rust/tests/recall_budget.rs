@@ -1,9 +1,15 @@
-mod affect_support;
 use qq_inner_core::persona::recall::{Budget, Request};
 use serde_json::json;
 #[test]
 fn optional_request_budget_and_scoped_evidence() {
-    let s = affect_support::store();
+    let s = qq_inner_core::store::Store::in_memory().unwrap();
+    for (chat, id, sender, own) in [
+        ("a", "1", "u", false),
+        ("b", "1", "v", false),
+        ("a", "2", "bot", true),
+    ] {
+        s.message(&json!({"chat":chat,"id":id,"sender":sender,"name":sender,"text":"约定明天","ts":100.,"self":own})).unwrap();
+    }
     assert!(!serde_json::from_value::<Request>(json!({})).unwrap().needed);
     let request: Request =
         serde_json::from_value(json!({"needed":true,"query":"约定","window":100000})).unwrap();

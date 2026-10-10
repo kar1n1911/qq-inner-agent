@@ -53,14 +53,12 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-`tests/engine_parity.rs` 的脚本同时喂给 Rust Engine 与 `fixtures/engine-oracle.mjs` 调用的
-**真实 JS Engine**。两边使用真实内存 Store、mock provider/transport、注入时钟/随机，
-比较每个模型阶段、决策序列、日志、候选池、投递/assessment/handled 和 chat 状态。
-涵盖点名/开放/显式 other、突发合并、冷却/静默/配额、各模型阶段作废、候选保留、
-非法输出、学习、API 预算、不确定送达与 dry-run。UUID 不比较；分数跨语言仅用浮点容差。
-Node 不在 PATH 时只跳过 JS oracle，Rust 不变量测试仍执行。发送入口精确断言已有 pending
-投递和 handled；并发/取消测试用屏障而非真实时间推进业务时钟。
-启发式断言用阈值方向和分数区间，不断言“正确质量分数”；发送次数、作用域、阶段顺序精确断言。
+`tests/engine_parity.rs` 使用真实内存 Store、mock provider/transport 和注入时钟/随机，
+验证阶段顺序、发送次数、持久化状态、作用域、并发与取消。迁移期 JS oracle 对照已删除，
+公共成员元数据及精确回复用例保留。启发式断言检查阈值方向与分数区间。
+当前分模块测试流程见[开发文档](../docs/DEVELOPMENT.md#测试在哪)。
+
+以下 P6c 差异、门控和检查点记录描述迁移当时的实现及验收，不代表当前测试清单。
 
 明确差异与边界：
 

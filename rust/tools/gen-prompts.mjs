@@ -1,7 +1,7 @@
 // 从 `src/prompts.mjs` 生成 `rust/src/prompts.rs`。
 //
 // 提示词是行为的一部分，手抄会引入看不见的字符差异（全角/半角、空格、换行）。因此
-// Rust 侧的常量一律由本脚本生成，并用 `rust/tests/prompts_parity.rs` 兜底。
+// Rust 侧的常量一律由本脚本生成，通过 `node rust/tools/gen-prompts.mjs --check` 检查漂移。
 //
 // 用法（仓库根目录）：node rust/tools/gen-prompts.mjs
 import fs from 'node:fs';
@@ -36,7 +36,7 @@ const guard = (label, text) => {
   if (text.includes('\r')) throw new Error(`${label} 含有回车符，请先统一换行`);
 };
 
-let out = `//! 对应 \`src/prompts.mjs\`。\n//!\n//! 这些字符串**属于行为的一部分**，必须与 JS 逐字一致。本文件由\n//! \`rust/tools/gen-prompts.mjs\` 从 JS 生成，并由 \`tests/prompts_parity.rs\` 保证不漂移。\n//!\n//! 改动提示词时：先改 \`src/prompts.mjs\`，再运行 \`node rust/tools/gen-prompts.mjs\`，\n//! 最后跑 \`cargo test --test prompts_parity\`。\n\n`;
+let out = `//! 对应 \`src/prompts.mjs\`。\n//!\n//! 这些字符串**属于行为的一部分**，必须与 JS 逐字一致。本文件由\n//! \`rust/tools/gen-prompts.mjs\` 从 JS 生成，并由 \`node rust/tools/gen-prompts.mjs --check\` 保证不漂移。\n//!\n//! 改动提示词时：先改 \`src/prompts.mjs\`，再运行 \`node rust/tools/gen-prompts.mjs\`，\n//! 最后跑 \`node rust/tools/gen-prompts.mjs --check\`。\n\n`;
 
 for (const [name, text] of items) {
   guard(name, text);
@@ -74,6 +74,16 @@ out += `        _ => &["boundary", "responsibility", "attribution"],
     parts.join("\\n")
 }
 `;
-fs.writeFileSync(target, out);
-execFileSync('rustfmt', ['--edition', '2021', target]);
-console.log(`已写入 ${path.relative(root, target)}（${out.length} 字节）`);
+const formatted = execFileSync('rustfmt', ['--edition', '2021', '--emit', 'stdout'], {
+  input: out,
+  encoding: 'utf8',
+});
+if (process.argv.includes('--check')) {
+  if (fs.readFileSync(target, 'utf8') !== formatted) {
+    throw new Error('rust/src/prompts.rs 已漂移；请运行 node rust/tools/gen-prompts.mjs');
+  }
+  console.log('提示词生成物一致');
+} else {
+  fs.writeFileSync(target, formatted);
+  console.log(`已写入 ${path.relative(root, target)}（${Buffer.byteLength(formatted)} 字节）`);
+}

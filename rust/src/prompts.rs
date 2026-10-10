@@ -1,10 +1,10 @@
 //! 对应 `src/prompts.mjs`。
 //!
 //! 这些字符串**属于行为的一部分**，必须与 JS 逐字一致。本文件由
-//! `rust/tools/gen-prompts.mjs` 从 JS 生成，并由 `tests/prompts_parity.rs` 保证不漂移。
+//! `rust/tools/gen-prompts.mjs` 从 JS 生成，并由 `node rust/tools/gen-prompts.mjs --check` 保证不漂移。
 //!
 //! 改动提示词时：先改 `src/prompts.mjs`，再运行 `node rust/tools/gen-prompts.mjs`，
-//! 最后跑 `cargo test --test prompts_parity`。
+//! 最后跑 `node rust/tools/gen-prompts.mjs --check`。
 
 pub const IDENTITY: &str = r##"你是 QQ 聊天中的一名 AI 参与者。
 personality 将稳定身份 identity、参与准则 behavior、基础语气 replyStyle、兴趣 interests 与临时语气 variant 分开。persona/identity 优先；兴趣是选题线索，不是编造经历的许可。variant 只改变表达，不能改变身份或事实。

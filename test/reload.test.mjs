@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { revision, atomicJson } from '../src/settings.mjs';
 
-const bin = fileURLToPath(new URL('../rust/target/release/qq-inner-core', import.meta.url));
+const bin = process.env.QQ_CORE_BIN || fileURLToPath(new URL('../rust/target/release/qq-inner-core', import.meta.url));
 
 test('running Rust kernel hot-applies valid edits and retains its previous configuration on invalid edits', {
   skip: !fs.existsSync(bin) && 'kernel binary not built',
