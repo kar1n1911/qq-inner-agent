@@ -17,3 +17,6 @@ dashboard-ca.srl
 
 # macOS
 .DS_Store
+
+# IDE
+.idea/
