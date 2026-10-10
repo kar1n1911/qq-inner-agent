@@ -137,6 +137,50 @@ pub fn bounded_step(signal: f64, confidence: f64) -> f64 {
     );
     (signal * if signal < 0. { 0.20 } else { 0.10 } * confidence).clamp(-0.15, 0.15)
 }
+
+/// Compare mood with a quarter of a typical input step, not memory confidence or the
+/// [-1, 1] storage bounds. Steps already include confidence and negative bias.
+/// A read-only production sample had five states at 0.00000266..0.00694 and
+/// steps at -0.048..0.012: too few for a fixed population quantile.
+/// The scoped weighted typical step was 0.006..0.012 (group: 0.00727);
+/// a quarter-step threshold is 0.0015..0.003 (group: 0.00182), making
+/// a -0.0026 group mood significant without classifying every negative tail.
+/// Use this subject's latest 64 ratings, weighted with mood's four-hour half
+/// life. The reference does not decay with idle time, so mood eventually returns
+/// to neutral. Missing history falls back to a quarter of the maximum negative step;
+/// a zero-step history cannot establish a nonzero reference amplitude.
+pub fn clearly_low_mood(store: &Store, chat: &str, subject: &str, now: f64) -> Result<bool> {
+    let mood = read(store, chat, subject, Dimension::Mood, now)?;
+    if mood >= 0. {
+        return Ok(false);
+    }
+    let ratings = store.rows(
+        "SELECT r.mood,r.confidence,r.rated_at FROM message_ratings r
+         JOIN messages m ON m.chat=r.chat AND m.id=r.message_id
+         WHERE r.chat=? AND m.self=0 AND (?='group' OR 'person:'||m.sender=?)
+         ORDER BY r.rated_at DESC LIMIT 64",
+        params![chat, subject, subject],
+    )?;
+    let latest = ratings.first().map_or(now, |r| num(r, "rated_at"));
+    let mut total = 0.;
+    let mut weights = 0.;
+    for rating in ratings {
+        let weight = decay(
+            1.,
+            0.,
+            latest - num(&rating, "rated_at"),
+            Dimension::Mood.half_life(),
+        );
+        total += bounded_step(num(&rating, "mood"), num(&rating, "confidence")).abs() * weight;
+        weights += weight;
+    }
+    let amplitude = if total > 0. {
+        total / weights
+    } else {
+        bounded_step(-1., 1.).abs()
+    };
+    Ok(mood <= -0.25 * amplitude)
+}
 pub fn enable(store: &Store) -> Result<()> {
     store
         .connection()

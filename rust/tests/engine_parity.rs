@@ -185,6 +185,9 @@ impl OrientationProvider for Harness {
                     assert!(payload["persona"].as_str().unwrap().starts_with("基座种子"));
                 }
             }
+            if stage == "FORM" && self.model.lock().unwrap()["expectAffectLearning"] == true {
+                assert!(system.contains(qq_inner_core::memory::AFFECT_LEARNING_CONTRACT));
+            }
             if stage == "ARTICULATE" {
                 if payload.get("backstories").is_some() {
                     assert!(system.contains(qq_inner_core::persona::backstory::RULE));
@@ -280,6 +283,13 @@ impl OrientationProvider for Harness {
                         }
                         response
                     }
+                }
+                "LEARNING_REVIEW" => {
+                    // Deliberately approve every claim: the runtime mood guard
+                    // must protect storage even when the reviewer misses venting.
+                    json!({"reviews":payload["candidates"].as_array().unwrap().iter()
+                        .map(|v| json!({"index":v["index"],"action":"keep","reason":"mock approval"}))
+                        .collect::<Vec<_>>()})
                 }
                 "ORIENT" => json!({"style":"谨慎接话","summary":"园艺讨论","topics":["园艺"]}),
                 _ => panic!("unexpected stage"),
@@ -2848,4 +2858,135 @@ async fn recall_rule_limits_gist_completion_in_both_model_stages() {
             "{stage} 必须保留证据的防注入边界"
         );
     }
+}
+
+// Two-layer plan (docs/working/prompt-and-learning-design.md:447-451):
+// Usability: an inbound OneBot message reaches FORM (with the Rust contract),
+// parsing, LEARNING_REVIEW and the Store::learn transaction; mood updates come
+// from FORM, not a direct LayeredMemory call. Normal one-source facts still learn.
+// Goal, line 447: "不把气话记成特质" is asserted on persisted traits and skip logs,
+// even if the model and reviewer both approve. Line 451: changing agreement alone
+// must not change that outcome. The model boundary is deterministic in this test.
+#[tokio::test]
+async fn mood_learning_goal_prevents_heated_traits_through_engine() {
+    for agreement in [-1., 1.] {
+        for (low, emotional) in [(true, true), (true, false), (false, false)] {
+            let (e, h) = setup(&base(
+                "mood_learning_goal",
+                json!({
+                    "affect":{"enabled":true},
+                    "learning":{"enabled":true,"minMessages":1,"intervalSeconds":30}
+                }),
+                vec![],
+            ));
+            *h.model.lock().unwrap() = json!({
+                "empty":true, "expectAffectLearning":true,
+                "affect":{"mood":if low {-0.013} else {0.},"rationality":0.,
+                    "affinity":0.,"agreement":agreement,"confidence":1.},
+                "learning":{"layers":[{"subject":"person:20","layer":"traits",
+                    "key":"garden","operation":"upsert", "text":if emotional {"讨厌园艺"} else {"喜欢园艺"},
+                    "importance":0.8,"confidence":0.9,"keywords":["园艺"],
+                    "sourceIds":["m1"],"emotional":emotional}],"expressions":[]}
+            });
+            e.ingest(&h.event(&ingest(
+                "m1",
+                if emotional {
+                    "[CQ:at,qq=99]气死我了，再也不碰园艺了！"
+                } else {
+                    "[CQ:at,qq=99]我喜欢园艺"
+                },
+            )))
+            .unwrap();
+            e.tick().unwrap();
+            e.wait_idle().await;
+            let calls = h.model_inputs.lock().unwrap();
+            assert!(calls.iter().any(|(stage, _)| stage == "FORM"));
+            let review = &calls
+                .iter()
+                .find(|(stage, _)| stage == "LEARNING_REVIEW")
+                .expect("learning must reach review")
+                .1;
+            assert_eq!(review["candidates"][0]["candidate"]["emotional"], emotional);
+            assert_eq!(review["sources"][0]["id"], "m1");
+            let traits = h.rows("SELECT * FROM memory_layers WHERE layer='traits'");
+            let skips = h.rows("SELECT * FROM decisions WHERE action='skipped'");
+            if low && emotional {
+                assert!(
+                    traits.is_empty(),
+                    "heated speech must not become traits or pending memory"
+                );
+                assert_eq!(skips.len(), 1);
+                let tags: Value = serde_json::from_str(skips[0]["tags"].as_str().unwrap()).unwrap();
+                assert_eq!(tags["reason"], "affect_learning_guard");
+            } else {
+                assert_eq!(traits.len(), 1);
+                assert_eq!(traits[0]["confidence"], 0.9);
+                assert_eq!(traits[0]["keywords"], "[\"园艺\"]");
+                assert!(skips.is_empty());
+            }
+            assert_eq!(
+                h.rows("SELECT last_id FROM chat_learning")[0]["last_id"],
+                "m1"
+            );
+            let mood = h
+                .rows("SELECT value FROM affect_state WHERE dimension='mood' AND subject='group'")
+                [0]["value"]
+                .as_f64()
+                .unwrap();
+            assert!((mood - if low { -0.0026 } else { 0. }).abs() < 1e-12);
+        }
+    }
+}
+
+// Goal: docs/working/prompt-and-learning-design.md:447, existing partials
+// must not promote using heated evidence, even with enough new source IDs.
+#[tokio::test]
+async fn mood_learning_goal_preserves_partial_through_engine() {
+    let (e, h) = setup(&base(
+        "mood_partial_goal",
+        json!({
+            "affect":{"enabled":true},
+            "learning":{"enabled":true,"minMessages":1,"intervalSeconds":30}
+        }),
+        vec![],
+    ));
+    let candidate = json!({"subject":"person:20","layer":"traits","key":"garden",
+        "operation":"upsert","text":"喜欢园艺","importance":0.8,"confidence":0.9,
+        "keywords":["园艺"],"sourceIds":["m1"],"verdict":"partial","emotional":false});
+    *h.model.lock().unwrap() = json!({"empty":true,"expectAffectLearning":true,
+        "learning":{"layers":[candidate],"expressions":[]}});
+    e.ingest(&h.event(&ingest("m1", "[CQ:at,qq=99]我可能喜欢园艺")))
+        .unwrap();
+    e.tick().unwrap();
+    e.wait_idle().await;
+    let before = h.rows("SELECT * FROM memory_layers WHERE layer='traits'");
+    assert_eq!(before.len(), 1);
+    assert_eq!(before[0]["confidence"], 0.5);
+    *h.now.lock().unwrap() += 31.;
+    e.ingest(&h.event(&ingest("m2", "园艺真讨厌！"))).unwrap();
+    e.ingest(&h.event(&ingest("m3", "[CQ:at,qq=99]再也不碰园艺了！")))
+        .unwrap();
+    let mut heated = candidate;
+    heated["verdict"] = json!("learn");
+    heated["emotional"] = json!(true);
+    heated["text"] = json!("讨厌园艺");
+    heated["sourceIds"] = json!(["m2", "m3"]);
+    *h.model.lock().unwrap() = json!({"empty":true,"expectAffectLearning":true,
+        "affect":{"mood":-0.013,"rationality":0.,"affinity":0.,"agreement":1.,"confidence":1.},
+        "learning":{"layers":[heated],"expressions":[]}});
+    e.tick().unwrap();
+    e.wait_idle().await;
+    assert_eq!(
+        h.rows("SELECT last_id FROM chat_learning")[0]["last_id"],
+        "m3"
+    );
+    assert_eq!(
+        h.rows("SELECT * FROM memory_layers WHERE layer='traits'"),
+        before
+    );
+    assert_eq!(
+        h.rows("SELECT * FROM decisions WHERE action='skipped'")
+            .len(),
+        1
+    );
 }
