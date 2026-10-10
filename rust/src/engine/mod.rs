@@ -198,6 +198,8 @@ struct Core {
     chats: Vec<(String, ChatState)>,
     tasks: Vec<JoinHandle<()>>,
     teaching_replies: Vec<(String, String)>,
+    teaching_commands: Vec<(String, String, String)>,
+    teaching_busy: bool,
     last_error: Option<String>,
     last_cycle: f64,
     identity_checked: Option<f64>,
@@ -508,13 +510,9 @@ impl Engine {
             if !db.message(&value)? {
                 return Ok(());
             }
-            if let Some(reply) =
-                crate::persona::owner_teaching::handle(&db, a, &m.chat, &m.sender, &raw, now)
-            {
-                db.mark_handled(&m.chat, &m.id, true)?;
-                core.teaching_replies.push((m.chat, reply));
-                return Ok(());
-            }
+            db.mark_handled(&m.chat, &m.id, true)?;
+            core.teaching_commands.push((m.chat, m.sender, raw));
+            return Ok(());
         }
         // History must not create active chats (including media/proactive cycles).
         let state = if backfill {
@@ -861,6 +859,30 @@ impl Engine {
             }
         }
 
+        if available && !core.teaching_busy && !core.teaching_commands.is_empty() {
+            core.teaching_busy = true;
+            let commands = std::mem::take(&mut core.teaching_commands);
+            let engine = self.clone();
+            core.tasks.push(tokio::spawn(async move {
+                // 首次 poll 时重新检查值班状态；未审核的指令保留原顺序。
+                if !engine.available(engine.now()).unwrap_or(false) {
+                    let mut core = engine.core();
+                    let newer = std::mem::replace(&mut core.teaching_commands, commands);
+                    core.teaching_commands.extend(newer);
+                    core.teaching_busy = false;
+                    return;
+                }
+                for (chat, sender, raw) in commands {
+                    let result = engine.review_teaching(&chat, &sender, &raw).await;
+                    engine.core().teaching_replies.push((chat, result.unwrap_or_else(|e| format!("未记住：审核失败：{e}"))));
+                }
+                engine.core().teaching_busy = false;
+                if let Err(e) = engine.tick() {
+                    engine.core().last_error = Some(e.to_string());
+                }
+            }));
+        }
+
         let teaching_replies = if available {
             std::mem::take(&mut core.teaching_replies)
         } else {
@@ -1008,6 +1030,26 @@ impl Engine {
         }
         Ok(())
     }
+    async fn review_teaching(&self, chat: &str, sender: &str, raw: &str) -> Result<String> {
+        use crate::persona::owner_teaching;
+        let a = &self.config.agent;
+        let input = raw.trim();
+        let mut response = None;
+        if let Some((command, body)) = ["/记住", "/黑话"].iter()
+            .find_map(|c| input.strip_prefix(c).map(|body| (*c, body.trim()))) {
+            match owner_teaching::candidate(a, chat, sender, command, body) {
+                Ok(candidate) => {
+                    let payload = crate::memory::learning_review_input(&[candidate], &[], &[]);
+                    response = Some(self.model(&prompts::compose_prompt(prompts::LEARNING_REVIEW,
+                        &[owner_teaching::REVIEW_CONTEXT]), payload).await?);
+                }
+                Err(e) => return Ok(format!("没看懂：{e}")),
+            }
+        }
+        Ok(owner_teaching::handle_reviewed(&*self.db()?, a, (chat, sender, raw), self.now(), response.as_ref())
+            .unwrap_or_else(|| "未记住：教学未授权".into()))
+    }
+
     pub async fn wait_idle(&self) {
         let _joining = self.joining.lock().await;
         loop {
