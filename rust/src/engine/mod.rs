@@ -604,7 +604,7 @@ impl Engine {
         }
     }
     async fn media_cycle(&self, chat: &str, start: CycleStart) -> Result<()> {
-        // 沿用观察准入、单群单飞、版本、主动冷却和配额；群作息不套用 global quiet。
+        // 沿用观察准入、单群单飞、版本、媒体节奏和总配额；群作息不套用 global quiet。
         let a = &self.config.agent;
         {
             let mut core = self.core();
@@ -638,10 +638,7 @@ impl Engine {
                 return Ok(());
             }
             let counts = db.counts(chat, now)?;
-            if num(&counts, "total") >= a.max_messages_per_hour
-                || num(&counts, "proactive") >= a.max_proactive_per_hour
-                || now - num(&counts, "last") < a.proactive_cooldown_seconds
-            {
+            if num(&counts, "total") >= a.max_messages_per_hour {
                 return Ok(());
             }
             let Some(selection) = media_select::select(
@@ -666,7 +663,7 @@ impl Engine {
             if !transport.connected || !transport.online {
                 return Ok(());
             }
-            let delivery = db.delivery(chat, true, now)?;
+            let delivery = db.delivery(chat, false, now)?;
             (selection, segment, delivery)
         };
         let sent = self.transport.send_media(chat, segment).await;
@@ -961,10 +958,10 @@ impl Engine {
                 continue;
             };
             let quiet = trigger != "media" && policy::quiet(now, a.quiet_hours.as_ref());
-            if trigger == "pause" && (!a.proactive || quiet) {
+            if matches!(trigger, "topic" | "pause") && (!a.proactive || quiet) {
                 continue;
             }
-            if s.hint != Hint::SelfChat && (!a.proactive || quiet) {
+            if s.hint != Hint::SelfChat && quiet {
                 s.pending = false;
                 s.pause_done = true;
                 continue;
@@ -1175,6 +1172,8 @@ impl Engine {
         )
     }
     async fn cycle(&self, chat: &str, trigger: &str, start: CycleStart) -> Result<()> {
+        // 发言意图由触发路径决定；未被点名的消息仍是回复。
+        let initiating = matches!(trigger, "topic" | "pause");
         let a = &self.config.agent;
         let CycleStart { version, id, now } = start;
         // 1–2：入口守卫；版本取自 tick 准入时的快照，等价 JS 首个 await 之前。
@@ -1291,7 +1290,7 @@ impl Engine {
             let angry_burst = crate::persona::affect::behavior(&db, &a.affect, chat, &t.last, now)?.burst;
             if !angry_burst
                 && (num(&t.counts, "total") >= a.max_messages_per_hour
-                    || (t.hint != Hint::SelfChat
+                    || (initiating
                         && (num(&t.counts, "proactive") >= a.max_proactive_per_hour
                             || now - num(&t.counts, "last") < a.proactive_cooldown_seconds)))
             {
@@ -1679,7 +1678,7 @@ impl Engine {
         let result = self
             .model(&prompts::compose_prompt(prompts::EVALUATION, &[]), payload)
             .await?;
-        let (selected, proactive, timing) = {
+        let (selected, timing) = {
             let mut core = self.core();
             let db = self.db()?;
             let rated = ratings(&result, &candidates)?;
@@ -1707,9 +1706,9 @@ impl Engine {
             let selected = policy::select(&rated, allocation, a, silent as f64, || {
                 (self.options.selection_random)()
             });
-            let proactive = t.hint != Hint::SelfChat;
             if selected.is_none()
-                || (proactive && (!a.proactive || policy::quiet(now, a.quiet_hours.as_ref())))
+                || (initiating && !a.proactive)
+                || (t.hint != Hint::SelfChat && policy::quiet(now, a.quiet_hours.as_ref()))
             {
                 self.record_decision(
                     &db,
@@ -1728,7 +1727,7 @@ impl Engine {
                 let time = self.now();
                 let timing = db.sending_timing(chat, time, a.sending.recovery_seconds)?;
                 Some(Timing {
-                    proactive,
+                    proactive: initiating,
                     age: (time - core.get(chat).unwrap().last_human).max(0.),
                     gap: num(&timing, "gap"),
                     recent_humans: num(&timing, "recentHumans"),
@@ -1737,7 +1736,7 @@ impl Engine {
             } else {
                 None
             };
-            (selected, proactive, timing)
+            (selected, timing)
         };
         let prediction = if let Some(timing) = timing {
             // 32–35：预测、抽签、持久化 assessment 后才准入生成。
@@ -1938,7 +1937,7 @@ impl Engine {
                 .filter(|m| truthy(&m["self"]))
                 .map(|m| text(m, "text").to_owned())
                 .collect::<Vec<_>>();
-            if (proactive && policy::quiet(self.now(), a.quiet_hours.as_ref()))
+            if (t.hint != Hint::SelfChat && policy::quiet(self.now(), a.quiet_hours.as_ref()))
                 || (!behavior.burst
                     && !face_only
                     && policy::suppress_repetition(text(&decorated, "text"), &own, || {
@@ -1981,7 +1980,7 @@ impl Engine {
                 t.hint,
                 || (self.options.expression_random)(),
             )?;
-            let delivery_id = db.delivery(chat, proactive, self.now())?;
+            let delivery_id = db.delivery(chat, initiating, self.now())?;
             if a.emoji.face_only && face_only {
                 db.execute(
                     "INSERT OR REPLACE INTO humanize_reply_state VALUES(?,1)",
@@ -2115,7 +2114,7 @@ impl Engine {
                 core.last_error = None;
                 (self.options.log)(
                     "message_sent",
-                    json!({"chat":chat,"proactive":proactive,"lengthTarget":length_target,"segments":sent_segments}),
+                    json!({"chat":chat,"proactive":initiating,"lengthTarget":length_target,"segments":sent_segments}),
                 );
             }
             Err(error) => {
