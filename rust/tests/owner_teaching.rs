@@ -1,10 +1,27 @@
 use qq_inner_core::{
     config::{defaults, merge, Config},
     persona::expression::ExpressionMemory,
-    persona::owner_teaching::handle,
+    persona::owner_teaching::handle_reviewed,
     store::Store,
 };
 use serde_json::{json, Value};
+
+fn handle(
+    store: &Store,
+    a: &qq_inner_core::config::Agent,
+    chat: &str,
+    sender: &str,
+    input: &str,
+    now: f64,
+) -> Option<String> {
+    handle_reviewed(
+        store,
+        a,
+        (chat, sender, input),
+        now,
+        Some(&json!({"reviews":[{"index":0,"action":"keep","reason":"非敏感的明确教学"}]})),
+    )
+}
 
 #[test]
 fn validation_and_literal_forgetting_are_scoped() {
@@ -18,6 +35,16 @@ fn validation_and_literal_forgetting_are_scoped() {
     a.owner_teaching.enabled = true;
     let owner = "1950202917";
     let chat = "private:1950202917";
+    assert!(qq_inner_core::persona::owner_teaching::handle(
+        &db,
+        &a,
+        chat,
+        owner,
+        "/记住 我喜欢喝美式",
+        100.
+    )
+    .unwrap()
+    .contains("自我审核未完成"));
     for input in [
         "/黑话",
         "/黑话 =B",

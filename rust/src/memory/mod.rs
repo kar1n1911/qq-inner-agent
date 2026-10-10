@@ -417,7 +417,9 @@ impl<'a> LayeredMemory<'a> {
                 }
             }
             let mut v = original.clone();
-            if v["operation"] == "upsert" {
+            if v["operation"] == "upsert"
+                && !crate::persona::owner_teaching::sources(array(&v["sources"]))
+            {
                 let (confidence_threshold, initial_evidence, promotion_evidence) =
                     self.learning_thresholds(chat, &v, now, settings.partial_evidence)?;
                 // At clearly low mood (<= -0.5), even full confidence cannot promote.
