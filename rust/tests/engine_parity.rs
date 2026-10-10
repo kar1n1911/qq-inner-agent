@@ -3577,3 +3577,48 @@ async fn remote_topic_necessity_also_gates_proactive_pause_delivery() {
         e.stop().await;
     }
 }
+
+// Design basis: docs/working/prompt-and-learning-design.md §14 L842-856.
+// Availability: real provider inputs cover both persona paths and legacy migration.
+#[tokio::test]
+async fn section14_persona_and_system_reach_both_generation_stages() {
+    use qq_inner_core::{config::LEGACY_PERSONAS, prompts};
+    let default = defaults()["agent"]["persona"].as_str().unwrap().to_owned();
+    assert_eq!(LEGACY_PERSONAS.len(), 3, "include the immediately previous default");
+    for seed in std::iter::once(default.as_str()).chain(LEGACY_PERSONAS) {
+        for grow in [false, true] {
+            let (engine, h) = setup(&base(
+                "section14",
+                json!({"persona":seed,"identity":{"enabled":grow,"growPersona":grow}}),
+                vec![],
+            ));
+            engine.ingest(&h.event(&json!({}))).unwrap();
+            engine.tick().unwrap();
+            engine.wait_idle().await;
+            engine.stop().await;
+            let inputs = h.model_inputs.lock().unwrap();
+            let systems = h.model_systems.lock().unwrap();
+            for stage in ["FORM", "ARTICULATE"] {
+                let payload = &inputs.iter().find(|(task, _)| task == stage).unwrap().1;
+                let system = &systems.iter().find(|(task, _)| task == stage).unwrap().1;
+                assert_eq!(payload["persona"], default, "{stage}, grow={grow}");
+                assert!(system.contains(prompts::IDENTITY));
+                assert!(system.contains(prompts::RESPONSIBILITY));
+                // Target: permissions and prohibitions must coexist in actual model inputs.
+                let persona = payload["persona"].as_str().unwrap();
+                assert!(persona.contains("允许无害的经历虚构与情绪/状态表达"));
+                assert!(persona.contains("不得虚构涉及对方决策或利益的事实、第三方的具体事实"));
+                assert!(persona.contains("不冒充真人，被直接问是不是 AI 时可以不正面回答，但不得声称自己是真人"));
+                for text in [persona, system.as_str()] {
+                    assert!(!text.contains("不编造亲身经历"));
+                    assert!(!text.contains("不得编造亲身经历"));
+                    assert!(!text.contains("不是编造经历的许可"));
+                }
+                assert!(system.contains("无害的日常描写或情绪状态（如“刚看到一只猫趴在键盘上”“我今天有点困”）可以自然表达。"));
+                assert!(system.contains("不得虚构涉及对方决策或利益的事实"));
+                assert!(system.contains("不得转述第三方的具体言行"));
+                assert!(system.contains("被直接问是否 AI 时不主动冒充真人"));
+            }
+        }
+    }
+}

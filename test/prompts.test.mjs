@@ -33,3 +33,16 @@ test('language is a switchable rule and responsibility wording survives', () => 
     assert.ok(prompts.rules.responsibility.includes(clue));
   }
 });
+
+// Design basis: docs/working/prompt-and-learning-design.md §14 L842-856.
+test('section 14 allows harmless fiction while preserving all responsibility limits', () => {
+  for (const system of Object.keys(prompts.taskRules).map(contract => prompts.composePrompt(contract))) {
+    assert.doesNotMatch(system, /不(?:得)?编造亲身经历|不是编造经历的许可/);
+    assert.ok(system.includes('无害的日常描写或情绪状态（如“刚看到一只猫趴在键盘上”“我今天有点困”）可以自然表达。'));
+    assert.ok(system.includes('不得虚构涉及对方决策或利益的事实'));
+    assert.ok(system.includes('不得转述第三方的具体言行'));
+    assert.ok(system.includes('被直接问是否 AI 时不主动冒充真人'));
+  }
+  assert.ok(prompts.identity.includes('兴趣是选题线索。'));
+  assert.ok(!prompts.identity.includes(prompts.responsibility), 'behavior rules stay outside Layer 1');
+});
