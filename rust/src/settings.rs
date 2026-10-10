@@ -116,6 +116,74 @@ pub(crate) fn sha256(input: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    struct RevisionRoot(std::path::PathBuf);
+    impl RevisionRoot {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "qq-revision-{}-{}",
+                std::process::id(),
+                rand::random::<u64>()
+            ));
+            fs::create_dir_all(&root).unwrap();
+            Self(root)
+        }
+    }
+    impl Drop for RevisionRoot {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn revision_treats_missing_and_empty_files_identically() {
+        let root = RevisionRoot::new();
+        let missing = revision(&root.0).unwrap();
+        for (config, secrets) in [(true, false), (false, true), (true, true)] {
+            for (file, present) in [("config.json", config), ("secrets.json", secrets)] {
+                let path = root.0.join(file);
+                if present {
+                    fs::write(path, "").unwrap();
+                } else if path.exists() {
+                    fs::remove_file(path).unwrap();
+                }
+            }
+            assert_eq!(
+                revision(&root.0).unwrap(),
+                missing,
+                "config={config}, secrets={secrets}"
+            );
+        }
+    }
+
+    #[test]
+    fn revision_detects_edits_to_either_file_and_propagates_read_errors() {
+        let root = RevisionRoot::new();
+        let initial = revision(&root.0).unwrap();
+        let mut revisions = vec![initial.clone()];
+        for (config, secrets) in [
+            ("中文🙂", ""),
+            ("", "中文🙂"),
+            ("中文", "🙂"),
+            ("中", "文🙂"),
+        ] {
+            fs::write(root.0.join("config.json"), config).unwrap();
+            fs::write(root.0.join("secrets.json"), secrets).unwrap();
+            let current = revision(&root.0).unwrap();
+            assert!(
+                !revisions.contains(&current),
+                "config={config}, secrets={secrets}"
+            );
+            assert_eq!(revision(&root.0).unwrap(), current);
+            revisions.push(current);
+        }
+        for file in ["config.json", "secrets.json"] {
+            fs::remove_file(root.0.join(file)).unwrap();
+        }
+        assert_eq!(revision(&root.0).unwrap(), initial);
+        fs::create_dir(root.0.join("config.json")).unwrap();
+        assert!(revision(&root.0).is_err());
+    }
+
     #[test]
     fn standard_sha_vectors() {
         assert_eq!(

@@ -1,7 +1,5 @@
 //! 不变量精确：阶段顺序、发送次数、状态与作用域。评分只验证方向/区间；
-//! golden 数值容差仅处理跨语言浮点表示，不把启发式分数当质量真值。
-#[path = "golden/mod.rs"]
-mod golden;
+//! 不把启发式分数当质量真值。
 use anyhow::Result;
 use futures_util::future::BoxFuture;
 use qq_inner_core::{
@@ -648,78 +646,6 @@ async fn script(case: &Value) -> Value {
     let output = json!({"label":case["label"],"trace":h.trace.lock().unwrap().clone(),"decisions":decisions,"deliveries":h.rows("SELECT chat,proactive,status FROM deliveries ORDER BY rowid"),"assessments":h.rows("SELECT chat,human_id,status FROM send_assessments ORDER BY rowid"),"thoughts":h.rows("SELECT chat,text,kind,used,score,subject FROM thoughts ORDER BY rowid"),"handled":h.rows("SELECT * FROM handled ORDER BY chat"),"chats":e.chats(),"calls":h.rows("SELECT count(*) n FROM calls")[0]["n"],"lastError":e.last_error()});
     e.stop().await;
     output
-}
-fn equivalent(actual: &Value, expected: &Value, path: &str) {
-    match (actual, expected) {
-        (Value::Number(a), Value::Number(b)) => assert!(
-            (a.as_f64().unwrap() - b.as_f64().unwrap()).abs() < 1e-9,
-            "{path}: {actual} != {expected}"
-        ),
-        (Value::Array(a), Value::Array(b)) => {
-            assert_eq!(a.len(), b.len(), "{path}: {actual} != {expected}");
-            for (i, (a, b)) in a.iter().zip(b).enumerate() {
-                equivalent(a, b, &format!("{path}/{i}"));
-            }
-        }
-        (Value::Object(a), Value::Object(b)) => {
-            assert_eq!(
-                a.keys().collect::<Vec<_>>(),
-                b.keys().collect::<Vec<_>>(),
-                "{path}"
-            );
-            for (k, a) in a {
-                equivalent(a, &b[k], &format!("{path}/{k}"));
-            }
-        }
-        _ => assert_eq!(actual, expected, "{path}"),
-    }
-}
-#[tokio::test]
-async fn scripted_conversations_match_real_js_decision_by_decision() {
-    let mut cases = scenarios();
-    // 不变量：省略开关与显式关闭都必须逐条匹配真实 JS，覆盖全部原有场景。
-    let disabled: Vec<_> = cases
-        .iter()
-        .cloned()
-        .map(|mut case| {
-            case["label"] = json!(format!(
-                "{}-layers-disabled",
-                case["label"].as_str().unwrap()
-            ));
-            case["config"]["agent"]["threeLayerDecision"] = json!(false);
-            case
-        })
-        .collect();
-    cases.extend(disabled);
-    let mut actual = Vec::new();
-    for c in &cases {
-        let mut result = script(c).await;
-        // P7a 新增 Rust 控制事件，JS 无此接口；单独行为测试，不纳入旧日志 oracle。
-        result["trace"]
-            .as_array_mut()
-            .unwrap()
-            .retain(|entry| entry[0] != "log" || entry[1] != "decision");
-        // Target segments are a Rust-only extension, covered by precise_reply tests.
-        for entry in result["trace"].as_array_mut().unwrap() {
-            if entry[0] == "log"
-                && matches!(entry[1].as_str(), Some("message_sent" | "delivery_error"))
-            {
-                entry[2].as_object_mut().unwrap().remove("segments");
-            }
-        }
-        actual.push(result);
-    }
-    // 固化金标准：完整阶段 trace 与落库结果，继续使用原 equivalent 的浮点规则。
-    // Rust 长度权重已独立调整；engine.json 仅对应长度 expected 随之更新。
-    let expected: Vec<Value> = serde_json::from_value(golden::expected(
-        include_str!("golden/engine.json"),
-        &json!(cases),
-    ))
-    .unwrap();
-    assert_eq!(actual.len(), expected.len());
-    for (a, b) in actual.iter().zip(&expected) {
-        equivalent(a, b, a["label"].as_str().unwrap());
-    }
 }
 fn actions(v: &Value) -> Vec<&str> {
     v["decisions"]
@@ -2769,6 +2695,7 @@ async fn public_member_metadata_reaches_context_orientation_and_self_without_mem
         e.stop().await;
     }
 }
+#[tokio::test]
 async fn precise_reply_keeps_addressed_message_when_later_open_message_arrives() {
     let case = base("precise_reply", json!({}), vec![]);
     let (e, h) = setup(&case);

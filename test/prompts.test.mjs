@@ -1,16 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import * as prompts from '../src/prompts.mjs';
 
-const contracts = JSON.parse(readFileSync(new URL('./fixtures/prompt-contracts.json', import.meta.url)));
-
-test('task contracts retain all pre-refactor JSON examples byte for byte', () => {
-  for (const [name, examples] of Object.entries(contracts)) {
-    assert.deepEqual(prompts[name].match(/\{[^\n]*\}/g), examples);
-    assert.ok(prompts[name].startsWith('TASK: '));
-    assert.doesNotMatch(prompts[name], /personality|persona|你是 QQ|AI 腔|优先 face/);
-  }
+test('Rust prompts match the current prompt sources and generator', () => {
+  execFileSync(process.execPath, [fileURLToPath(new URL('../rust/tools/gen-prompts.mjs', import.meta.url)), '--check'], { stdio: 'pipe' });
 });
 
 test('identity occurs once and every named rule can be disabled independently', () => {

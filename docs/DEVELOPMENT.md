@@ -41,7 +41,7 @@ agent "是谁、怎么说话"这一整条链。
 ### 提示词
 
 - **源**:`src/prompts.mjs`(仓库根,JS);**生成物**:`rust/src/prompts.rs`。
-- 改动提示词:`src/prompts.mjs` → `node rust/tools/gen-prompts.mjs` → `cargo test --test prompts_parity`。
+- 改动提示词:`src/prompts.mjs` → `node rust/tools/gen-prompts.mjs` → `node rust/tools/gen-prompts.mjs --check`。
 - 运行时片段(不进入生成物):`persona/humanize.rs` / `persona/recall.rs` 的常量,由 engine 追加到 payload。
 
 ---
@@ -164,7 +164,34 @@ Node 只承载仪表盘与 CLI(旧 agent 实现已归档到 `js-legacy` 分支):
 
 ## 测试在哪
 
-- 每个系统的 parity/单测在 `rust/tests/`:`config_parity.rs` `policy_parity.rs` `sending_parity.rs` `prompts_parity.rs` `engine_parity.rs` `memory_parity.rs` `store_parity.rs` `activity_parity.rs` `provider_parity.rs` `phase5_parity.rs` `identity.rs` `backstory.rs` `onebot_mock.rs` 等;
-- parity 期望值冻结在 `rust/tests/golden/`(不依赖 node);
-- 运行:`cargo test`;`cargo clippy --all-targets -- -D warnings`。
-- **磁盘提示**:本仓库有约 25 个测试二进制,每次 `cargo test` 都会往 `rust/target/debug` 写调试产物,反复跑可涨到 10G+。已在 `Cargo.toml` 用 `[profile.dev] debug = "line-tables-only"` 限制;在服务器上跑过测试后,用 `cargo clean --profile dev`(或删 `rust/target/debug`)回收空间,保留 `target/release` 即可。
+**改哪个模块就跑哪个模块的测试；只在合并前跑一次全量。** 测试验证当前模块的行为、不变量与边界，不再保存迁移期 JS oracle 的逐值快照。
+
+- Rust 集成套件（`rust/tests/`）：`affect`、`engine_parity`、`onebot_mock`、`media_select`、`media_collect`、`identity`、`backstory`、`owner_teaching`、`humanize`、`learning_triage`、`backfill_policy`、`backlog_digest`、`recall_budget`。例如修改引擎时运行 `cd rust && cargo test --test engine_parity`。`engine_parity` 保留名称，但只验证行为，包括公共成员元数据及精确回复。
+- Rust 内联单测在各 `rust/src/**` 模块中。例如修改配置文件协议时运行 `cd rust && cargo test --lib settings::tests`；revision 验证缺失/空文件等价、任一文件编辑可见、恢复原文恢复 revision，以及读取错误传播，不冻结哈希常量。
+- 情绪测试合并为 `affect.rs`，按象限、步长、衰减等输入表验证行为。媒体采集与选择分别覆盖持久化/事务和选择/学习链路，保留两个套件。
+- Node 套件（`test/*.test.mjs`）：`control`、`dashboard`、`diagnostics`、`prompts`、`redirect`、`reload`、`settings-patch`。例如运行 `node --test test/settings-patch.test.mjs`。
+- 提示词选择**生成一致性检查**：修改 `src/prompts.mjs` 或 `src/orientation.mjs` 后运行 `node rust/tools/gen-prompts.mjs`，再运行 `node rust/tools/gen-prompts.mjs --check`。检查在内存中生成并经 rustfmt 格式化，与 `rust/src/prompts.rs` 逐字比较，不修改工作区，也不依赖 golden；Node 的 `prompts` 套件自动执行此检查（需要 Node 与 rustfmt）。
+- `rust/tests/golden/` 及其辅助全部删除。旧 JS 整库 schema/数据打开兼容性覆盖随 oracle 删除：旧实现已归档，不再维护全 schema/逐行等价；当前 Rust 存储单测与媒体旧 schema 迁移行为测试仍保留。
+
+本次精简前后（按测试函数计数，表驱动中的输入行不单独计数）：
+
+| 项目 | 精简前 | 精简后 |
+| --- | ---: | ---: |
+| Rust 测试 | 305 | 231 |
+| Rust 集成套件 | 26 | 13 |
+| Node 测试 | 34 | 34 |
+| golden 目录逻辑字节数（含辅助） | 5,256,568 | 0 |
+
+Rust 数量包含补回一个原本缺少 `#[tokio::test]` 的精确回复用例；情绪九项行为均保留。Node 用生成一致性检查替换旧 JSON 示例快照，所以总数不变。
+
+合并前在仓库根目录执行一次：
+
+```sh
+cargo clippy --manifest-path rust/Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path rust/Cargo.toml
+QQ_CORE_BIN="$PWD/rust/target/debug/qq-inner-core" npm test
+```
+
+Node 热重载测试需要已构建的内核；`QQ_CORE_BIN` 可指向其他构建目录。macOS 默认缺少第二个 loopback 地址，TLS 多来源限流测试会按平台跳过。
+
+**磁盘提示**：Rust 集成测试现有 13 个二进制；`Cargo.toml` 中 `[profile.dev] debug = "line-tables-only"` 限制调试产物体积。在服务器验收后可用 `cargo clean --manifest-path rust/Cargo.toml --profile dev` 回收开发构建空间，保留 release。
