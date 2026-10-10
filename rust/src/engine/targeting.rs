@@ -43,8 +43,9 @@ pub fn validate(
             .map(str::to_owned),
     };
     if hint == Hint::SelfChat {
-        // Trusted inbound trigger, retained separately from the latest message.
-        targets.reply_to = addressed_id.map(str::to_owned);
+        // Preserve a validated model choice; otherwise quote the latest inbound
+        // addressed trigger, retained separately from later open messages.
+        targets.reply_to = targets.reply_to.or_else(|| addressed_id.map(str::to_owned));
     } else if (targets.reply_to.is_some() || targets.mention.is_some())
         && draw().partial_cmp(&0.1) != Some(std::cmp::Ordering::Less)
     {
@@ -57,6 +58,65 @@ pub fn validate(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn addressed_reply_prefers_valid_model_target_and_falls_back_otherwise() -> Result<()> {
+        let db = Store::in_memory()?;
+        for (chat, id, ts) in [("group:1", "old", 0), ("group:2", "foreign", 1)] {
+            db.message(
+                &json!({"chat":chat,"id":id,"sender":"20","text":"hi","ts":ts,"self":false}),
+            )?;
+        }
+        for i in 0..100 {
+            db.message(&json!({"chat":"group:1","id":format!("recent{i}"),"sender":"20","text":"hi","ts":1,"self":false}))?;
+        }
+        for (response, expected) in [
+            (json!({"replyTo":"recent0"}), "recent0"),
+            (json!({"replyTo":"missing"}), "recent99"),
+            (json!({"replyTo":"foreign"}), "recent99"),
+            (json!({"replyTo":"old"}), "recent99"),
+            (json!({"replyTo":42}), "recent99"),
+            (json!({"replyTo":""}), "recent99"),
+            (json!({"replyTo":null}), "recent99"),
+            (json!({}), "recent99"),
+        ] {
+            let targets = validate(
+                &db,
+                "group:1",
+                "99",
+                &response,
+                Some("recent99"),
+                Hint::SelfChat,
+                || panic!("addressed replies must bypass the optional targeting gate"),
+            )?;
+            assert_eq!(targets.reply_to.as_deref(), Some(expected), "{response}");
+        }
+        // Non-addressed turns still ignore addressed_id and retain the existing 10% gate.
+        for (response, draw, expected) in [
+            (json!({"replyTo":"recent0"}), 0., Some("recent0")),
+            (json!({"replyTo":"recent0"}), 0.5, None),
+            (json!({"replyTo":"missing"}), 0., None),
+            (json!({}), 0., None),
+        ] {
+            for hint in [Hint::Open, Hint::Other] {
+                let targets = validate(
+                    &db,
+                    "group:1",
+                    "99",
+                    &response,
+                    Some("recent99"),
+                    hint,
+                    || draw,
+                )?;
+                assert_eq!(
+                    targets.reply_to.as_deref(),
+                    expected,
+                    "{hint:?}: {response}"
+                );
+            }
+        }
+        Ok(())
+    }
 
     #[test]
     fn targets_are_scoped_recent_and_gated() -> Result<()> {

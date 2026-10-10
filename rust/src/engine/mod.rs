@@ -553,6 +553,7 @@ impl Engine {
         // 只有去重成功的新消息递增 version；批内 self 优先于后续开放消息。
         s.version += 1;
         s.last_human = now;
+        // 多人点名时按接收顺序保留最后一条，仅作为模型未选有效引用时的回退。
         if m.hint == Hint::SelfChat {
             s.addressed_id = Some(m.id.clone());
         } else if !s.pending {
