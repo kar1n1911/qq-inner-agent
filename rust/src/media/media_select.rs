@@ -127,7 +127,7 @@ impl Config {
 pub struct GroupActivity {
     pub rate: f64,
     pub since_human: f64,
-    /// 连续活跃度；quiet 只供冷场安全门槛和学习分桶使用。
+    /// 连续活跃度；quiet 仅描述活跃度，不决定场合或救场门槛。
     pub activity: f64,
     pub quiet: bool,
     pub awake: bool,
@@ -161,8 +161,11 @@ pub fn group_activity(db: &Store, chat: &str, now: f64, silence: f64) -> Result<
     let mut samples = 0usize;
     for bucket in db.rows(
         "SELECT hour,count FROM group_hours WHERE chat=? AND hour>=? AND hour<=?",
-        params![chat, ((now - 30. * 86400.) / 3600.).floor() as i64,
-            (now / 3600.).floor() as i64],
+        params![
+            chat,
+            ((now - 30. * 86400.) / 3600.).floor() as i64,
+            (now / 3600.).floor() as i64
+        ],
     )? {
         let h = bucket["hour"].as_i64().unwrap();
         let count = bucket["count"].as_u64().unwrap() as usize;
@@ -305,6 +308,36 @@ impl Candidate {
         Ok(json!({"type":"image","data":{"file":format!("file://{}",path.display())}}))
     }
 }
+/// 场合只由结构阶段派生；现有 Classification 没有可靠的轻松/争论标签，
+/// 不用回复情绪冒充插入素材时的语气。桶名带 stage 前缀以隔离旧聚合数据。
+pub fn occasion_bucket(stage: Stage) -> &'static str {
+    match stage {
+        Stage::Developing => "stage_developing",
+        Stage::Closing => "stage_closing",
+        Stage::NaturalEnd => "stage_natural_end",
+        Stage::Standalone => "stage_standalone",
+    }
+}
+
+/// 概率触发与候选硬门槛共享此谓词，不依赖活跃度的 quiet 切点。
+pub fn rescue_trigger(stage: Stage, since_human: f64, c: &Config) -> bool {
+    since_human >= c.silence_seconds && matches!(stage, Stage::Closing | Stage::NaturalEnd)
+}
+
+#[derive(Clone, Copy)]
+pub struct Occasion {
+    bucket: &'static str,
+    rescue: bool,
+}
+impl Occasion {
+    pub fn new(stage: Stage, since_human: f64, c: &Config) -> Self {
+        Self {
+            bucket: occasion_bucket(stage),
+            rescue: rescue_trigger(stage, since_human, c),
+        }
+    }
+}
+
 pub fn enable(db: &Store) -> Result<()> {
     db.enable_media()?;
     db.connection().execute_batch("CREATE TABLE IF NOT EXISTS media_fitness(target TEXT,source TEXT,hash TEXT,bucket TEXT,positive REAL NOT NULL DEFAULT 0,total INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(target,source,hash,bucket));
@@ -312,6 +345,42 @@ pub fn enable(db: &Store) -> Result<()> {
     CREATE TABLE IF NOT EXISTS media_sharing(a TEXT,b TEXT,hour INTEGER,strength REAL,summary TEXT,PRIMARY KEY(a,b));
     CREATE TABLE IF NOT EXISTS media_pending(chat TEXT,event TEXT,source TEXT,hash TEXT,bucket TEXT,ts REAL,classification TEXT,wild INTEGER DEFAULT 0,PRIMARY KEY(chat,event,source,hash));
     CREATE TABLE IF NOT EXISTS media_wild(chat TEXT PRIMARY KEY,accepted INTEGER DEFAULT 0);")?;
+    migrate_occasion_buckets(db)
+}
+
+/// 不改表结构：按历史反馈自带的分类和已审核 signal 回填，更新桶名使迁移幂等。
+/// 无分类的旧聚合无法拆分，保留但不读取；损坏的旧反馈也保留供审计。
+/// 如需清理孤立聚合，可执行 DELETE FROM media_fitness
+/// WHERE bucket IN ('active','quiet_rescue'); 新桶及反馈不受影响。
+fn migrate_occasion_buckets(db: &Store) -> Result<()> {
+    let tx = db.immediate()?;
+    for r in db.rows(
+        "SELECT * FROM media_feedback WHERE bucket IN ('active','quiet_rescue')",
+        [],
+    )? {
+        let Some(classification) = r["classification"]
+            .as_str()
+            .and_then(|s| serde_json::from_str::<Classification>(s).ok())
+        else {
+            continue;
+        };
+        let bucket = occasion_bucket(classification.stage);
+        if let Some(value) = r["signal"].as_f64() {
+            db.execute("INSERT INTO media_fitness VALUES(?,?,?,?,?,1) ON CONFLICT(target,source,hash,bucket) DO UPDATE SET positive=positive+excluded.positive,total=total+1",
+                params![r["chat"].as_str(),r["source"].as_str(),r["hash"].as_str(),bucket,value])?;
+        }
+        db.execute(
+            "UPDATE media_feedback SET bucket=? WHERE chat=? AND event=? AND source=? AND hash=?",
+            params![
+                bucket,
+                r["chat"].as_str(),
+                r["event"].as_str(),
+                r["source"].as_str(),
+                r["hash"].as_str()
+            ],
+        )?;
+    }
+    tx.commit()?;
     Ok(())
 }
 pub struct Feedback<'a> {
@@ -319,7 +388,6 @@ pub struct Feedback<'a> {
     pub event: &'a str,
     pub source: &'a str,
     pub hash: &'a str,
-    pub bucket: &'a str,
     pub classification: &'a Classification,
     pub outcome: Outcome,
     pub awake: bool,
@@ -327,6 +395,7 @@ pub struct Feedback<'a> {
 pub fn learn(db: &Store, f: Feedback<'_>) -> Result<Option<f64>> {
     let tx = db.immediate()?;
     let value = signal(f.classification, f.outcome, f.awake);
+    let bucket = occasion_bucket(f.classification.stage);
     let inserted = db.execute(
         "INSERT OR IGNORE INTO media_feedback VALUES(?,?,?,?,?,?,?,?)",
         params![
@@ -334,7 +403,7 @@ pub fn learn(db: &Store, f: Feedback<'_>) -> Result<Option<f64>> {
             f.event,
             f.source,
             f.hash,
-            f.bucket,
+            bucket,
             serde_json::to_string(f.classification)?,
             serde_json::to_string(&f.outcome)?,
             value
@@ -342,7 +411,7 @@ pub fn learn(db: &Store, f: Feedback<'_>) -> Result<Option<f64>> {
     )?;
     if inserted > 0 {
         if let Some(v) = value {
-            db.execute("INSERT INTO media_fitness VALUES(?,?,?,?,?,1) ON CONFLICT(target,source,hash,bucket) DO UPDATE SET positive=positive+excluded.positive,total=total+1",params![f.chat,f.source,f.hash,f.bucket,v])?;
+            db.execute("INSERT INTO media_fitness VALUES(?,?,?,?,?,1) ON CONFLICT(target,source,hash,bucket) DO UPDATE SET positive=positive+excluded.positive,total=total+1",params![f.chat,f.source,f.hash,bucket,v])?;
         }
     }
     tx.commit()?;
@@ -389,7 +458,7 @@ pub fn candidates(
     query: &str,
     now: f64,
     c: &Config,
-    quiet: bool,
+    occasion: Occasion,
 ) -> Result<Vec<Candidate>> {
     if !c.enabled {
         return Ok(vec![]);
@@ -425,7 +494,13 @@ pub fn candidates(
             continue;
         }
         // 温度是硬门槛：包括 wild，抽签必中也不能越过。
-        if quiet && fitness(db, chat, source, hash, "quiet_rescue")? < c.mildness_threshold {
+        // 非救场场合也拒绝反复收到负反馈的素材；1/3 冷启动仍可探索。
+        let floor = if occasion.rescue {
+            c.mildness_threshold.max(0.1)
+        } else {
+            0.1
+        };
+        if fitness(db, chat, source, hash, occasion.bucket)? < floor {
             continue;
         }
         result.push(Candidate {
@@ -439,12 +514,7 @@ pub fn candidates(
     Ok(result)
 }
 pub fn probability(a: &GroupActivity, stage: &Classification, c: &Config, waiting: bool) -> f64 {
-    if !c.enabled
-        || waiting
-        || !a.awake
-        || a.since_human < c.silence_seconds
-        || !matches!(stage.stage, Stage::Closing | Stage::NaturalEnd)
-    {
+    if !c.enabled || waiting || !a.awake || !rescue_trigger(stage.stage, a.since_human, c) {
         return 0.;
     }
     let rescue = (c.p_quiet * a.since_human / c.silence_seconds).min(c.quiet_cap);
@@ -489,7 +559,8 @@ pub fn select(
     let att = attention(&a, c.groups.get(chat).unwrap_or(&c.attention), accepted);
     let target = att.as_ref().map_or(0.3 + 0.5 * a.activity, |a| a.target);
     let reaction_weight = att.as_ref().map_or(1., |a| a.reaction_weight);
-    let mut items = candidates(db, chat, &last.text, now, c, a.quiet)?;
+    let occasion = Occasion::new(stage.stage, a.since_human, c);
+    let mut items = candidates(db, chat, &last.text, now, c, occasion)?;
     // face 是明确的短反应；图片没有风格标注，不能臆测其内容。
     // 先过相关度、来源、温和硬门槛，再按连续风格权重排序。
     let rank = |item: &Candidate| {
@@ -508,7 +579,7 @@ pub fn select(
     Ok(items.into_iter().next().map(|candidate| Selection {
         candidate,
         classification: stage,
-        bucket: if a.quiet { "quiet_rescue" } else { "active" },
+        bucket: occasion.bucket,
         wild: att.is_some_and(|a| a.drift_level == Drift::Wild),
     }))
 }
@@ -553,7 +624,6 @@ pub fn observe(db: &Store, chat: &str, now: f64, c: &Config) -> Result<()> {
                     event: &m.id,
                     source: chat,
                     hash,
-                    bucket: if quiet { "quiet_rescue" } else { "active" },
                     classification: &stage,
                     outcome: outcome(&history, m.ts, c),
                     awake,
@@ -583,7 +653,6 @@ pub fn observe(db: &Store, chat: &str, now: f64, c: &Config) -> Result<()> {
                 event,
                 source: r["source"].as_str().unwrap(),
                 hash: r["hash"].as_str().unwrap(),
-                bucket: r["bucket"].as_str().unwrap(),
                 classification: &stage,
                 outcome,
                 awake,
