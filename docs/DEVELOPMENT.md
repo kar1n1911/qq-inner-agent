@@ -361,3 +361,37 @@ QQ_CORE_BIN="$PWD/rust/target/debug/qq-inner-core" npm test
 Node 热重载测试需要已构建的内核；`QQ_CORE_BIN` 可指向其他构建目录。macOS 默认缺少第二个 loopback 地址，TLS 多来源限流测试会按平台跳过。
 
 **磁盘提示**：Rust 集成测试现有 13 个二进制；`Cargo.toml` 中 `[profile.dev] debug = "line-tables-only"` 限制调试产物体积。在服务器验收后可用 `cargo clean --manifest-path rust/Cargo.toml --profile dev` 回收开发构建空间，保留 release。
+
+## 二进制自更新（人工管理入口）
+
+**设计依据 UPDATE-1（目标）**：把手工部署内置化；调用更新入口后，磁盘可执行文件必须等于新构建产物，旧进程退出后由监督者在同一路径启动新版；调用回滚入口后，磁盘和新启动进程都必须恢复上一版。不能仅以“构建成功”或“发送了重启信号”判定完成。
+
+**设计依据 UPDATE-2（发送安全）**：重启必须先停止接收新任务、等待引擎在途发送完成并记录结果，再断开 OneBot、关闭 SQLite、自行退出。发送前已持久化的 pending 投递在异常退出后只转为 uncertain，绝不重放。
+
+实现：`rust/src/update.rs`（更新事务、持久状态、控制分发），`rust/build.rs`（编译时 git revision），`rust/src/main.rs`（CLI、控制总线接线、排空退出）。不定时拉取，不调用 systemctl，不修改 napcat 依赖关系。
+
+### 操作步骤
+
+1. 首次部署本功能仍需正常手工构建并重启一次。确保服务使用本仓库的可执行文件，`Restart=always`（`scripts/install_service.py` 已配置），服务用户有仓库、二进制目录写权限，PATH 能找到 Git/Cargo，Git 的 upstream 和非交互认证已设置好。
+2. 在开发机提交、推送。服务端执行 `./agent update apply`；原生 CLI 等价为 `rust/target/release/qq-inner-core --root "$PWD" update apply`。CLI 只发送一次请求，不自动重试。响应 `accepted: true` 表示任务已接收，**不表示更新成功**。
+3. 执行 `./agent update status` 查看结果；`runningRevision` 是当前进程编译时写入的 revision，`installedRevision` 是已安装版本，`previousRevision` / `previousBinary` 是备份，另有 `operation`、`result`、`error`、时间戳、`busy`、`pid`。构建详情在 `.runtime/update/build.log`，状态保存在 `.runtime/update/status.json`。
+4. 成功后出现 `restart_pending`，进程排空并退出。`flock` 等待的内核退出后，包装进程也退出、释放锁；systemd 根据 `Restart=always` 重启相同路径。启动后的 `update.status` 为 `completed`，`runningRevision` 应是目标 revision。直接手动运行 `start` 时没有监督者，不会自行再启动。
+5. 回滚执行 `./agent update rollback`，再查询 `./agent update status`。回滚不拉取、不构建、不回退 Git 工作树或数据库；用备份执行相同的原子安装和排空退出流程，并把换下来的版本保留为新的上一版。
+
+本地控制套接字仍是配置的数据目录下 `control.sock`（目录权限 0700）。管理方法为 `update.apply`、`update.status`、`update.rollback`，使用现有逐行 JSON 协议，例如 `{"id":"admin-1","method":"update.apply","params":{}}`。同一进程同时只允许一个变更，直到重启完成；重复变更返回 `update_busy`，状态查询不阻塞。可由有该用户套接字权限的 CLI/仪表盘调用，本次提供 CLI，不新增公开 HTTP 接口。
+
+### 前置检查、失败与恢复
+
+- `git status --porcelain --untracked-files=all` 必须为空（包括未跟踪文件）；然后 `git pull --ff-only`。脏工作树、无 upstream、认证失败或分叉都报告 `failed` 和错误，保留原二进制，不重启。
+- pull 前后 HEAD 相同，返回 `already_latest`（已是最新），**不构建**。这里表示源码没有新提交；回滚后源码与运行版本可能不同，须对照 `runningRevision`。构建失败后已经拉下来的 HEAD 不自动回退；再次 apply 若没有新提交仍不重建，需要推送新的修复提交，或由管理员处理临时工具链故障后手工构建部署。
+- 构建实际执行 `cargo build --release --bin qq-inner-core --target-dir <隔离目录>`，从不向运行中的 `rust/target/release` 构建；失败清除隔离构建目录，保留旧文件和备份，保留构建日志。构建后再次校验工作区与 HEAD，拒绝源码在构建期间发生的变化。
+- 安装前执行候选产物的 `build-revision`，必须匹配目标 revision；校验当前磁盘版本仍匹配运行版本。候选复制到目标二进制的同目录临时文件，fsync 后，通过 rename 原子覆盖；运行中进程继续持有旧 inode。备份在 `.runtime/update/previous-*`，在替换前持久化。旧备份留存供人工审计；status 指向可直接回滚的上一版。
+- 无备份、备份丢失、版本不匹配、文件权限不足均报告错误。替换前失败不改变在线文件；替换后若落盘状态或清理失败，记录错误并仍请求排空重启，避免磁盘已换新版而继续接受第二次安装。进程意外终止时下次启动会把未完成的事务标记为 `interrupted`；若实际运行 revision 已等于目标，则认定 `completed`。
+- 重启期间套接字短暂不可用；非常快的回滚可能在确认响应抵达客户端前开始退出。此时应重连查询 status，**不要自动重放更新/回滚请求**。本功能没有启动健康检查后的自动回滚；若新程序无法启动，管理员可停止服务后根据持久化 `previousBinary` 复制到可执行文件同目录临时路径，再 rename 覆盖并启动服务。
+- 更新自身不依赖 systemd 的 stop 超时：服务主动等待发送排空后才退出。发送失败/连接断开会按既有逻辑记录 uncertain，启动恢复不重发；部署不提供 OneBot 无法保证的网络层 exactly-once 承诺。
+
+### 两层测试及设计映射
+
+- **可用性**：`rust/src/update/tests.rs` 用临时 Git 仓库作为假远端、脚本作为 Cargo；覆盖无新提交不构建、脏工作区、非快进、构建失败清理、产物版本不匹配、缺失备份、并发互斥、状态与备份、原子替换和控制套接字路由。`rust/src/main.rs` 的运行时测试另外验证生产 `run()` 确实接入管理方法，并验证退出排空。
+- **目标**：`control_entry_restarts_new_artifact_and_rollback_restarts_old_artifact` 对应 UPDATE-1：通过真实 `Server → Admin → Updater` 套接字调用升级，逐字节比较磁盘文件与假构建预期产物，等待旧子进程正常退出，再由测试监督者从相同 ExecStart 路径启动；断言新 PID、运行 revision、备份内容；再调用回滚，断言磁盘内容和启动进程都恢复旧版。两个可执行脚本作为可区分的假产物，复用已编译的测试服务程序；测试不拉 GitHub、不嵌套运行 Cargo、不操作真实 systemd。
+- **发送安全**：运行时排空测试对应 UPDATE-2；现有引擎与 OneBot 测试验证发送结果落库、uncertain 和无自动重放。测试代码标注上述设计行号，按本文件“两层都过才算完成”的规则验收。

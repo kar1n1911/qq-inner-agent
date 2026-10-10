@@ -33,6 +33,13 @@ struct Cli {
 enum Command {
     /// Probe the repository root, configuration, and SQLite, then exit.
     Selftest,
+    /// Print the revision embedded at compile time.
+    BuildRevision,
+    /// Human-triggered binary deployment via the local control socket.
+    Update {
+        #[arg(value_parser = ["apply", "status", "rollback"])]
+        action: String,
+    },
     /// Run the agent until SIGINT, SIGTERM or SIGHUP.
     Start,
     /// Print actual SQLite schema (in memory unless --database is supplied).
@@ -67,6 +74,24 @@ async fn main() -> Result<()> {
     let root = resolve_root(cli.root)?;
 
     match cli.command {
+        Command::BuildRevision => println!("{}", qq_inner_core::update::REVISION),
+        Command::Update { action } => {
+            use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+            let dir = config::load_config(&root)?.config.data_dir;
+            let mut socket = tokio::net::UnixStream::connect(dir.join("control.sock")).await?;
+            socket.write_all(format!("{{\"id\":\"cli\",\"method\":\"update.{action}\"}}\n").as_bytes()).await?;
+            let mut reader = BufReader::new(socket);
+            loop {
+                let mut line = String::new();
+                anyhow::ensure!(reader.read_line(&mut line).await? > 0, "control disconnected; query update status");
+                let reply: Value = serde_json::from_str(&line)?;
+                if reply["id"] == "cli" {
+                    println!("{}", serde_json::to_string_pretty(&reply)?);
+                    anyhow::ensure!(reply["ok"] == true, "update request rejected");
+                    break;
+                }
+            }
+        }
         Command::Start => {
             if root.join(".settings-write").exists() || config::load_config(&root).is_err() {
                 eprintln!("Invalid configuration. Run ./agent setup to correct it.");
@@ -435,7 +460,7 @@ impl Runtime {
         loop {
             tokio::select! {
                 biased;
-                _ = shutdown.changed() => { self.abort.send_replace(true); stop.await; return Ok(()); }
+                _ = shutdown.changed() => { stop.await; self.abort.send_replace(true); return Ok(()); }
                 _ = &mut stop => break,
                 _ = report.tick() => self.report()?,
                 Some(notice) = self.notices.recv() => self.notice(notice).await,
@@ -487,8 +512,8 @@ impl Runtime {
         Ok(())
     }
     async fn shutdown(mut self) -> Result<()> {
-        self.abort.send_replace(true);
         self.engine.stop().await;
+        self.abort.send_replace(true);
         self.drain_backfill().await;
         self.disconnect().await;
         let result = self.report();
@@ -517,9 +542,10 @@ async fn run(root: PathBuf) -> Result<()> {
     let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     let mut hup = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())?;
     let (stop, mut shutdown) = watch::channel(false);
+    let signal_stop = stop.clone();
     let signals = tokio::spawn(async move {
         tokio::select! { _ = int.recv() => {}, _ = term.recv() => {}, _ = hup.recv() => {} }
-        stop.send_replace(true);
+        signal_stop.send_replace(true);
     });
     anyhow::ensure!(
         !root.join(".settings-write").exists(),
@@ -572,7 +598,13 @@ async fn run(root: PathBuf) -> Result<()> {
             rt.config.onebot_token.text.clone(),
         ],
     ));
-    let control = Server::bind(&rt.config.data_dir, backend.clone(), events)?;
+    let updater = qq_inner_core::update::Updater::new(
+        fs::canonicalize(&root)?, std::env::current_exe()?,
+        qq_inner_core::update::REVISION.into(), stop,
+    )?;
+    let control = Server::bind(&rt.config.data_dir, Arc::new(qq_inner_core::update::Admin {
+        backend: backend.clone(), updater,
+    }), events)?;
     rt.control = Some(backend);
     rt.connect();
     let mut tick = timer(1);
@@ -862,6 +894,78 @@ mod tests {
         assert!(weak.upgrade().is_none());
     }
 
+    // Goal design: docs/DEVELOPMENT.md:351 (UPDATE-2). A real engine send is
+    // held inside a mock OneBot; shutdown must await its ACK before disconnecting.
+    #[tokio::test]
+    async fn update_shutdown_drains_onebot_send_before_disconnect_without_replay() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::{accept_async, tungstenite::Message};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let dir = Temp::new();
+        dir.config(json!({
+            "provider":{"model":"fixture"},
+            "onebot":{"url":format!("ws://{}/", listener.local_addr().unwrap())},
+            "agent":{"allowedUsers":["1950202917"],"schedule":{"enabled":false},
+                "identity":{"enabled":false},"ownerTeaching":{"enabled":true},
+                "backfill":{"enabled":false},"proactive":false}
+        }));
+        fs::write(dir.0.join("secrets.json"), r#"{"apiKey":"fixture"}"#).unwrap();
+        let mut rt = dir.runtime();
+        let abort = rt.abort.subscribe();
+        let store = rt.store.clone();
+        let (sent, mut received) = mpsc::unbounded_channel();
+        let (release, mut released) = mpsc::unbounded_channel();
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let mut ws = accept_async(socket).await.unwrap();
+            let mut count = 0;
+            while let Some(Ok(Message::Text(frame))) = ws.next().await {
+                let request: Value = serde_json::from_str(&frame).unwrap();
+                let data = match request["action"].as_str().unwrap() {
+                    "get_login_info" => json!({"user_id":99}),
+                    "get_status" => json!({"online":true}),
+                    "send_private_msg" => {
+                        count += 1;
+                        sent.send(()).unwrap();
+                        released.recv().await.unwrap();
+                        json!({"message_id":1234})
+                    }
+                    _ => json!({}),
+                };
+                ws.send(Message::Text(json!({"echo":request["echo"],"status":"ok","retcode":0,"data":data}).to_string())).await.unwrap();
+            }
+            count
+        });
+        rt.connect();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !rt.bot.state().online { tokio::time::sleep(Duration::from_millis(10)).await; }
+        }).await.unwrap();
+        rt.engine.ingest(&json!({"post_type":"message", "message_type":"private",
+            "self_id":99,"user_id":1950202917u64,"message_id":1,
+            "time":1700000000,"message":"/忘记 临时测试","sender":{"nickname":"Owner"}})).unwrap();
+        rt.engine.tick().unwrap();
+        tokio::time::timeout(Duration::from_secs(3), received.recv()).await.unwrap().unwrap();
+        assert_eq!(store.lock().unwrap().rows("SELECT status FROM deliveries", []).unwrap()[0]["status"], "pending");
+        let shutdown = tokio::spawn(rt.shutdown());
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert!(!*abort.borrow(), "OneBot disconnected while send was in flight");
+        assert!(!shutdown.is_finished());
+        release.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let rows = store.lock().unwrap().rows("SELECT status FROM deliveries", []).unwrap();
+                if rows[0]["status"] == "sent" { break; }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }).await.unwrap();
+        store.lock().unwrap().recover_deliveries().unwrap();
+        assert_eq!(store.lock().unwrap().rows("SELECT status, message_id FROM deliveries", []).unwrap(),
+            vec![json!({"status":"sent","message_id":"1234"})]);
+        drop(store);
+        tokio::time::timeout(Duration::from_secs(3), shutdown).await.unwrap().unwrap().unwrap();
+        assert_eq!(server.await.unwrap(), 1);
+    }
+
     #[tokio::test]
     async fn backfill_runs_on_connect_timer_and_reconnect() {
         use futures_util::{SinkExt, StreamExt};
@@ -995,6 +1099,47 @@ mod tests {
                 .unwrap()
                 .block_on(run(PathBuf::from(root)))
                 .unwrap();
+        }
+    }
+
+    // Usability: prove the production run() wires update methods into its control bus.
+    #[test]
+    fn runtime_control_bus_exposes_update_management() {
+        use std::io::{BufRead, BufReader};
+        struct Child(std::process::Child);
+        impl Drop for Child {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let dir = Temp::new();
+        dir.config(json!({"agent":{"dryRun":true}}));
+        let _child = Child(Process::new(std::env::current_exe().unwrap())
+            .args(["--exact", "tests::signal_child", "--nocapture"])
+            .env("QIA_RUNTIME_SIGNAL_TEST", &dir.0)
+            .stdout(Stdio::null()).spawn().unwrap());
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let mut socket = loop {
+            if let Ok(socket) = std::os::unix::net::UnixStream::connect(dir.0.join("state/control.sock")) {
+                break socket;
+            }
+            assert!(std::time::Instant::now() < deadline, "runtime socket not ready");
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        writeln!(socket, "{}", json!({"id":"update", "method":"update.status"})).unwrap();
+        let mut reader = BufReader::new(socket);
+        loop {
+            let mut line = String::new();
+            assert!(reader.read_line(&mut line).unwrap() > 0);
+            let reply: Value = serde_json::from_str(&line).unwrap();
+            if reply["id"] == "update" {
+                assert_eq!(reply["ok"], true);
+                assert_eq!(reply["result"]["runningRevision"], qq_inner_core::update::REVISION);
+                assert_eq!(reply["result"]["result"], "never_updated");
+                break;
+            }
         }
     }
 

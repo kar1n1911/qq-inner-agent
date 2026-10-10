@@ -12,3 +12,4 @@ pub mod topic;
 pub mod transport;
 
 pub mod prompt_overlay;
+pub mod update;
