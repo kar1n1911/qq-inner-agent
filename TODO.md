@@ -1,7 +1,393 @@
 # 代办 / Backlog
 
-## WebUI 排版
-- 高级界面与普通配置界面的组件排版/对齐有问题,待修(web/index.html 的 form-grid 布局)。
+> 状态标记:⏸ 未开始 · 🔄 进行中 · ⛔ 被外部条件阻塞
+>
+> **⚠️ 本文件部分条目已过时,以两处为准**:
+> - **已完成的近期工作**(J0 群头衔、J 精确回复、L 作息判据+洪泛、N 配置补丁式保存、测试精简、JS 遗留清理):
+>   见 `git log` 与 `docs/DEVELOPMENT.md`;
+> - **设计 vs 实现审计的 39 条偏差及其修复进度**:见
+>   [`docs/working/audit-design-vs-implementation.md`](docs/working/audit-design-vs-implementation.md)(第五节含额度中断后的续做顺序)。
 
-## 待办(可选)
-- 身份自治 / 过往情景的专门单测(当前靠 transport 层测试覆盖)。
+## A. 人味 / 说话方式(同一条线,建议一批改)
+
+- **A1 提示词:候选类型 + 评分标准** ✅ 已完成(`4cdf504`)
+  - `src/prompts.mjs` 的 `formation` 首段:system1 扩成"快速回应 / 情绪反应 / 随口搭茬(可很短、可只附和)",
+    去掉 system2 的"观察",加"优先像群里人随口说的话:可以说废话、可以只跟着乐、不必每条都有信息量或判断"。
+  - `evaluation`:补"自然的随口搭话(哪怕没有信息量)同样值得发言;不要只奖励有信息量、有判断或显得聪明的候选"。
+  - 同步更新金标准 `rust/tests/golden/prompts.json`(逐字比对,必失配)。
+
+- **A2 提示词:学习项与死锁** ✅ 已完成(`4cdf504`)
+  - `traits` 层长期为空(实测 `long_term:1 / traits:0 / expressions:0`),而 `LEARNED_STYLE` 要求
+    "只能用 chatStyle 与 memories 中确有依据的说法" → **死锁**:没有依据就永远说不出群里的说话方式。
+  - 修:放宽口语语气词/常见网络表达的使用门槛;`formation` 里把"群内互动风格 / 语气 / 常用表达"列为优先学习项,收紧 skip。
+  - 观察期风格偏旁观(`orientation.analysis.style` 实测为"先以观察者姿态潜水…不凑热闹"),
+    在 ORIENTATION 提示词里加入"初始风格要偏参与而非旁观,避免一上来就点评"。
+
+- **A3 长度档位偏短** ✅ 已完成(`01b7877`)
+  - `policy.rs` 权重:被点名 `short 0.70 / medium 0.28 / long 0.02`;开放 `tiny 0.35 / short 0.45 / medium 0.18 / long 0.02`
+    → 开放场景 **80% 落 tiny/short**。
+  - `engine/mod.rs:1647` affect 的 `disposition.length()` 会**直接覆盖**权重表(`Angry|Supportive → short`)。
+  - 修:下调 tiny/short 权重、提高 medium;重新评估 affect 覆盖是否合理。
+
+## B. 发送与叫醒
+
+- **B1 @ 提及要能"叫醒"** ✅ 已完成(`01b7877`)
+  - `available()`(作息 × 节律)有两道闸门:`tick` 入口与 `cycle` 入口;实测被 @ 后**连判定事件都没有**。
+  - 修:`Hint::SelfChat`(@ / 叫名字 / 私聊)绕过作息闸门。
+  - 注:i18n 里明确写着"**被 @ 也需等待**",是旧设计,需一并改文案。
+
+- **B2 发送概率调参** ✅ 已完成(已热加载)
+  - `agent.sending.addressedProbability` 0.8 → **1.0**(默认值)。
+  - `agent.sending.proactiveProbability` 0.8 → 0.9(有效概率约 0.2 → 0.25)。
+  - 复核 `maxNegativeProbability` 0.8(默认 0.4)。
+  - 说明:公式本身无 bug;实测有效概率 ≈ base × settle × pace × motivation × forecast × mood × affinity × disposition。
+
+- **B3 affect 的 `Withdrawn` 压制** ⏸
+  - 实测 `disposition = Withdrawn` → `motivation() = 0.2` → 概率 **× 0.2**,是有效概率偏低的主因之一。
+  - 复核 `mood`/`rationality` 的近零取值为什么落到 `Withdrawn` 象限。
+
+- **B4 多气泡回复实际从未生效** ✅ 已完成(`4cdf504`)
+  - 远端 `agent.multiBubble = true`,但实测自己发过 5 条、**连续气泡 0 对**。
+  - 原因:`ARTICULATION` 的输出契约是 `{"text","emoji","faceId"}`,**没有 `bubbles` 字段**;
+    `MULTI_BUBBLE_INSTRUCTIONS` 又说"**可以**额外返回"(可选)→ 模型严格按契约输出,永远不返回多气泡,
+    代码 `if bubbles.is_empty() { vec![text] }` 退化成单条。
+  - 修:把 `bubbles` 写进 ARTICULATE 的输出契约,并把措辞从"可以"改成明确要求
+    (如"当 multiBubble=true 且内容适合时,必须拆成 2–3 条"),同时明确与 `lengthTarget` 的关系。
+
+## C. 自我身份(本次误答的根因,四条一起做)
+
+- **C1 自己发言的 speaker 用群内可见名** ✅ 已完成(`8131f18`)
+  - `engine/mod.rs:1213`:`"speaker": if self { a.name.text } else { text(m,"name") }`
+  - 实测:QQ 昵称是 `Kar1n1911`、群名片为空,但自己发的话在上下文里署名 `Lantaneen`(群里没人这么叫它)。
+  - 修:自己发言用**群名片优先、否则 QQ 昵称**,与群友看到的完全一致。
+
+- **C2 注入自我身份** ✅ 已完成(`8131f18`)
+  - 上下文加:「你的 QQ 是 3879337324,群内昵称 `Kar1n1911`,群名片 `<card>`;**群友讨论的机器人就是你**,不要以第三方身份谈论自己」。
+
+- **C3 aliases 自动并入可见名** ✅ 已完成(`8131f18`)
+  - `agent.aliases` 目前是 `[Lantaneen, Luma]`;把当前 QQ 昵称/群名片自动并入,让"叫名字"也能命中 `Hint::SelfChat`。
+
+- **C4 记忆里的自我表述** ✅ 已完成(`2f06889`)
+  - 实测学到的 `long_term` 是第三方口吻:「群里在调试一个叫丹德莱的机器人,1950202917 自己写的框架…」。
+  - 修:学习提示词加约束——涉及本机器人的内容记成"我",不要记成"群里有个机器人"。
+
+## D. 其他
+
+- **D1 dashboard 观察期用时冻结** 🔄 已改**未提交**
+  - `web/app.js`(ready 时用 `analysis.analyzedAt` 冻结,不再用 `now-started` 实时累加)+ `web/i18n.mjs` 新增
+    `Observation duration|观察用时`。语法已校验。
+- **D2 WebUI 排版** ⏸ 高级界面与普通配置界面的组件排版/对齐有问题(`web/index.html` 的 form-grid)。
+- **D3 身份自治 / 过往情景的专门单测** ⏸ 当前靠 transport 层测试覆盖。
+
+## E. 架构审计:开着但没生效的模块
+
+- **E1 `relay` 接线(仅链接)** ✅ 已完成(`c16e42a`)—— 但见 E6
+  - `rust/src/topic/relay.rs` 418 行 + 6 测试,但 `is_duplicate` / `safety_gate` / `decide`
+    以及 `RelayDecision` / `RelayKind` / `OriginKind` / `SelfReview` 在**全仓 0 处引用**。
+  - 文件头自述:"纯决策模块;**调用方**负责提供本群未过期 short_term 与可信审核结果" ——
+    即"抓取 + 审核 + 发送"的调用方**从未实现**。`agent.relay.enabled = true` 等于空转。
+  - 附带:**文档与代码不符** —— `docs/DEVELOPMENT.md:112` 与
+    `docs/working/prompt-and-learning-design.md:58` 都把 §21 群间转发标为「✅ 已实现(P6i)」,需一并修正。
+  - 待定:是补齐调用方,还是先降级文档/关闭开关。
+
+- **E2 搜索词由兴趣主动生成** ✅ 已完成(`2c47ca6`)
+  - `enabled: true` 但 `github: []`、`feeds: []`;`Settings::enabled()` 要求来源非空 → 实际关闭。
+  - 管线是接好的(`engine` 调 `topic_sources.collect(...)`),只差配置真实来源。
+
+- **E3 `identity` 被 traits 卡死** 🔄 A2 已修,待观察是否解冻
+  - 4 个子开关全开,但 `identity_state.last_attempt = None`、`identity_persona` 0 行、群名片为空。
+  - 原因:`enough()` 需要 `minTraits: 3`,而 `traits` 层只有 **1** 条。
+  - **与 A2 同一根因**:修好 A2 后 A2 / E3 / expression 会一起解冻。
+
+- **E4 `expression` 学不到** 🔄 同 A2,待观察
+  - `learn`/`useLearned` 均开,`expressions` 表 **0 行**;模型从不产出 `expressions`(与 A2 同源)。
+
+- **E5 因果链备忘** ⏸
+  - **A2(traits)是枢纽**:同时卡住 identity(E3)、expression(E4)、以及"群内说话方式"本身。
+  - 优先级建议:A2 → E3/E4 → B4/A3 → B1/B2 → E1(relay 是否补齐待定)。
+
+- **E6 relay 链接的证据门槛过严** ✅ 已修复(`eb47bb6`)
+  - 实机发现:其他群 2 条 b23.tv 链接**都只有 1 个作者**,被"≥2 作者"门槛挡掉 → relay 永不触发。
+  - 修:**低风险链接降为 ≥1 作者**(保留 `source == item.url` 与"证据正文必须含该 URL");
+    `links.rs::collect` 与 `relay.rs::decide` 两处同步放宽;**高风险升档仍要求 `independent_evidence` 不变**。
+  - 验证:relay 单测 10 项 + 远程全量 **264 项全过**、clippy 干净;用真实数据复核两条链接现已满足新判据。
+
+- **E7 上线的修复尚无实机行为样本** ⏸
+  - agent 作息 14:00–01:00(Europe/Stockholm),观察时 07:30 属**离岗**,因此 A/B/C 组改动**还没有真实发言样本**可验证。
+  - 需在 14:00 后观察:是否被 @ 能叫醒、是否出现多气泡、traits 是否开始增长。
+
+## I. 连续性审计(文档要求连续、代码却写成阶梯)
+
+> 已完成。原审计方法:逐条比对 `docs/working/*.md` 的"连续/比例/强度/渐变"意图与 `rust/src/` 实现。
+
+### 已完成 ✅
+
+- **I0 affect 四象限硬分类 → 连续模型**(`0d64c4f`)
+  `motivation(v,r) = 1 + intensity·(Σwᵢmᵢ/Σwᵢ − 1)`,`intensity = min(1, √(v²+r²)/0.15)`,四角高斯加权;
+  `disposition()` 降级为 **argmax**(仅供规则/熔断/诊断)。长度权重同样连续倾斜。含 1000 步密集采样单调性断言。
+- **I0b 死区 + @ 豁免 + `Withdrawn 0.2→0.5`**(`5e0f4b5`),后被连续模型吸收。
+
+- **I1–I4 §10.4 素材选靶链连续化**(`85d53db`)
+  - I1 `quiet` 二值(`rate<0.5 || since>=silence*6`)→ **由连续活跃度逐级插值**出 drift(4 档)/anchor(3 档),不再一次跳两级;
+  - I2 **`reaction_style` 接上消费点**(原为死代码,`:459` 用 `_` 丢弃)且 `short_density → 风格`改为连续;
+  - I3 目标相关度去掉二次量化(原 `if quiet{0.3}else{0.8}` → 四档 → 三层地板,只落 6 个取值);
+  - I4 `confident` 的 **20× 跳变**(`if confident {1.} else {0.05}`)→ 由结构量算**连续置信度**。
+
+- **I5–I6 情绪接线**(`7a6fa59`)
+  - I5 **群级 mood 补接线**:`apply` 写入 group 级(affinity 仍只属人物级)、`behavior` 读取并在**主动发言准入**上生效(被点名仍豁免);
+  - I6 **§6.6 情绪调制学习分诊**:低 mood → 倾向 `skip` 且已存 `partial` 不升格;低 affinity → 提高证据门槛;高 affinity → 可更早 `learn`。
+    方向性守住:**只调阈值,不改事实性校验**;`agreement` 不参与。
+
+- **丙 无文档依据的硬阈值**(`2a4bedc`)
+  - `policy.rs` `similarity > 0.88` → 改为 **`smoothstep` 连续抑制**(`repetition_penalty`),附"0.88 两侧斜率连续"断言;
+  - `ranking.rs` / `expression.rs` 的 `confidence < min_confidence`、`policy.rs` 资格门 → **保留为可信门并注明理由**
+    (改连续会危及"证据不足不得入库"的保守性)。
+
+### 未完成 ⛔
+
+- **I7 §15 跨群共享学习** —— 文档 L873 已给连续公式 `share = clamp((overlap−floor)/(ceil−floor))`(floor .35/ceil .75),
+  但**整节未实现**,而状态表 L56 标「✅ 已实现(P6b)」。
+  - **决定:补实现,等 codex 额度恢复后再做**;
+  - 实现时须守 §15.2/§15.4 红线:只取 `subject=group` 的 traits/long_term/expressions/jargon,
+    **person:<QQ号>、原始正文、昵称身份永不外溢**;
+  - 临时措施:**文档状态需先从「✅」改回「⬜」**(与 relay 同类问题,尚未改)。
+
+## J0. 群头衔 / 成员角色读取 ⏸ 待额度恢复
+
+**需求**:读取**群头衔**(成员专属头衔)。
+
+**API 已实测**(NapCat 4.18.33,`get_group_member_info` / `get_group_member_list` 返回字段):
+```
+group_id, user_id, nickname, card, sex, age, area, level, qq_level,
+join_time, last_sent_time, title_expire_time, unfriendly,
+card_changeable, is_robot, shut_up_timestamp, role, title
+```
+- 实测:663614559 有 3 人带专属头衔、65840633 有 14 人(如 `奶龙大王` / `开服大神` / `群老鸽子` / `总督` / `艾米酱`);
+- `role` = owner/admin/member(1/6/271 与 1/10/83);
+- **`is_robot`** = 是否机器人(见下面 §J1)。
+
+**现状**:`persona/mod.rs` 的 `member_names()` 与 `engine/mod.rs` 的 `nickname_samples()` **只取 `card`/`nickname`**,
+`title` / `role` / `level` / `is_robot` **全部被丢弃**。
+
+**建议用途**(实现时再定取舍):
+1. **上下文**:history 里发言人带上头衔/角色(群主、管理员、专属头衔),帮助理解"谁说话更有分量";
+2. **入群观察**:群资料里列出**有头衔的成员**(头衔常反映群文化,如"总督""群老鸽子");
+3. **自我身份**:自己的头衔 + 用 `is_robot` 列出**群里的其他机器人**;
+4. 注意红线:头衔/角色是**公开群信息**,但仍不得与 `person:<QQ号>` 的推断性记忆混用。
+
+## J1. 用 `is_robot` 强化"是否指自己"的判据 ⏸ 并入 K 组续做
+
+**实证**:65840633 里有一名成员 **`沐沐大魔王`,其 `title` 就是 `bot`** —— 证明"群内bot"这一说法**不能等于自己**。
+
+**要求**:续做 K 组的 C2/C4 自我指涉判据时,补一条更硬的依据:
+- 取当前群成员列表,筛出 `is_robot=true` 的成员;
+- 若某话题的**证据消息来自 `is_robot=true` 且不是自己**的成员,则**不得**把该内容记成"我";
+- 反之,只有证据指向**自己这个账号**(自己的 QQ / 自己的消息 / 自己的群名片或昵称)时才记成"我"。
+
+**接入点**:`get_group_member_list` 已有调用路径(`persona/mod.rs:415`、`engine/mod.rs:1005`),可顺带把 `is_robot` 带出来并缓存。
+
+## J. 精确回复(@ / 引用回复)⏸ 待额度恢复,暂不启动
+
+**目标**:让 agent 能 **@ 某人**或**引用某条消息**(QQ 的"精确回复")。
+
+**API 已查证**(NapCat 4.18.33 实测支持,OneBot v11 标准段):
+
+| 段 | 格式 | NapCat 内部 |
+|---|---|---|
+| @ | `{"type":"at","data":{"qq":"<QQ号>"}}` | `type: ze.at, data:{qq}` |
+| 引用 | `{"type":"reply","data":{"id":"<消息id>"}}` | `type: ze.reply, data:{id}` |
+
+**接入点**:`transport/mod.rs::send` 现有 `params = {"message":[…], "auto_escape":true}`,
+只需在 `message` 数组**前插段**(顺序 `[reply][at][text][face]`)。
+注意 `auto_escape:true` 已把模型输出锁成惰性文本 → **新段必须由代码构造,不能解析模型文本**;
+`send_media()` 已有"禁止 text/at 等段"的先例。
+
+**已定口径**(用户确认):
+
+1. **被 @ 时默认自动引用**叫它的那条消息 —— **不依赖模型**,保证关键场合一定生效;
+2. **开放讨论里 @ 人 / 引用的阈值要调高(概率要低)** —— 避免显吵、避免 @ 错人;
+3. **模型出意图 + 引擎校验**:ARTICULATE 增加可选 `replyTo`(消息 id)/`mention`(QQ);
+   引擎验证 `replyTo` 必须存在于该聊天近期消息、`mention` 必须是近期发言人且不是自己,
+   **任一不合法即丢弃该字段**(与"外部内容不可信"同一口径,防编造);
+4. **可观测**:`deliveries` / `message_sent` 事件带上实际发出的段,仪表盘可见"这条引用了谁/@ 了谁"。
+
+**涉及文件**:`transport/mod.rs`(`send`)、`engine/mod.rs`(默认行为 + 校验)、
+`engine/policy.rs`(开放场景的低概率)、`src/prompts.mjs`(ARTICULATE 契约)、`store`(记录发出的段)。
+
+## K. 被额度中断的任务(worktree 已存 WIP,续做勿重来)⛔
+
+| worktree | WIP 提交 | 内容 | 状态 |
+| --- | --- | --- | --- |
+| `selfref-prompt` | 见 `git log` | C4 自我指涉**判据化**(@了自己QQ / 含自己消息 / 命中群名片或昵称 / 指向自身属性四判据 + "群内可能有其他 bot"反例);EVALUATION 明确"不需要建议或信息增量" | 改了 `prompts.mjs`/`generated`/`golden`,**未提交完成** |
+| `selfref-engine` | 见 `git log` | C2 自我身份改带判据+反例;C1 核实 speaker 取群名片;C3 门槛去"增量"(`rating_weight` 去平方、`quality` 不再相乘硬卡、`relevance` full_at 3.0→2.5) | 改了 `policy.rs`/`self_identity.rs`/tests,**未提交完成** |
+
+> 另:`threshold` 已在线下调 **3.3 → 2.6** 并热加载生效(配置侧,不依赖 codex)。
+>
+> **续做时必须并入 §J1**:用成员列表的 `is_robot` 区分"其他机器人"与"自己"(实证:65840633 有成员头衔就叫 `bot`)。
+
+## L. tick 筛选优化(作息判据根治 + 洪泛)⏸ 待额度恢复 —— **M 与 L 已合并为本条**
+
+### 现象
+1. **主动话题永久失效**:`decision_screen` 恒返回 `topic="outside_group_schedule"`(见下"根因");
+2. **日志洪泛**:每群**每秒**一条 `decision_screen`(实测 94 条/分钟),把仪表盘 Activity 刷满;
+3. 二者**同一根因**,且第 2 条会掩盖第 1 条(看起来只是刷屏,实则功能被堵死)。
+
+### 根因
+
+**① 作息判据读的是会被裁剪的表**
+```rust
+// media_select.rs:165-168
+let awake = rows.len() >= 20 && span >= 3.*86400. && hours[hour] >= 2
+            && hours[hour] as f64 >= max_hours as f64 * 0.1;
+```
+`rows` 来自 `messages` 表,而 `storage.maxMessagesPerChat`(默认 500)**只保留最近 N 条**:
+- 65840633(活跃群)507 条只跨 **5.7 小时**;663614559 320 条跨 2.1 天 → **`span >= 3 天` 永不满足**;
+- 其余三条件均通过(行数、当前小时 51/31 条、10% 门槛 5.1/15.6)。
+- **矛盾本质**:判据要"30 天作息分布",却从"只留 500 条"的表里算 —— **群越活跃、跨度越短、越不可能通过**,方向正好反了。
+
+**② 闸门未通过时不推迟,tick 每秒重算重记**
+```rust
+// engine/mod.rs:893-905
+if screened.reply.is_none() { "message" }
+else if screened.topic.is_none() { s.due = now + min_think_interval.max(60.); ... "topic" }
+else { continue; }        // ← 日志里这条(reply 与 topic 都非空)既不推迟也不更新 last_think
+```
+节流闸门 `:882` 依赖 `last_think`,而它只在 `cycle` 真正开跑时才更新(`:1206`)→ **每 tick 重新 `screen()`**
+(内含 `counts`/`reservoir`/`group_activity`/`expectation`/`handled` 多次查询)并重新记日志。
+
+### 修复要求
+
+1. **作息判据不再依赖会被裁剪的原始消息**:维护**独立的按小时计数**(如建 `group_hours(chat, hour, count, updated)` 之类,
+   在 ingest 时递增;或在 prune 之前把统计落盘)。**建表时用现有 `messages`(30 天保留)做一次回填**,
+   使改动上线后**立刻**有正确的作息分布,而不必等历史重新累积;
+2. **复核 `span >= 3 天` 这条启发式**(目前无文档依据):改为按**样本量/覆盖天数**判断冷启动
+   (例如"累计样本 ≥N 且覆盖 ≥D 个不同日子"),避免"活跃群反而不满足"的反向激励;
+3. **闸门未通过也要有节奏**:所有分支(含 `else { continue; }` 与 `reply.is_none()` 的 `"message"` 支)
+   都按 `min_think_interval` 更新 `s.due` / `s.last_think`,不再每秒重算;
+4. **日志卫生**:`decision_screen` 改为**状态变化时才记**(按 chat 缓存上次 `(reply, topic)`,相同则跳过);
+5. **测试**:①裁剪后 `awake` 仍正确(直方图不受 `maxMessagesPerChat` 影响);
+   ②同一闸门理由连续多个 tick 只记一次日志、`screen()` 不被每秒重跑;
+   ③冷启动判据在"样本少/覆盖天数少"时不误开;
+6. `cargo clippy --all-targets -- -D warnings` + `cargo test` 全过(远程再验)。
+
+### 临时措施(已做)
+`storage.maxMessagesPerChat` 已 500 → **8000**,但**旧消息无法找回**,跨度需重新累积:
+663614559 约 **22 小时**、65840633 约 **66 小时**后才会自然满足 —— 这也是本条**必须做代码根治**的理由。
+
+## N. WebUI 保存配置应"只改改动的那一项",而不是整文件重写⏸ 待额度恢复
+
+**现象**:在仪表盘上改**一个**设置并保存,`config.json` **整个文件被重写并重排**,
+而不是只改对应那一行。
+
+**实测证据**:
+| | 顶层键序 | agent 下 |
+|---|---|---|
+| schema(`defaults.json`) | `ui, provider, onebot, agent, storage` | `ocr, backfill, name, …` |
+| 线上 `config.json` | `agent, onebot, provider, storage, ui` | **字母序** `activeWindowSeconds, affect, aliases, …` |
+
+线上文件已是**字母序** —— 说明它被"重排 + 全量重写"过,而非按 schema 或原序保留。
+
+**根因**:
+- 前端 `web/app.js:207` 提交的是 `formConfig()`,而它从 `saved.config` 起套表单值 → **整份配置**;
+- 服务端 `src/settings.mjs::saveSettings` 用 `merge(shape, payload)`(base 是 **schema**)后 `atomicJson` **整文件写出** →
+  键序跟随 schema,而非原文件;
+- 后果:①改一个值 = 全文件 diff;②**会冲掉别处刚改的值**(CLI/内核/其他会话);
+  现有 `revision` 校验只能在"文件在加载后被改过"时给出 409,防不住"同一次保存把别的键写回旧值"。
+
+**修复要求**:
+1. **前端只提交改动**:`formConfig()` 与 `saved.config` 做**深比较**,只提交发生变化的路径(补丁);
+2. **服务端按补丁合并**而不是整体替换:
+   - base 改为**当前文件内容**(保留其键序),只把补丁里的路径写进去;
+   - 缺失键再套 schema 默认值,**不得**因为套默认值而改变既有键的顺序;
+   - `revision` 校验保留(补丁与"他人已改同一个键"冲突时仍给 409);
+3. **文件稳定性**:保存一项后,其余行应**逐字不变**(可用 `git diff --stat` 断言:只 1 行变化);
+4. **测试**:①只改一个标量 → 其余键的序列化结果字节不变、键序不变;②改嵌套项(如 `agent.sending.*`)→ 同级其余键不动;
+   ③并发改动不同键时合并成功、改动同一键时 409。
+
+## O. 评论图片时：先重发原图，再评论 ⏸ 待额度恢复
+
+- **背景（实测，非推测）**：10-09 23:10 群里转发了一张「各高校奶龙群二维码合集」图，机器人 00:04 评论
+  「哈哈，奶龙第四帝国都出来了」。该词**确实印在图上** —— `media_ocr` 于 23:42:16 读出
+  （`SYSU纯正奶龙群` / `奶龙第四帝国` / `HFUT风风光光奶龙团` / `BUAA奶龙同好会` / `TJU奶龙同好会`，
+  confidence 0.75，reliable=1），**不是幻觉**。问题在于群友看不出它在评论**哪张图**，因为图在**合并转发内部**。
+- **约束**：合并转发内部的消息不是当前群的真实消息，**无法对其做引用回复**（`reply` 段指不到）。
+- **做法**：当机器人要评论一张**不在当前可见上下文里的图**（合并转发 / 历史里的图）时，
+  **先把原图作为独立消息发出来，再发评论**；两步之间沿用正常节奏（可复用多气泡间隔）。
+  评论**当前可见上下文里**的图时**不**额外重发。
+- **前置能力（当前缺失）**：合并转发内部的图片目前**只被 OCR 读取**（`media/ocr.rs:138` 用 temp 文件、用完即弃），
+  **没有进 `media_assets`** —— 因为 `media::observe`（`media/mod.rs:102-115`）只遍历**原始段**的 `image`/`face`，
+  合并转发内部的图在 forward 节点里。因此必须先把它们按既有采集规则（哈希去重、`media_receipts`、来源档位）
+  收进素材库，才能用 `send_media` 重发。
+- **测试（两层）**：
+  - 可用性：合并转发里的图能进 `media_assets` 且有文件；`send_media` 能发出它；
+  - **目标测试**：构造"评论合并转发里的图片"场景，断言**先发出一条 `image` 段、再发出 `text` 段**，
+    且 image 文件与图上那条一致；反面断言：评论当前上下文里的图时**不**额外重发。
+
+## F. 未来计划
+
+- **F1 插件系统** ⏸(架构级,未开工)
+  - **实施计划已完成** → [`docs/working/io-port-plan.md`](docs/working/io-port-plan.md)
+    (插件分两类:**第一类 IO 插件**=本计划范围,**第二类决策层插件**=单独立项;
+    6 个端口 + `engine/io/` 单一入口 + 能力动态降级 + 一致性测试套件 + 人设面硬边界;
+    建议起步只批 **P0–P2**)。
+  - **设计分析已完成** → [`docs/PLUGIN-PORTS.md`](docs/PLUGIN-PORTS.md)(输入/输出端口的中立模型);
+    其 **§4 迁移路径已由上面的实施计划取代**。
+  - **本次范围收窄**:先做**输入/输出端口**,不做决策层插件;核心动作是
+    **把 I/O 序列化成中立形式**(`Incoming` / `Segment` / `Command` / `Capabilities`),
+    再由插件适配 OneBot / 微信 / Discord / TG 等协议;
+  - **分步**:P1 定义中立类型(纯新增,零风险)→ P2 写 OneBot 端口(双向映射 + 测试,不改行为)
+    → P3 入站切换 → P4 出站切换(21 个调用点)→ P5 能力驱动降级 → P6 sidecar 插件化;
+  - **建议先做 P1+P2**:把 OneBot 细节从内核抽出来但**行为逐字不变**,验证等价后再切换;
+  - 待你拍板的问题见设计文档 §5(中立段粒度 / Forward 由谁展开 / Fetch* 返回形状 / id 校验归属 / 进程内 vs sidecar)。
+  - 目标:允许**不改内核**就扩展 agent 能力 —— 新的消息源、工具、行为片段、上下文提供者。
+  - 现状基础:内核已经有天然挂载点,可作为插件的接入面:
+    | 挂载点 | 位置 | 插件可做什么 |
+    | --- | --- | --- |
+    | 输入 | `Engine::ingest` 前后 | 自定义消息源(非 QQ 渠道)、预处理/过滤、额外标注 |
+    | 上下文 | `engine/mod.rs::context()` 组装 payload 时 | 注入额外上下文(知识库、外部状态) |
+    | 决策 | FORMATION/EVALUATION 之后 | 自定义候选规则、评分维度 |
+    | 输出 | `transport.send` 之前 | 额外的发送通道、二次改写、审计 |
+    | 对外接口 | 控制套接字(`control.rs`) | 新增 `plugin.*` 方法,仪表盘加页 |
+  - 需要先定的设计问题:
+    1. **形态**:进程内动态库(Rust `dylib`/`abi_stable`)、**sidecar 子进程**(走控制套接字/stdio)、还是脚本层(复用 Node)?
+       考虑到"不加依赖 + 进程隔离 + 崩溃不拖垮内核",**sidecar 子进程**最稳,脚本层最快;
+    2. **权限与安全**:插件能看到消息与记忆,必须划清边界(哪些表可读、哪些动作可调、是否允许外网);
+       参考现有 `relay` 的"外部内容一律不可信"与 `owner_teaching::authorized` 的授权模型;
+    3. **生命周期**:安装/启停/热重载/失败隔离(插件崩溃不得影响 tick 与发送);
+    4. **配置**:`agent.plugins[]`(enabled/路径/权限/参数),并纳入键白名单与仪表盘;
+    5. **可观测**:插件的日志/事件进入控制套接字(新事件类型),仪表盘可见。
+  - 建议顺序:先做**只读上下文插件**(风险最低)→ 再做输入侧(自定义消息源)→ 最后才是输出侧(能发消息)。
+  - 备注:插件系统落地前,`relay`(E1)这类"半截模块"不要再增加 —— 先补齐接线范式,再考虑开放扩展点。
+
+## G. 本轮新增(2026-10-09)
+
+- **G1 提示词生成器曾完全不可用** ✅ 已修
+  - `rust/tools/gen-prompts.mjs` 依赖的 `src/orientation.mjs` 在清理 JS 源(`23bca38`)时被**误删** →
+    `node rust/tools/gen-prompts.mjs` 直接崩,**任何提示词改动都无法重新生成 `prompts.rs`、也无法跑 parity**。
+  - 已从 `23bca38^` 恢复(98 行);重生成后 `prompts.rs` 逐字一致,`prompts_parity` 通过。
+  - 教训:`src/prompts.mjs` 与 `src/orientation.mjs` 是**提示词源**,不属于"已归档的 JS agent 实现",不可删。
+
+- **G2 远端磁盘已并入 128G** ✅
+  - `sda2` 40G → **126G**(可用 94G);`growpart` + `resize2fs`,服务未中断。
+
+## H. 流程备忘(重要)
+
+- **每个模块的验收标准(必须遵守):先测"输入/输出本身是否正常",再确认"两者是否真的接入了程序总线"。**
+  - 第一步(单元/功能):模块的输入解析、输出结构在隔离测试下正确;
+  - 第二步(接线):**输入端**在真实链路里被喂到数据、**输出端**被真实消费(不是只写了个函数没人调)。
+  - 反面教材:`topic::relay` 决策模块写全了、单测也过,**但全仓 0 处调用方** —— 配置打开等于空转。
+  - 验收时要给出**可观测证据**(日志事件/表数据/仪表盘字段),不能只看"测试通过"。
+
+
+
+- **判断 codex 是否结束,要看"倒计时是否在动",不是"有没有倒计时"。**
+  - pebrel 会把**中途的** codex 报成 `finished`(误报);面板上的计时器形如 `1m 06s • esc to interrupt`。
+  - 正确判据:**隔一段时间读两次面板,比较计时器的值** —— 值在变大 = 还在工作;值不变或消失 = 已停。
+  - 踩过的坑:以前只查"有没有倒计时",于是长时间误判 codex 仍在工作。
+- 因此**不使用** `pebrel agent delegate` 的自动回报:它同样会把中途状态报成完成,反而制造误判。
+
+## 已完成的(留档)
+
+- rapidocr 引擎接入(`d72a00e`)——实测中文明显优于 tesseract,且自带置信度;远端已切到 `engine: rapidocr`。
+- OCR 可信度信号(`e61fe46`)、转发内图片标记 + OCR(`4bf03aa`)、消息回填(默认开启)、感知与值班解耦。
+- 远端服务顺序:NapCat 改为在 agent 之后启动。

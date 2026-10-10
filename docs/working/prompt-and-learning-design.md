@@ -55,8 +55,8 @@
 | 虚构的**责任线**(需改提示词) | ✅ | ✅ 已实现（P6f 任务 2） | — | 十四 |
 | 近似群**自动跨群共享** | ✅ | ⬜ 部分实现（Rust `6abefc4`：§15.1–15.3、§15.4 隐私红线与小时重算已实现；提供 `agent.memory.crossGroupDisabled` 总开关、`learning.list.sharing` 查询及 `cross_group_memory` 日志；尚缺仪表盘共享专用展示与总开关控件） | 学习分诊 | 十五 |
 | 落库前**自我审核** | ✅ | ✅ 已实现（P6g） | — | 十六 |
-| 新话题来源(外部新鲜内容 + 群间转发) | ✅ | ✅ 已实现（P6i：forward 段收发 / topic_source / relay） | — | 二十一 |
-| 身份自治(改昵称 / 群昵称 / 头像) | ✅ | ⬜ 待实现（依赖桥 set_profile/set_group_card/set_avatar，SnowLuma 无、NapCat 有） | — | 二十二 |
+| 新话题来源(外部新鲜内容 + 群间转发) | ✅ | 🟡 部分实现：forward 段收发 ✅ / topic_source ✅（搜索词由群兴趣主动生成）/ **relay 仅"链接"一种** ✅；卡片、群级话题、合并转发正文未接 | — | 二十一 |
+| 身份自治(改昵称 / 群昵称 / 头像) | ✅ | 🟡 代码已接（`persona/mod.rs` automate/grow + NapCat 的 `set_*`）；但被 `enough()` 的 `minTraits=3` 卡住，线上从未触发 | — | 二十二 |
 
 ### ⚠️ 涉及"已迁移模块行为"的新设计,必须做成**可开关且默认关闭**
 
