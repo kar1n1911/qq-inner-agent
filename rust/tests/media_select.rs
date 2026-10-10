@@ -50,8 +50,15 @@ fn train(db: &Store, chat: &str, source: &str, hash: &str, bucket: &str, outcome
                 event: &format!("training-{hash}-{bucket}-{i}"),
                 source,
                 hash,
-                bucket,
-                classification: &classified(Stage::Closing, Relation::Continuation, true),
+                classification: &classified(
+                    if bucket == "stage_developing" {
+                        Stage::Developing
+                    } else {
+                        Stage::Closing
+                    },
+                    Relation::Continuation,
+                    true,
+                ),
                 outcome,
                 awake: true,
             },
@@ -143,7 +150,6 @@ fn excluded_silence_is_audited_without_any_fitness_write() {
                     event: &i.to_string(),
                     source: "group:10",
                     hash: "cat",
-                    bucket: "quiet_rescue",
                     classification: &c,
                     outcome: Outcome::Silence,
                     awake: true
@@ -165,7 +171,6 @@ fn excluded_silence_is_audited_without_any_fitness_write() {
                 event: &format!("uncertain-{i}"),
                 source: "group:10",
                 hash: "cat",
-                bucket: "quiet_rescue",
                 classification: &c,
                 outcome,
                 awake: true,
@@ -193,7 +198,7 @@ fn explicit_negative_is_not_rewarded_and_learning_is_group_and_bucket_scoped() {
         "group:10",
         "group:10",
         "gentle",
-        "quiet_rescue",
+        "stage_closing",
         Outcome::Positive,
     );
     train(
@@ -201,16 +206,16 @@ fn explicit_negative_is_not_rewarded_and_learning_is_group_and_bucket_scoped() {
         "group:10",
         "group:10",
         "barbed",
-        "quiet_rescue",
+        "stage_closing",
         Outcome::Negative,
     );
-    let gentle = ms::fitness(&db, "group:10", "group:10", "gentle", "quiet_rescue").unwrap();
-    let barbed = ms::fitness(&db, "group:10", "group:10", "barbed", "quiet_rescue").unwrap();
+    let gentle = ms::fitness(&db, "group:10", "group:10", "gentle", "stage_closing").unwrap();
+    let barbed = ms::fitness(&db, "group:10", "group:10", "barbed", "stage_closing").unwrap();
     // 启发式：支持证据应提高、争论证据应降低；不用拟合精确小数。
     assert!(gentle > 0.65 && barbed < 0.35 && gentle > barbed);
     assert_eq!(
         db.rows(
-            "SELECT * FROM media_fitness WHERE target='group:11' OR bucket='active'",
+            "SELECT * FROM media_fitness WHERE target='group:11' OR bucket='stage_developing'",
             []
         )
         .unwrap()
@@ -223,7 +228,7 @@ fn explicit_negative_is_not_rewarded_and_learning_is_group_and_bucket_scoped() {
         "group:10",
         "group:10",
         "gentle",
-        "quiet_rescue",
+        "stage_closing",
         Outcome::Positive,
     );
     assert_eq!(n(&db, "media_feedback"), before, "重放不再学习");
@@ -251,20 +256,27 @@ fn zero_draw_cannot_bypass_temperature_even_with_wild_drift() {
         "group:10",
         "group:10",
         "barbed",
-        "quiet_rescue",
+        "stage_closing",
         Outcome::Negative,
     );
     assert!(ms::select(&db, "group:10", NOW, &c, 0.).unwrap().is_none());
-    assert!(ms::candidates(&db, "group:10", "猫猫 好的", NOW, &c, true)
-        .unwrap()
-        .is_empty());
+    assert!(ms::candidates(
+        &db,
+        "group:10",
+        "猫猫 好的",
+        NOW,
+        &c,
+        ms::Occasion::new(Stage::Closing, 600., &c)
+    )
+    .unwrap()
+    .is_empty());
     asset(&db, "group:10", "gentle", "unknown", "猫猫 好的");
     train(
         &db,
         "group:10",
         "group:10",
         "gentle",
-        "quiet_rescue",
+        "stage_closing",
         Outcome::Positive,
     );
     let selected = ms::select(&db, "group:10", NOW, &c, 0.).unwrap().unwrap();
@@ -277,9 +289,16 @@ fn zero_draw_cannot_bypass_temperature_even_with_wild_drift() {
             .unwrap(),
         json!({"type":"face","data":{"id":"14"}})
     );
-    assert!(ms::candidates(&db, "group:10", "火箭 发射", NOW, &c, false)
-        .unwrap()
-        .is_empty());
+    assert!(ms::candidates(
+        &db,
+        "group:10",
+        "火箭 发射",
+        NOW,
+        &c,
+        ms::Occasion::new(Stage::Developing, 0., &c)
+    )
+    .unwrap()
+    .is_empty());
     message(&db, "group:10", "drift-check", NOW, "火箭 发射 收到", false);
     assert!(
         ms::select(&db, "group:10", NOW, &c, 0.).unwrap().is_none(),
@@ -303,11 +322,18 @@ fn public_is_required_before_entering_cross_group_candidates() {
     }
     asset(&db, "private:20", "dm", "public", "猫猫");
     let hashes = |db: &Store| {
-        ms::candidates(db, "group:11", "猫猫", NOW, &c, false)
-            .unwrap()
-            .into_iter()
-            .map(|r| r.hash)
-            .collect::<Vec<_>>()
+        ms::candidates(
+            db,
+            "group:11",
+            "猫猫",
+            NOW,
+            &c,
+            ms::Occasion::new(Stage::Developing, 0., &config()),
+        )
+        .unwrap()
+        .into_iter()
+        .map(|r| r.hash)
+        .collect::<Vec<_>>()
     };
     assert_eq!(hashes(&db), vec!["p"]);
     db.set_media_source_override("group:10", "u", Some(Override::Public))
@@ -317,9 +343,16 @@ fn public_is_required_before_entering_cross_group_candidates() {
         .unwrap();
     assert_eq!(hashes(&db), vec!["u"], "小时缓存不得缓存公开性");
     assert_eq!(
-        ms::candidates(&db, "group:10", "原始聊天不得外溢", NOW, &c, false)
-            .unwrap()
-            .len(),
+        ms::candidates(
+            &db,
+            "group:10",
+            "原始聊天不得外溢",
+            NOW,
+            &c,
+            ms::Occasion::new(Stage::Developing, 0., &config())
+        )
+        .unwrap()
+        .len(),
         3,
         "群内档位不限制使用"
     );
@@ -328,11 +361,16 @@ fn public_is_required_before_entering_cross_group_candidates() {
     assert!(!serde_json::to_string(&cache).unwrap().contains("原始聊天"));
     db.execute("DELETE FROM expressions", []).unwrap();
     assert_eq!(hashes(&db), vec!["u"], "小时内快照稳定");
-    assert!(
-        ms::candidates(&db, "group:11", "猫猫", NOW + 3600., &c, false)
-            .unwrap()
-            .is_empty()
-    );
+    assert!(ms::candidates(
+        &db,
+        "group:11",
+        "猫猫",
+        NOW + 3600.,
+        &c,
+        ms::Occasion::new(Stage::Developing, 0., &config())
+    )
+    .unwrap()
+    .is_empty());
 }
 #[test]
 fn sharing_is_symmetric_monotone_and_has_a_hard_floor() {
@@ -532,11 +570,16 @@ fn disabled_selector_does_not_touch_database_schema() {
         .unwrap()
         .is_none());
     ms::observe(&db, "group:10", NOW, &Config::default()).unwrap();
-    assert!(
-        ms::candidates(&db, "group:10", "猫猫", NOW, &Config::default(), false)
-            .unwrap()
-            .is_empty()
-    );
+    assert!(ms::candidates(
+        &db,
+        "group:10",
+        "猫猫",
+        NOW,
+        &Config::default(),
+        ms::Occasion::new(Stage::Developing, 0., &config())
+    )
+    .unwrap()
+    .is_empty());
     assert_eq!(
         db.rows(
             "SELECT name FROM sqlite_master WHERE name LIKE 'media_%'",
@@ -628,7 +671,7 @@ fn reaction_density_is_continuous_and_changes_actual_selection() {
             "group:10",
             "group:10",
             hash,
-            "quiet_rescue",
+            "stage_closing",
             Outcome::Positive,
         );
     }
@@ -813,4 +856,496 @@ fn schedule_survives_capacity_pruning_and_distinguishes_cold_start() {
             .unwrap()
             .awake
     );
+}
+
+#[test]
+fn stage_buckets_are_independent_and_reads_match_learning() {
+    let db = db();
+    let c = config();
+    asset(&db, "group:10", "same", "unknown", "猫猫");
+    train(
+        &db,
+        "group:10",
+        "group:10",
+        "same",
+        "stage_closing",
+        Outcome::Positive,
+    );
+    let closing = ms::fitness(&db, "group:10", "group:10", "same", "stage_closing").unwrap();
+    assert_eq!(
+        ms::fitness(&db, "group:10", "group:10", "same", "stage_developing").unwrap(),
+        1. / 3.
+    );
+    train(
+        &db,
+        "group:10",
+        "group:10",
+        "same",
+        "stage_developing",
+        Outcome::Negative,
+    );
+    assert_eq!(
+        ms::fitness(&db, "group:10", "group:10", "same", "stage_closing").unwrap(),
+        closing
+    );
+    assert!(ms::candidates(
+        &db,
+        "group:10",
+        "猫猫",
+        NOW,
+        &c,
+        ms::Occasion::new(Stage::Developing, 0., &c)
+    )
+    .unwrap()
+    .is_empty());
+    assert_eq!(
+        ms::candidates(
+            &db,
+            "group:10",
+            "猫猫",
+            NOW,
+            &c,
+            ms::Occasion::new(Stage::Closing, 600., &c)
+        )
+        .unwrap()
+        .len(),
+        1
+    );
+    for (stage, expected) in [
+        (Stage::Developing, "stage_developing"),
+        (Stage::Closing, "stage_closing"),
+        (Stage::NaturalEnd, "stage_natural_end"),
+        (Stage::Standalone, "stage_standalone"),
+    ] {
+        assert_eq!(ms::occasion_bucket(stage), expected);
+        let classification = classified(stage, Relation::Continuation, true);
+        ms::learn(
+            &db,
+            Feedback {
+                chat: "group:10",
+                event: expected,
+                source: "group:10",
+                hash: "fresh",
+                classification: &classification,
+                outcome: Outcome::Positive,
+                awake: true,
+            },
+        )
+        .unwrap();
+        let row = db
+            .rows(
+                "SELECT bucket FROM media_feedback WHERE event=?",
+                [expected],
+            )
+            .unwrap()
+            .remove(0);
+        assert_eq!(row["bucket"], expected);
+        // 新素材 prior=1/3；一次正反馈=1/2。读错桶会被 .45 门槛拦住。
+        if matches!(stage, Stage::Closing | Stage::NaturalEnd) {
+            let c = Config {
+                mildness_threshold: 0.45,
+                ..config()
+            };
+            if stage == Stage::Closing {
+                asset(&db, "group:10", "fresh", "unknown", "猫猫");
+            }
+            assert!(ms::candidates(
+                &db,
+                "group:10",
+                "猫猫",
+                NOW,
+                &c,
+                ms::Occasion::new(stage, 600., &c)
+            )
+            .unwrap()
+            .iter()
+            .any(|x| x.hash == "fresh"));
+        }
+    }
+}
+
+#[test]
+fn rescue_gate_applies_while_activity_is_above_one_third() {
+    let db = db();
+    let c = config();
+    history(&db, "group:10");
+    for i in 0..80 {
+        message(
+            &db,
+            "group:10",
+            &format!("burst-{i}"),
+            NOW - 680. + i as f64,
+            "猫猫",
+            false,
+        );
+    }
+    asset(&db, "group:10", "same", "unknown", "猫猫 好的");
+    let a = ms::group_activity(&db, "group:10", NOW, c.silence_seconds).unwrap();
+    assert!(a.activity > 1. / 3. && !a.quiet && a.awake);
+    assert!(a.since_human >= c.silence_seconds);
+    let stage = classified(Stage::Closing, Relation::Continuation, true);
+    assert!(ms::probability(&a, &stage, &c, false) > 0.);
+    assert!(
+        ms::select(&db, "group:10", NOW, &c, 0.).unwrap().is_none(),
+        "冷启动不能越过救场门槛"
+    );
+    train(
+        &db,
+        "group:10",
+        "group:10",
+        "same",
+        "stage_closing",
+        Outcome::Negative,
+    );
+    assert!(ms::select(&db, "group:10", NOW, &c, 0.).unwrap().is_none());
+    asset(&db, "group:10", "gentle", "unknown", "猫猫 好的");
+    train(
+        &db,
+        "group:10",
+        "group:10",
+        "gentle",
+        "stage_closing",
+        Outcome::Positive,
+    );
+    let selected = ms::select(&db, "group:10", NOW, &c, 0.).unwrap().unwrap();
+    assert_eq!(selected.classification.stage, Stage::Closing);
+    assert_eq!(selected.bucket, "stage_closing");
+    assert_eq!(selected.candidate.hash, "gentle");
+    for stage in [
+        Stage::Closing,
+        Stage::NaturalEnd,
+        Stage::Developing,
+        Stage::Standalone,
+    ] {
+        for since in [299., 300., 301.] {
+            let expected = since >= 300. && matches!(stage, Stage::Closing | Stage::NaturalEnd);
+            assert_eq!(ms::rescue_trigger(stage, since, &c), expected);
+            assert_eq!(
+                ms::probability(
+                    &activity(false, since),
+                    &classified(stage, Relation::Continuation, true),
+                    &c,
+                    false
+                ) > 0.,
+                expected
+            );
+        }
+    }
+}
+
+#[test]
+fn human_rescue_and_legacy_pending_learn_in_the_selected_stage_bucket() {
+    let db = db();
+    let c = config();
+    history(&db, "group:10");
+    asset(&db, "group:10", "cat", "unknown", "猫猫");
+    message(&db, "group:10", "rescue", NOW, "新话题", false);
+    message(&db, "group:10", "response", NOW + 1., "喜欢", false);
+    db.execute(
+        "INSERT INTO media_contexts VALUES('group:10','cat','rescue','usage')",
+        [],
+    )
+    .unwrap();
+    let classification = classified(Stage::Closing, Relation::Continuation, true);
+    db.execute(
+        "INSERT INTO media_pending VALUES('group:10','legacy','group:10','cat','active',?,?,0)",
+        params![NOW, serde_json::to_string(&classification).unwrap()],
+    )
+    .unwrap();
+    ms::observe(&db, "group:10", NOW + 121., &c).unwrap();
+    let rows = db
+        .rows("SELECT bucket FROM media_feedback ORDER BY event", [])
+        .unwrap();
+    assert_eq!(rows.len(), 2);
+    for row in rows {
+        assert_eq!(row["bucket"], ms::occasion_bucket(Stage::Closing));
+    }
+    assert_eq!(n(&db, "media_pending"), 0);
+    let before = db.rows("SELECT * FROM media_fitness", []).unwrap();
+    ms::observe(&db, "group:10", NOW + 122., &c).unwrap();
+    assert_eq!(db.rows("SELECT * FROM media_fitness", []).unwrap(), before);
+}
+
+#[test]
+fn legacy_feedback_migration_is_stage_scoped_and_idempotent() {
+    let db = db();
+    for (event, stage, bucket, signal) in [
+        ("closing", Stage::Closing, "active", Some(1.)),
+        ("developing", Stage::Developing, "active", Some(0.)),
+        ("end", Stage::NaturalEnd, "quiet_rescue", Some(1.)),
+        ("excluded", Stage::Closing, "quiet_rescue", None),
+    ] {
+        db.execute(
+            "INSERT INTO media_feedback VALUES('g',?,'g','same',?,?,?,?)",
+            params![
+                event,
+                bucket,
+                serde_json::to_string(&classified(stage, Relation::Continuation, true)).unwrap(),
+                "null",
+                signal
+            ],
+        )
+        .unwrap();
+    }
+    db.execute(
+        "INSERT INTO media_feedback VALUES('g','broken','g','same','active','invalid','null',1)",
+        [],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO media_fitness VALUES('g','g','orphan','quiet_rescue',100,100)",
+        [],
+    )
+    .unwrap();
+    ms::enable(&db).unwrap();
+    assert_eq!(
+        ms::fitness(&db, "g", "g", "same", "stage_closing").unwrap(),
+        0.5
+    );
+    assert_eq!(
+        ms::fitness(&db, "g", "g", "same", "stage_developing").unwrap(),
+        0.25
+    );
+    assert_eq!(
+        ms::fitness(&db, "g", "g", "same", "stage_natural_end").unwrap(),
+        0.5
+    );
+    assert_eq!(
+        ms::fitness(&db, "g", "g", "orphan", "stage_closing").unwrap(),
+        1. / 3.
+    );
+    let before = db
+        .rows("SELECT * FROM media_fitness ORDER BY bucket,hash", [])
+        .unwrap();
+    ms::enable(&db).unwrap();
+    assert_eq!(
+        db.rows("SELECT * FROM media_fitness ORDER BY bucket,hash", [])
+            .unwrap(),
+        before
+    );
+    assert_eq!(n(&db, "media_feedback"), 5);
+}
+
+mod engine_bus {
+    use super::*;
+    // 突发消息和救场落在同一作息小时，避免测试夹具跨小时误判睡眠。
+    const NOW: f64 = super::NOW + 600.;
+    use anyhow::Result;
+    use futures_util::future::BoxFuture;
+    use qq_inner_core::{
+        config::{defaults, merge, Config as EngineConfig},
+        engine::{
+            orientation::{OrientationProvider, OrientationTransport},
+            Engine, EngineTransport, Options,
+        },
+        transport::{OneBotError, State},
+    };
+    use serde_json::Value;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Default)]
+    struct Bus {
+        now: Mutex<f64>,
+        sent: Mutex<Vec<Value>>,
+    }
+    impl OrientationTransport for Bus {
+        fn self_id(&self) -> String {
+            "99".into()
+        }
+        fn call<'a>(&'a self, _: &'a str, _: Value) -> BoxFuture<'a, Result<Value>> {
+            Box::pin(async { anyhow::bail!("no network in media test") })
+        }
+    }
+    impl OrientationProvider for Bus {
+        fn json<'a>(&'a self, system: &'a str, _: Value) -> BoxFuture<'a, Result<Value>> {
+            Box::pin(async move {
+                assert!(
+                    system.contains("TASK: FORM"),
+                    "unexpected model call: {system}"
+                );
+                Ok(json!({"allocation":"open","candidates":[]}))
+            })
+        }
+    }
+    impl EngineTransport for Bus {
+        fn state(&self) -> State {
+            State {
+                connected: true,
+                online: true,
+                self_id: "99".into(),
+                reconnects: 0,
+            }
+        }
+        fn send_media<'a>(
+            &'a self,
+            chat: &'a str,
+            segment: Value,
+        ) -> BoxFuture<'a, std::result::Result<Value, OneBotError>> {
+            Box::pin(async move {
+                self.sent
+                    .lock()
+                    .unwrap()
+                    .push(json!({"chat":chat,"segment":segment}));
+                Ok(json!({"message_id":"media-sent"}))
+            })
+        }
+        fn send<'a>(
+            &'a self,
+            _: &'a str,
+            _: &'a str,
+            _: Option<&'a str>,
+            _: Option<&'a str>,
+            _: Option<&'a str>,
+        ) -> BoxFuture<'a, std::result::Result<Value, OneBotError>> {
+            Box::pin(async { panic!("media must use send_media") })
+        }
+    }
+    fn event(id: &str, now: f64, text: &str, face: bool) -> Value {
+        let mut segments = vec![json!({"type":"text","data":{"text":text}})];
+        if face {
+            segments.push(json!({"type":"face","data":{"id":"14"}}));
+        }
+        json!({"post_type":"message","message_type":"group","group_id":10,"self_id":99,
+            "user_id":20,"message_id":id,"time":now,"sender":{"nickname":"Human"},"message":segments})
+    }
+    async fn run_case(
+        closing: Outcome,
+        developing: Outcome,
+    ) -> (Arc<Engine>, Arc<Bus>, Arc<Mutex<Store>>) {
+        let store = Arc::new(Mutex::new(Store::in_memory().unwrap()));
+        let bus = Arc::new(Bus::default());
+        let clock = bus.clone();
+        let cfg = EngineConfig::from_value(&merge(&defaults(), &json!({
+            "apiKey":"mock","onebotToken":"","provider":{"model":"mock"},"dataDir":"unused",
+            "agent":{"allowedGroups":["10"],"schedule":{"enabled":false},"rhythm":{"enabled":false},
+                "identity":{"enabled":false},"observation":{"enabled":false},"learning":{"enabled":false},
+                "dryRun":false,"quietHours":null,"proactive":true,"threeLayerDecision":false,
+                "debounceSeconds":0,"minThinkIntervalSeconds":1,"proactiveCooldownSeconds":0,
+                "activeWindowSeconds":1000,"system1Probability":0,"maxMessagesPerHour":100,"maxProactivePerHour":100}
+        }))).unwrap();
+        let engine = Engine::new_with_media(
+            cfg,
+            store.clone(),
+            bus.clone(),
+            bus.clone(),
+            Options {
+                now: Arc::new(move || *clock.now.lock().unwrap()),
+                random: Arc::new(|| 0.),
+                selection_random: Arc::new(|| 0.),
+                activity_random: Arc::new(|| 0.),
+                ..Default::default()
+            },
+            config(),
+            qq_inner_core::media::Config {
+                enabled: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        // 可用性：真实 OneBot 入站采集，建立作息/密度/素材上下文，不手工插入素材表。
+        for i in 0..201 {
+            let now = NOW - 800. + i as f64;
+            *bus.now.lock().unwrap() = now;
+            engine
+                .ingest(&event(
+                    &format!("input-{i}"),
+                    now,
+                    if i == 200 { "猫猫 好的" } else { "猫猫" },
+                    true,
+                ))
+                .unwrap();
+        }
+        engine.tick().unwrap();
+        engine.wait_idle().await;
+        assert_eq!(engine.last_error(), None);
+        assert!(bus.sent.lock().unwrap().is_empty());
+        {
+            let db = store.lock().unwrap();
+            let assets = db.media_assets("group:10").unwrap();
+            assert_eq!(assets.len(), 1);
+            let hash = assets[0]["hash"].as_str().unwrap();
+            train(&db, "group:10", "group:10", hash, "stage_closing", closing);
+            train(
+                &db,
+                "group:10",
+                "group:10",
+                hash,
+                "stage_developing",
+                developing,
+            );
+        }
+        *bus.now.lock().unwrap() = NOW;
+        let a = ms::group_activity(&store.lock().unwrap(), "group:10", NOW, 300.).unwrap();
+        assert!(a.awake && a.activity > 1. / 3. && !a.quiet, "{a:?}");
+        engine.tick().unwrap();
+        engine.wait_idle().await;
+        assert_eq!(engine.last_error(), None);
+        (engine, bus, store)
+    }
+
+    /// 可用性：输入→采集→决策→传输→pending→真实回复→反馈落库的接线。
+    /// 设计依据：docs/working/prompt-and-learning-design.md:808-812（上下文与群反应学习）。
+    #[tokio::test]
+    async fn media_bus_sends_and_learns_the_saved_occasion() {
+        let (engine, bus, store) = run_case(Outcome::Positive, Outcome::Negative).await;
+        assert_eq!(
+            *bus.sent.lock().unwrap(),
+            vec![json!({"chat":"group:10","segment":{"type":"face","data":{"id":"14"}}})]
+        );
+        {
+            let db = store.lock().unwrap();
+            let pending = db.rows("SELECT * FROM media_pending", []).unwrap();
+            assert_eq!(pending.len(), 1);
+            assert_eq!(pending[0]["bucket"], "stage_closing");
+            assert_eq!(
+                db.rows("SELECT status FROM deliveries", []).unwrap()[0]["status"],
+                "sent"
+            );
+        }
+        *bus.now.lock().unwrap() = NOW + 1.;
+        engine
+            .ingest(&event("reaction", NOW + 1., "喜欢", false))
+            .unwrap();
+        // 上一次素材 cycle 的 minThinkInterval 已满，先消费普通消息，随后才进入媒体观察。
+        engine.tick().unwrap();
+        engine.wait_idle().await;
+        *bus.now.lock().unwrap() = NOW + 122.;
+        engine.tick().unwrap();
+        engine.wait_idle().await;
+        assert_eq!(engine.last_error(), None);
+        {
+            let db = store.lock().unwrap();
+            let feedback = db
+                .rows(
+                    "SELECT bucket,signal FROM media_feedback WHERE event='media-sent'",
+                    [],
+                )
+                .unwrap();
+            assert_eq!(
+                feedback,
+                vec![json!({"bucket":"stage_closing","signal":1.})]
+            );
+            assert_eq!(n(&db, "media_pending"), 0);
+        }
+        engine.stop().await;
+    }
+
+    /// 目标：同一素材在收束适合、展开不适合，必须独立影响真实选择及发出。
+    /// 设计依据：docs/working/prompt-and-learning-design.md:762-769，硬门槛 :771。
+    /// 固定输入、时钟与抽签，只翻转另一阶段反馈，实际发送结果必须不变。
+    #[tokio::test]
+    async fn developing_fitness_cannot_reward_or_poison_actual_closing_sends() {
+        for (closing, expected) in [(Outcome::Positive, 1), (Outcome::Negative, 0)] {
+            for developing in [Outcome::Positive, Outcome::Negative] {
+                let (engine, bus, store) = run_case(closing, developing).await;
+                assert_eq!(
+                    bus.sent.lock().unwrap().len(),
+                    expected,
+                    "收束={closing:?}, 展开={developing:?}：只能由当前场合适配度决定发出"
+                );
+                assert_eq!(n(&store.lock().unwrap(), "media_pending"), expected as i64);
+                engine.stop().await;
+            }
+        }
+    }
 }
