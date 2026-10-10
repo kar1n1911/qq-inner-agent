@@ -237,7 +237,7 @@ pub struct Selected {
     pub adjusted: f64,
 }
 
-/// 主动候选按连续参与概率选择；显式点名与 proactive 开关仍是事实性路由。
+/// 未点名候选按连续参与概率选择；主动开关由调用方按触发路径检查。
 /// 文档 prompt-and-learning-design.md §10.4 不二值化相关度，§18 将相关度视为启发式。
 /// 相关度与动机最低端 1 的权重为零；新颖性仅作弱加权，不作为发言前提。
 /// 线性爬坡减轻中低分惩罚，最终抽样的概率不会在饱和点处跳变。
@@ -267,9 +267,6 @@ pub fn select(
     });
     if allocation == Allocation::SelfChat {
         return pool.into_iter().next();
-    }
-    if !agent.proactive {
-        return None;
     }
     let threshold = if allocation == Allocation::Other {
         agent.interrupt_threshold

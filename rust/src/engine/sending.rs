@@ -276,7 +276,7 @@ pub fn sending_probability_with_affect(
             if timing.proactive {
                 motivation
             } else {
-                // 被点名或私聊时保留情绪增益，但不因情绪压制回应。
+                // 所有消息回复（包括未点名）保留情绪增益，但不因情绪压制回应。
                 motivation.max(1.)
             }
         }),

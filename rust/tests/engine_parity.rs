@@ -686,13 +686,14 @@ async fn decision_and_delivery_invariants_without_node() {
         let actions = actions(&out);
         let calls = stages(&out);
         match label {
-            "addressed" | "burst" | "quiet_addressed" | "explicit_self" => {
+            "addressed" | "burst" | "quiet_addressed" | "explicit_self"
+            | "proactive_quota" | "model_self_proactive_off" => {
                 assert_eq!(actions, ["sent"], "{label}");
                 assert_eq!(calls, ["FORM", "EVALUATE", "FORECAST", "ARTICULATE"]);
                 assert_eq!(out["chats"][0][1]["pending"], false);
                 assert_eq!(out["chats"][0][1]["pauseDone"], true);
             }
-            "quiet_open" | "quota" | "proactive_quota" | "model_self_proactive_off" => {
+            "quiet_open" | "quota" => {
                 assert!(calls.is_empty(), "{label}");
                 assert!(actions.is_empty());
             }
@@ -1686,6 +1687,7 @@ async fn independent_topic_gates_and_probability() {
         .iter()
         .any(|v| v[0] == "model" && v[3] == "topic"));
     assert_eq!(e.last_error(), None);
+    assert_eq!(h.rows("SELECT proactive FROM deliveries"), vec![json!({"proactive":1})]);
 }
 
 #[tokio::test]
@@ -3083,4 +3085,183 @@ async fn owner_teaching_goal_dangerous_instruction_never_commits_and_drop_is_aud
     assert_eq!(replies.len(), 1);
     assert!(replies[0][2].as_str().unwrap().contains(reason));
     assert_ne!(replies[0][2], "记住了");
+}
+
+
+#[tokio::test]
+async fn unaddressed_followup_ignores_initiation_gates_and_recovery() {
+    for three_layer in [false, true] {
+        for (proactive, limit) in [(false, 1.), (true, 1.), (true, 100.)] {
+            let (e, h) = setup(&base(
+                "unaddressed_followup",
+                json!({"threeLayerDecision":three_layer,"proactive":proactive,
+                    "proactiveCooldownSeconds":180,"maxProactivePerHour":limit,
+                    "affect":{"enabled":true},
+                    "sending":{"addressedProbability":0.9,"proactiveProbability":0.2,"recoverySeconds":300}}),
+                vec![],
+            ));
+            // A recent initiation exercises cooldown alone or cooldown plus quota.
+            {
+                let db = h.store.lock().unwrap();
+                let id = db.delivery("group:10", true, h.now() - 1.).unwrap();
+                db.finish_delivery(&id, "sent", None).unwrap();
+                for (dimension, value) in [("mood", -1.), ("rationality", 1.), ("affinity", -1.)] {
+                    db.execute(
+                        "INSERT INTO affect_state VALUES('group:10','person:20',?,?,0,1,?,'[]')",
+                        rusqlite::params![dimension, value, h.now()],
+                    )
+                    .unwrap();
+                }
+            }
+            {
+                let db = h.store.lock().unwrap();
+                let state = qq_inner_core::engine::ChatState {
+                    pending: true,
+                    ..Default::default()
+                };
+                let mut agent = e.config.agent.clone();
+                agent.proactive = true;
+                for (limit, reason) in [(1., "proactive_quota"), (100., "proactive_cooldown")] {
+                    agent.max_proactive_per_hour = limit;
+                    let screened = qq_inner_core::engine::decision::screen(
+                        &db,
+                        "group:10",
+                        &state,
+                        &agent,
+                        h.now(),
+                    )
+                    .unwrap();
+                    assert_eq!(screened.reply, None);
+                    assert_eq!(screened.topic, Some(reason));
+                }
+            }
+            for (id, text, reply) in [
+                (
+                    "reply1",
+                    "盆土干了怎么处理？",
+                    "先检查花盆底部排水是否通畅。",
+                ),
+                (
+                    "reply2",
+                    "那之后应该怎么做？",
+                    "等表层略干再浇透，避免根部长期积水。",
+                ),
+            ] {
+                *h.model.lock().unwrap() = json!({"decisionDraw":0.85,"reply":reply});
+                e.ingest(&h.event(&json!({"id":id,"text":text}))).unwrap();
+                e.tick().unwrap();
+                e.wait_idle().await;
+                assert_eq!(e.last_error(), None);
+                let assessment = h.store.lock().unwrap().assessment("group:10", id).unwrap().unwrap_or_else(|| panic!("missing {id}, layers={three_layer}, proactive={proactive}, trace={:?}, chats={:?}", h.trace.lock().unwrap(), e.chats()));
+                let details = &assessment["details"];
+                assert_eq!(details["timing"]["proactive"], false);
+                assert!(details["timing"]["gap"].as_f64().unwrap() <= 20.);
+                assert_eq!(details["factors"]["base"], 0.9);
+                for factor in ["settle", "recovery", "pace", "motivation", "forecast"] {
+                    assert_eq!(details["factors"][factor], 1., "{factor}");
+                }
+                assert_eq!(details["probability"], 0.9);
+                assert_eq!(details["factors"]["affect"]["disposition"], 1.);
+                assert_eq!(details["factors"]["affect"]["affinity"], 1.);
+                *h.now.lock().unwrap() += 20.;
+            }
+            assert_eq!(*h.sends.lock().unwrap(), 2);
+            assert_eq!(
+                h.rows("SELECT proactive FROM deliveries WHERE message_id IS NOT NULL"),
+                vec![json!({"proactive":0}), json!({"proactive":0})]
+            );
+            let counts = h.store.lock().unwrap().counts("group:10", h.now()).unwrap();
+            assert_eq!(counts["proactive"], 1);
+            assert_eq!(counts["total"], 3);
+        }
+    }
+}
+
+#[tokio::test]
+async fn pause_delivery_remains_an_initiation() {
+    let (e, h) = setup(&base(
+        "pause_initiation",
+        json!({"pauseSeconds":300}),
+        vec![],
+    ));
+    h.model.lock().unwrap()["empty"] = json!(true);
+    e.ingest(&h.event(&json!({"text":"花园最近很安静"})))
+        .unwrap();
+    e.tick().unwrap();
+    e.wait_idle().await;
+    *h.now.lock().unwrap() += 301.;
+    *h.model.lock().unwrap() = json!({});
+    e.tick().unwrap();
+    e.wait_idle().await;
+    assert_eq!(e.last_error(), None);
+    assert_eq!(*h.sends.lock().unwrap(), 1);
+    assert_eq!(
+        h.rows("SELECT proactive FROM deliveries"),
+        vec![json!({"proactive":1})]
+    );
+    let inputs = h.model_inputs.lock().unwrap();
+    let (_, forecast) = inputs
+        .iter()
+        .find(|(stage, _)| stage == "FORECAST")
+        .unwrap();
+    assert_eq!(forecast["trigger"], "pause");
+    assert_eq!(forecast["timing"]["proactive"], true);
+}
+
+/// 目标测试：回复不能继承话题发起的冷却，否则刚接住的对话会自锁。
+/// 设计依据：docs/working/prompt-and-learning-design.md L649、L652：
+/// 主动冷却属于②；①和②的输入、触发条件、冷却周期与失败后果不同。
+/// 经过真实 ingest/tick/cycle/SQLite 链路，仅模型与外部 transport 使用测试替身。
+#[tokio::test]
+async fn goal_conversation_continues_after_a_recent_unaddressed_reply() {
+    for three_layer in [false, true] {
+        let (e, h) = setup(&base(
+            "conversation_continuity_goal",
+            json!({"threeLayerDecision":three_layer,
+                "proactiveCooldownSeconds":180,"maxProactivePerHour":6,
+                "sending":{"recoverySeconds":300}}),
+            vec![],
+        ));
+        let replies = [
+            "先检查花盆底部排水是否通畅。",
+            "等表层略干再浇透，避免根部长期积水。",
+        ];
+        for (index, question) in ["盆土干了怎么处理？", "那之后应该怎么做？"]
+            .iter()
+            .enumerate()
+        {
+            *h.model.lock().unwrap() = json!({"decisionDraw":0.5,"reply":replies[index]});
+            e.ingest(&h.event(&json!({"id":format!("followup{index}"),"text":question})))
+                .unwrap();
+            e.tick().unwrap();
+            e.wait_idle().await;
+            assert_eq!(e.last_error(), None);
+            // 每一步都确认实际输出，第一条成功后才提交下一条输入。
+            assert_eq!(*h.sends.lock().unwrap(), index + 1);
+            assert!(h
+                .trace
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|event| event[0] == "send"
+                    && event[1] == "group:10"
+                    && event[2] == replies[index]));
+            assert_eq!(
+                h.rows("SELECT status, proactive FROM deliveries ORDER BY ts"),
+                vec![json!({"status":"sent","proactive":0}); index + 1]
+            );
+            *h.now.lock().unwrap() += 20.;
+        }
+        assert_eq!(
+            h.rows("SELECT text FROM messages WHERE self=1 ORDER BY ts"),
+            replies
+                .iter()
+                .map(|reply| json!({"text":reply}))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            h.store.lock().unwrap().counts("group:10", h.now()).unwrap()["proactive"],
+            0
+        );
+    }
 }

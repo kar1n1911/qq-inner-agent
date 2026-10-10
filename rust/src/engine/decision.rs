@@ -1,7 +1,7 @@
 //! ①基于待处理消息；②基于群状态。初筛不调用模型，③仍由原有流水线处理。
 use crate::{
     config::Agent,
-    engine::policy::{self, Hint},
+    engine::policy,
     engine::ChatState,
     media::media_select,
     memory::num,
@@ -63,13 +63,8 @@ fn screen_inner(
             None
         }
     });
-    // ①：无新消息不能回复；点名保留对主动配额/主动冷却的豁免。
-    let reply = (if s.hint == Hint::SelfChat {
-        common
-    } else {
-        proactive
-    })
-    .or(if s.pending {
+    // ①：所有消息回复共用回复闸门，不消耗主动冷却/配额。
+    let reply = common.or(if s.pending {
         None
     } else {
         Some("no_new_message")
