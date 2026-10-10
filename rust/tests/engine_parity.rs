@@ -251,7 +251,6 @@ impl OrientationProvider for Harness {
                 return Ok(m.get("invalid").cloned().unwrap_or(json!({})));
             }
             Ok(match stage {
-                "LEARNING_REVIEW" => json!({"reviews":[{"index":0,"action":"keep","reason":"非敏感的明确教学"}]}),
                 "FORM" => {
                     let mut formed = json!({"allocation":m.get("allocation").unwrap_or(&json!("open")),"candidates":if m["empty"]==true {json!([])} else {json!([{"kind":"system2","text":"建议从土壤湿度判断浇水"}])}});
                     if let Some(learning) = m.get("learning") {
@@ -286,10 +285,11 @@ impl OrientationProvider for Harness {
                     }
                 }
                 "LEARNING_REVIEW" => {
+                    // Covers single owner-teaching candidates and multi-claim reviews.
                     // Deliberately approve every claim: the runtime mood guard
                     // must protect storage even when the reviewer misses venting.
                     json!({"reviews":payload["candidates"].as_array().unwrap().iter()
-                        .map(|v| json!({"index":v["index"],"action":"keep","reason":"mock approval"}))
+                        .map(|v| json!({"index":v["index"],"action":"keep","reason":"非敏感的明确教学"}))
                         .collect::<Vec<_>>()})
                 }
                 "ORIENT" => json!({"style":"谨慎接话","summary":"园艺讨论","topics":["园艺"]}),
