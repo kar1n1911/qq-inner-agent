@@ -2721,6 +2721,57 @@ async fn precise_reply_keeps_addressed_message_when_later_open_message_arrives()
 }
 
 #[tokio::test]
+async fn precise_reply_quotes_actual_response_target_instead_of_latest_mention() {
+    // Design basis: the 10:54 incident answered “回头别真调成丹德莱” but quoted
+    // a later, unrelated role prompt. The emitted quote must match the reply's object.
+    for (model_target, expected) in [
+        (Some("joke"), "joke"),
+        (Some("missing"), "role-prompt"),
+        (None, "role-prompt"),
+    ] {
+        let case = base("reply_object", json!({"debounceSeconds":2}), vec![]);
+        let (e, h) = setup(&case);
+        *h.model.lock().unwrap() = json!({
+            "reply":"放心，还没调成丹德莱呢。",
+            "replyTo":model_target
+        });
+        for (id, sender, text) in [
+            ("first-call", 20, "[CQ:at,qq=99]看看这个"),
+            ("joke", 21, "回头别真调成丹德莱"),
+            (
+                "role-prompt",
+                22,
+                "[CQ:at,qq=99]角色扮演提示词：露尼西亚（Lunasia）…",
+            ),
+            ("later-open", 23, "补充一句"),
+        ] {
+            e.ingest(&h.event(&json!({"id":id,"sender":sender,"text":text})))
+                .unwrap();
+        }
+        assert_eq!(e.chats()[0].1.addressed_id.as_deref(), Some("role-prompt"));
+        *h.now.lock().unwrap() += 3.;
+        e.tick().unwrap();
+        e.wait_idle().await;
+        assert_eq!(
+            *h.targets.lock().unwrap(),
+            vec![json!({"replyTo":expected,"mention":null})]
+        );
+        {
+            let trace = h.trace.lock().unwrap();
+            let sent = trace
+                .iter()
+                .find(|v| v[0] == "log" && v[1] == "message_sent")
+                .expect("the response must actually be sent");
+            assert_eq!(
+                sent[2]["segments"][0][0],
+                json!({"type":"reply","data":{"id":expected}})
+            );
+        }
+        e.stop().await;
+    }
+}
+
+#[tokio::test]
 async fn precise_reply_engine_applies_gate_and_private_exclusion() {
     for (private, addressed, draw, expected) in [
         (false, false, 0., json!({"replyTo":"m1","mention":"20"})),
