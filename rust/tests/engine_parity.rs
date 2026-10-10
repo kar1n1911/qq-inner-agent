@@ -258,6 +258,11 @@ impl OrientationProvider for Harness {
             Ok(match stage {
                 "FORM" => {
                     let mut formed = json!({"allocation":m.get("allocation").unwrap_or(&json!("open")),"candidates":if m["empty"]==true {json!([])} else {json!([{"kind":"system2","text":"建议从土壤湿度判断浇水"}])}});
+                    if m["relayOnly"] == true {
+                        formed["candidates"] = json!(payload["externalTopics"].as_array()
+                            .into_iter().flatten().map(|topic| json!({"kind":"system2","text":topic["item"]["url"]}))
+                            .collect::<Vec<_>>());
+                    }
                     if let Some(learning) = m.get("learning") {
                         formed["learning"] = learning.clone();
                     }
@@ -2572,6 +2577,70 @@ async fn relay_links_enter_formation_only_after_review_and_local_dedup() {
         }
         // FORM returns no ideas: relay must never bypass the existing pipeline to send.
         assert_eq!(*h.sends.lock().unwrap(), 0, "{mode}");
+    }
+}
+
+#[tokio::test]
+async fn relay_without_learning_does_not_repush_a_link_within_the_dedup_window() {
+    // Design docs/working/prompt-and-learning-design.md §21.7 L1237:
+    // 同一链接/内容已在本群出现则不发，避免同一条反复刷。
+    const URL: &str = "https://example.org/esp32";
+    for age in [3600., 86399., 86400., 86401.] {
+        let (e, h) = topic_setup(json!({
+            "relay":{"enabled":true}, "learning":{"enabled":false}
+        }));
+        *h.model.lock().unwrap() = json!({"relayOnly":true,"relayAudit":{"keep":[0]},"reply":URL,"replyTo":"interest0"});
+        let start = h.now();
+        {
+            let db = h.store.lock().unwrap();
+            db.execute("DELETE FROM thoughts", []).unwrap();
+            db.message(&json!({"chat":"group:11","id":"source","sender":"30","text":URL,"ts":start-60.,"self":false})).unwrap();
+            for i in 0..2 {
+                db.message(&json!({"chat":"group:10","id":format!("interest{i}"),"sender":"20","text":"esp32","ts":start-700.-i as f64,"self":false})).unwrap();
+            }
+        }
+        e.tick().unwrap();
+        e.wait_idle().await;
+        assert_eq!(e.last_error(), None);
+        assert_eq!(*h.sends.lock().unwrap(), 1, "initial relay must really send: {:?}", h.trace.lock().unwrap());
+        assert_eq!(h.rows("SELECT text FROM messages WHERE chat='group:10' AND self=1")[0]["text"], URL);
+        assert!(h.rows("SELECT * FROM memory_layers WHERE layer='short_term'").is_empty());
+
+        *h.now.lock().unwrap() = start + age;
+        h.model.lock().unwrap()["replyTo"] = json!("fresh-interest0");
+        h.model_inputs.lock().unwrap().clear();
+        h.trace.lock().unwrap().clear();
+        {
+            let db = h.store.lock().unwrap();
+            // Keep the source and local interest fresh, so expiration of either
+            // cannot falsely make the duplicate test pass.
+            db.message(&json!({"chat":"group:11","id":"source-again","sender":"30","text":URL,"ts":h.now()-60.,"self":false})).unwrap();
+            for i in 0..2 {
+                db.message(&json!({"chat":"group:10","id":format!("fresh-interest{i}"),"sender":"20","text":"esp32","ts":h.now()-700.-i as f64,"self":false})).unwrap();
+            }
+            db.mark_handled("group:10", "fresh-interest0", true).unwrap();
+            // The retry's hour must be awake too, including the one-hour retry.
+            for i in 0..6 {
+                db.message(&json!({"chat":"group:10","id":format!("schedule{i}"),"sender":"20","text":"好的","ts":h.now()-86400.,"self":false})).unwrap();
+            }
+        }
+        e.restore().unwrap();
+        e.tick().unwrap();
+        e.wait_idle().await;
+        assert_eq!(e.last_error(), None);
+        let expired = age >= 86400.;
+        if !expired {
+            assert_eq!(*h.sends.lock().unwrap(), 1, "no repeated push at age={age}");
+        }
+        {
+            let inputs = h.model_inputs.lock().unwrap();
+            // Expiration permits candidates again; later send gates still apply.
+            assert!(inputs.iter().any(|(stage, _)| stage == "FORM"), "topic path must run at age={age}: {:?}", h.trace.lock().unwrap());
+            assert_eq!(inputs.iter().any(|(stage, _)| stage == "RELAY"), expired, "age={age}");
+            assert_eq!(inputs.iter().any(|(stage, p)| stage == "FORM" && p["externalTopics"].is_array()), expired, "age={age}");
+        }
+        assert!(h.rows("SELECT * FROM memory_layers WHERE layer='short_term'").is_empty());
+        e.stop().await;
     }
 }
 
