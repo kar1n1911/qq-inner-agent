@@ -1,4 +1,5 @@
 import { setTimeout as sleep } from 'node:timers/promises';
+import { callBudget } from './model-budget.mjs';
 
 export class ProviderError extends Error {
   constructor(code) { super(code); this.name = 'ProviderError'; this.code = code; }
@@ -31,8 +32,8 @@ export async function listModels(c, key, fetcher = globalThis.fetch) {
   return [...new Set(data.data.filter(m => typeof m?.id === 'string' && m.id.length <= 200).map(m => m.id))].slice(0, 500).sort();
 }
 export class Provider {
-  constructor(config, key, store, options = {}) {
-    this.config = config; this.key = key; this.store = store;
+  constructor(config, key, budgetFile, options = {}) {
+    this.config = config; this.key = key; this.budgetFile = budgetFile;
     this.fetch = options.fetch || globalThis.fetch; this.sleep = options.sleep || sleep;
     this.now = options.now || (() => Date.now() / 1000);
     this.blockedUntil = 0; this.calls = 0;
@@ -55,7 +56,7 @@ export class Provider {
     if (c.thinking === 'disabled') body.thinking = { type: 'disabled' };
     for (let attempt = 0; attempt <= c.retries; attempt++) {
       signal?.throwIfAborted();
-      if (!this.store.callBudget(this.now(), c.requestsPerHour)) throw new ProviderError('hourly_api_budget');
+      if (!callBudget(this.budgetFile, this.now(), c.requestsPerHour)) throw new ProviderError('hourly_api_budget');
       let retryDelay = Math.min(30, 2 ** attempt);
       try {
         this.calls++;

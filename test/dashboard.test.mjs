@@ -8,7 +8,6 @@ import { once } from 'node:events';
 import { defaults } from '../src/config.mjs';
 import { publicSettings, saveSettings, recoverSettings, atomicJson } from '../src/settings.mjs';
 import { createDashboard } from '../src/dashboard.mjs';
-import { Store } from '../src/store.mjs';
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'qq-dashboard-test-'));
@@ -39,8 +38,8 @@ test('HTTP dashboard authentication, CSRF, validated save, redaction and fixed s
   const root = fixture(), actions = [], server = http.createServer();
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const { handler } = createDashboard({ root, settings: { origins: [origin] }, key: 'test-access-key', serviceControl: async action => actions.push(action), serviceStatus: async () => 'active' });
-  server.on('request', handler);
+  const dashboard = createDashboard({ root, settings: { origins: [origin] }, key: 'test-access-key', serviceControl: async action => actions.push(action), serviceStatus: async () => 'active' });
+  server.on('request', dashboard.handler);
   const request = (url, options = {}) => fetch(origin + url, options);
   try {
     assert.equal((await request('/')).status, 200);
@@ -65,11 +64,10 @@ test('HTTP dashboard authentication, CSRF, validated save, redaction and fixed s
     assert.equal((await request('/api/learning/reset', { method: 'POST', headers: noCsrf, body: '{"chat":"private:20"}' })).status, 403);
     assert.equal((await request('/api/learning/reset', { method: 'POST', headers, body: '{"chat":"private:20","subject":"person:21"}' })).status, 400);
     assert.equal((await request('/api/learning/reset', { method: 'POST', headers, body: '{"chat":"private:20","subject":"group"}' })).status, 400);
-    const memoryStore = new Store(path.join(root, 'data/agent.sqlite'));
-    memoryStore.memory.apply('private:20', [{ subject: 'person:20', layer: 'traits', key: '互动风格', operation: 'upsert', text: '短句接话', importance: 0.8, sources: [] }], Date.now()/1000, defaults.agent.memory);
-    assert.equal((await (await request('/api/state', { headers })).json()).memories[0].text, '短句接话');
-    assert.equal((await request('/api/learning/reset', { method: 'POST', headers, body: '{"chat":"private:20"}' })).status, 200);
-    assert.equal(memoryStore.memory.context('private:20', '20', Date.now()/1000, defaults.agent.memory)[0].traits.length, 0); memoryStore.close();
+    const reset = await request('/api/learning/reset', { method: 'POST', headers, body: '{"chat":"private:20"}' });
+    assert.equal(reset.status, 503);
+    assert.match((await reset.json()).error, /Core control socket unavailable.*Start the core service/);
+    assert.equal(fs.existsSync(path.join(root, 'data/agent.sqlite')), false);
     assert.equal((await (await request('/api/debug/receive', { headers })).json()).state, 'idle');
     assert.equal((await request('/api/debug/stop', { method: 'POST', headers, body: '{}' })).status, 200);
     assert.equal((await request('/api/config', { method: 'PUT', headers: noCsrf, body: JSON.stringify({ revision: s.revision, patch: { 'agent.threshold': changed.agent.threshold } }) })).status, 403);
@@ -88,7 +86,7 @@ test('HTTP dashboard authentication, CSRF, validated save, redaction and fixed s
     assert.ok(!state.includes('model-secret')); assert.ok(state.includes('[redacted]'));
     await request('/api/logout', { method: 'POST', headers, body: '{}' });
     assert.equal((await request('/api/config', { headers })).status, 401);
-  } finally { server.closeAllConnections(); await new Promise(r => server.close(r)); fs.rmSync(root, { recursive: true, force: true }); }
+  } finally { await dashboard.close(); server.closeAllConnections(); await new Promise(r => server.close(r)); fs.rmSync(root, { recursive: true, force: true }); }
 });
 
 

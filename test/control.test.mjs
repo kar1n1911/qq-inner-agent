@@ -8,7 +8,7 @@ import { once } from 'node:events';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { ControlClient, MAX_LINE } from '../src/control.mjs';
 import { createDashboard } from '../src/dashboard.mjs';
-import { Store } from '../src/store.mjs';
+import { DatabaseSync } from 'node:sqlite';
 
 async function until(predicate) {
   for (let i = 0; i < 200; i++) { if (predicate()) return; await sleep(10); }
@@ -98,8 +98,18 @@ test('control bounds frames and pending requests and discards malformed/unfinish
 test('dashboard HTTP state survives absent socket, uses live reads, then falls back on failure', async t => {
   const root = fixture(t), dir = path.join(root, 'data');
   fs.writeFileSync(path.join(dir, 'status.json'), JSON.stringify({ mode: 'dry_run', selfId: '42' }));
-  const store = new Store(path.join(dir, 'agent.sqlite'));
-  store.decision('group:1', 'skip', 2, [], 123); store.close();
+  const db = new DatabaseSync(path.join(dir, 'agent.sqlite'));
+  db.exec("CREATE TABLE decisions(chat TEXT, ts REAL, action TEXT, score REAL, tags TEXT); INSERT INTO decisions VALUES('group:1',123,'skip',2,'[]')");
+  db.exec(`
+    CREATE TABLE thoughts(chat TEXT,text TEXT,kind TEXT,score REAL,created REAL,used INTEGER);
+    CREATE TABLE send_assessments(chat TEXT,ts REAL,status TEXT,details TEXT);
+    CREATE TABLE memory_layers(id TEXT,chat TEXT,subject TEXT,layer TEXT,text TEXT,updated REAL,expires REAL);
+    INSERT INTO memory_layers VALUES('memory','group:1','group','traits','offline memory',123,9999999999);
+    CREATE TABLE expressions(chat TEXT,term TEXT,updated REAL);
+    INSERT INTO expressions VALUES('group:1','offline expression',9999999999);
+  `);
+  db.close();
+  const original = fs.readFileSync(path.join(dir, 'agent.sqlite'));
   const server = http.createServer(); server.listen(0, '127.0.0.1'); await once(server, 'listening');
   t.after(async () => { server.closeAllConnections(); await new Promise(r => server.close(r)); });
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -111,6 +121,8 @@ test('dashboard HTTP state survives absent socket, uses live reads, then falls b
   const post = async url => { const res = await fetch(origin + url, { method: 'POST', headers, body: '{}' }); assert.equal(res.status, 200); return res.json(); };
   const fallback = await get('/api/state');
   assert.equal(dashboard.control.available, false); assert.equal(fallback.status.mode, 'dry_run'); assert.equal(fallback.decisions[0].score, 2);
+  assert.equal(fallback.memories[0].text, 'offline memory');
+  assert.equal(fallback.expressions[0].term, 'offline expression');
   let fail = false, listening = false, saturated = false;
   await mock(t, dir, (req, socket) => {
     if (fail) return;
@@ -145,6 +157,7 @@ test('dashboard HTTP state survives absent socket, uses live reads, then falls b
   assert.equal(truncated.memories.length, 200); assert.deepEqual(truncated.expressions, fallback.expressions);
   fail = true;
   assert.deepEqual(await get('/api/state'), fallback);
+  assert.deepEqual(fs.readFileSync(path.join(dir, 'agent.sqlite')), original);
 });
 
 test('dashboard does not replay an uncertain diagnostic send through the fallback', async t => {
@@ -165,4 +178,43 @@ test('dashboard does not replay an uncertain diagnostic send through the fallbac
   const res = await fetch(origin + '/api/debug/send', { method: 'POST', headers });
   assert.equal(res.status, 502); assert.equal((await res.json()).error, 'control_disconnected');
   assert.equal(sends, 1); assert.equal(fallbackConnections, 0);
+});
+
+test('learning reset only uses the core and reports unavailable, rejected, timed-out and disconnected requests', async t => {
+  const root = fixture(t), dir = path.join(root, 'data');
+  const file = path.join(dir, 'agent.sqlite');
+  const db = new DatabaseSync(file);
+  db.exec("CREATE TABLE notes(text TEXT); INSERT INTO notes VALUES('keep owner note')"); db.close();
+  const original = fs.readFileSync(file);
+  const server = http.createServer(); server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(async () => { server.closeAllConnections(); await new Promise(r => server.close(r)); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const dashboard = createDashboard({ root, settings: { origins: [origin] }, key: 'key', controlOptions: { timeoutMs: 80, retryMs: 10 } });
+  t.after(() => dashboard.close()); server.on('request', dashboard.handler);
+  const login = await fetch(origin + '/api/login', { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body: '{"key":"key"}' });
+  const headers = { Cookie: login.headers.get('set-cookie').split(';')[0], Origin: origin, 'X-CSRF-Token': (await login.json()).csrf, 'Content-Type': 'application/json' };
+  const reset = async params => fetch(origin + '/api/learning/reset', { method: 'POST', headers, body: JSON.stringify(params) });
+  const unavailable = await reset({ chat: 'group:1' });
+  assert.equal(unavailable.status, 503); assert.match((await unavailable.json()).error, /Start the core service.*not reset/);
+  let mode = 'ok'; const requests = [];
+  await mock(t, dir, (req, socket) => {
+    requests.push(req);
+    if (mode === 'ok') reply(socket, req, { ok: true });
+    if (mode === 'reject') socket.write(JSON.stringify({ id: req.id, ok: false, error: { code: 'internal_error' } }) + '\n');
+    if (mode === 'disconnect') socket.destroy();
+  });
+  await until(() => dashboard.control.available);
+  for (const params of [{ chat: 'group:1' }, { chat: 'group:1', subject: 'person:20' }, { chat: 'group:1', subject: 'group' }, { chat: 'private:20', subject: 'person:20' }]) {
+    const res = await reset(params);
+    assert.equal(res.status, 200); assert.deepEqual(await res.json(), { ok: true });
+    assert.equal(requests.at(-1).method, 'learning.reset'); assert.deepEqual(requests.at(-1).params, params);
+  }
+  for (mode of ['reject', 'timeout', 'disconnect']) {
+    const res = await reset({ chat: 'group:1' });
+    assert.equal(res.status, 502); assert.match((await res.json()).error, /not confirmed.*refresh learning state/);
+  }
+  await until(() => dashboard.control.available);
+  await sleep(100);
+  assert.equal(requests.length, 7); // Reconnection never replays a mutation.
+  assert.deepEqual(fs.readFileSync(file), original);
 });
