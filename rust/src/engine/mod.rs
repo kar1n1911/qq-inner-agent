@@ -433,7 +433,8 @@ impl Engine {
         let a = &self.config.agent;
         let now = self.now();
         let self_id = self.transport.self_id();
-        if (a.observation.enabled || a.identity.enabled)
+        if !backfill
+            && (a.observation.enabled || a.identity.enabled)
             && event["post_type"] == "notice"
             && event["notice_type"] == "group_increase"
             && (event["self_id"].is_null() || js_string(&event["self_id"]) == self_id)
@@ -552,10 +553,11 @@ impl Engine {
         if a.learning.enabled {
             LayeredMemory::new(&db).capture(&value, now, &a.memory)?;
         }
-        db.observe(&value, now)?;
         let Some(s) = state else {
             return Ok(());
         };
+        // Only live messages can answer an expectation; history is perception only.
+        db.observe(&value, now)?;
         // 只有去重成功的新消息递增 version；批内 self 优先于后续开放消息。
         s.version += 1;
         s.last_human = now;

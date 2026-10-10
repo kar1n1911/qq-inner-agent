@@ -102,6 +102,11 @@ impl OrientationTransport for Harness {
                 self.entered.notify_one();
                 self.release.acquire().await.unwrap().forget();
             }
+            if action == "get_group_msg_history" {
+                if let Some(messages) = self.model.lock().unwrap()["history"][params["group_id"].as_str().unwrap_or_default()].as_array() {
+                    return Ok(json!({"messages":messages}));
+                }
+            }
             anyhow::bail!("unsupported")
         })
     }
@@ -2197,6 +2202,99 @@ async fn backfill_perceives_once_without_scheduling_and_preserves_live_priority(
     assert_eq!(e.chats()[0].1.hint, qq_inner_core::engine::policy::Hint::SelfChat);
     assert!(e.chats()[0].1.pending);
     assert_eq!(e.orientation.get("group:10").unwrap().unwrap().message_count, 4);
+    e.stop().await;
+}
+
+#[tokio::test]
+async fn backfill_preserves_expectation_and_perception_but_live_observes() {
+    let (e, h) = setup(&base(
+        "backfill_expectation",
+        json!({"learning":{"enabled":true},"observation":{"enabled":true}}),
+        vec![],
+    ));
+    h.store.lock().unwrap().expect("group:10", h.now(), 600., &json!({})).unwrap();
+    let mut old = h.event(&json!({"id":"old"}));
+    old["time"] = json!(h.now() - 3600.);
+    e.ingest_backfill(&old).unwrap();
+    e.ingest_backfill(&old).unwrap();
+    assert!(h.rows("SELECT observation FROM expectations")[0]["observation"].is_null());
+    assert_eq!(h.rows("SELECT ts FROM messages")[0]["ts"], h.now() - 3600.);
+    assert_eq!(h.rows("SELECT count,updated FROM group_hours"), vec![json!({"count":1,"updated":h.now()-3600.})]);
+    assert_eq!(e.orientation.get("group:10").unwrap().unwrap().message_count, 1);
+    assert!(!h.rows("SELECT * FROM memory_layers WHERE layer='short_term'").is_empty());
+    assert!(e.chats().is_empty());
+    e.ingest(&h.event(&json!({"id":"live","text":"普通实时回应"}))).unwrap();
+    let observed = h.store.lock().unwrap().expectation("group:10", h.now()).unwrap().unwrap();
+    assert_eq!(observed["observation"], json!({"event":"human_message","addressed":false,"at":h.now()}));
+    *h.now.lock().unwrap() += 1.;
+    e.ingest(&h.event(&json!({"id":"live2"}))).unwrap();
+    assert_eq!(h.store.lock().unwrap().expectation("group:10", h.now()).unwrap().unwrap()["observation"], observed["observation"]);
+    e.stop().await;
+}
+
+/// Goal: a just-sent reply must still await a human after a history fetch.
+/// Design: prompt-and-learning-design.md §九 L648 (expectation input),
+/// L781 (waiting responses take priority), and mod.rs original L419
+/// (history contributes to perception without changing live reply scheduling).
+#[tokio::test]
+async fn goal_backfill_after_sending_cannot_answer_the_agents_expectation() {
+    let (e, h) = topic_setup(json!({"sending":{"expectationSeconds":900}}));
+    e.ingest(&h.event(&json!({"id":"question"}))).unwrap();
+    e.tick().unwrap();
+    e.wait_idle().await;
+    assert_eq!(*h.sends.lock().unwrap(), 1);
+    let expected = h.store.lock().unwrap().expectation("group:10", h.now()).unwrap().unwrap();
+    assert_eq!(expected["observation"]["event"], "no_message_yet");
+    let state = serde_json::to_value(e.chats()).unwrap();
+    let mut old = h.event(&json!({"id":"historical-answer"}));
+    old["time"] = json!(h.now() - 3600.);
+    h.model.lock().unwrap()["history"] = json!({"10":[old]});
+    e.backfill_once().await;
+    assert_eq!(h.rows("SELECT * FROM messages WHERE id='historical-answer'").len(), 1);
+    assert_eq!(serde_json::to_value(e.chats()).unwrap(), state);
+    assert_eq!(h.store.lock().unwrap().expectation("group:10", h.now()).unwrap().unwrap(), expected);
+    assert!(h.rows("SELECT observation FROM expectations")[0]["observation"].is_null());
+
+    // Once the group is quiet, the still-open expectation blocks a new topic.
+    *h.now.lock().unwrap() += 301.;
+    {
+        let db = h.store.lock().unwrap();
+        db.add_thought("group:10", &json!({"text":"聊聊花园","kind":"system2"}), h.now()).unwrap();
+        let screen = qq_inner_core::engine::decision::screen(&db, "group:10", &e.chats()[0].1, &e.config.agent, h.now()).unwrap();
+        assert_eq!(screen.reply, Some("no_new_message"));
+        assert_eq!(screen.topic, Some("expectation"));
+    }
+    e.tick().unwrap();
+    e.wait_idle().await;
+    assert_eq!(*h.sends.lock().unwrap(), 1);
+
+    // The real response must win the one-shot observation and reach FORECAST.
+    *h.now.lock().unwrap() += 2.;
+    e.ingest(&h.event(&json!({"id":"real-answer","text":"普通实时回应"}))).unwrap();
+    e.tick().unwrap();
+    e.wait_idle().await;
+    let inputs = h.model_inputs.lock().unwrap().clone();
+    let forecast = &inputs.iter().rev().find(|(stage, _)| stage == "FORECAST").unwrap().1;
+    assert_eq!(forecast["priorExpectation"]["forecast"], expected["forecast"]);
+    assert_eq!(forecast["priorExpectation"]["observation"], json!({"event":"human_message","addressed":false,"at":h.now()}));
+    assert_eq!(forecast["priorExpectation"]["elapsedSeconds"], 303.);
+    e.stop().await;
+}
+
+#[tokio::test]
+async fn backfill_notice_cannot_reset_live_orientation_or_scheduling() {
+    let (e, h) = setup(&base("backfill_notice", json!({"observation":{"enabled":true}}), vec![]));
+    e.ingest(&h.event(&json!({}))).unwrap();
+    let state = serde_json::to_value(e.chats()).unwrap();
+    let orientation = h.rows("SELECT * FROM group_orientation");
+    let notice = json!({"post_type":"notice","notice_type":"group_increase","self_id":99,"user_id":99,"group_id":10,"time":h.now()});
+    e.ingest_backfill(&notice).unwrap();
+    assert_eq!(serde_json::to_value(e.chats()).unwrap(), state);
+    assert_eq!(h.rows("SELECT * FROM group_orientation"), orientation);
+    e.ingest(&notice).unwrap();
+    assert!(!e.chats()[0].1.pending);
+    assert_eq!(e.chats()[0].1.version, 2);
+    assert_ne!(h.rows("SELECT * FROM group_orientation"), orientation);
     e.stop().await;
 }
 
