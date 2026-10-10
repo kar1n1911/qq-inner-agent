@@ -10,3 +10,5 @@ pub mod settings;
 pub mod store;
 pub mod topic;
 pub mod transport;
+
+pub mod update;
