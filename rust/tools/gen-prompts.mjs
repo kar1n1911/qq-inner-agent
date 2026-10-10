@@ -13,12 +13,13 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..', '..');
 const target = path.join(root, 'rust', 'src', 'prompts.rs');
 
-const { identity, outputContract, rules, taskRules, languageRules, formation, evaluation, articulation, forecast, learningReview } =
+const { identity, outputContract, rules, taskRules, languageRules, formation, evaluation, articulation, forecast, learningReview, runtimeFragments } =
   await import(path.join(root, 'src', 'prompts.mjs'));
-// ORIENT 提示词住在 orientation.mjs 里，但它同样是"行为的一部分"，一并生成。
+// ORIENT 在 orientation.mjs 中组装；契约与规则的唯一真源仍是 prompts.mjs。
 const { orientationPrompt } = await import(path.join(root, 'src', 'orientation.mjs'));
 
 const items = [
+  ...Object.entries(runtimeFragments),
   ['IDENTITY', identity],
   ['OUTPUT_CONTRACT', outputContract],
   ...Object.entries(rules).map(([name, text]) => [name.replace(/[A-Z]/g, c => `_${c}`).toUpperCase(), text]),
@@ -50,7 +51,7 @@ for (const [name, key] of [['AUTO', 'auto'], ['ZH_CN', 'zh-CN'], ['EN', 'en']]) 
   // Language is an independently switchable behavior rule.
   const instruction = languageRules[key];
   guard(name, instruction);
-  out += `const INSTRUCTION_${name}: &str = r##"${instruction}"##;\n`;
+  out += `pub const INSTRUCTION_${name}: &str = r##"${instruction}"##;\n`;
 }
 
 out += `\n/// 复刻 \`articulationFor\`：非法语言在 JS 里抛错，这里返回错误。\npub fn articulation_for(language: &str) -> Result<String, &'static str> {\n    articulation_for_with_rules(language, &[])\n}\n\npub fn articulation_for_with_rules(language: &str, disabled_rules: &[&str]) -> Result<String, &'static str> {\n    let instruction = match ReplyLanguage::parse(language) {\n        Some(ReplyLanguage::Auto) => INSTRUCTION_AUTO,\n        Some(ReplyLanguage::ZhCn) => INSTRUCTION_ZH_CN,\n        Some(ReplyLanguage::En) => INSTRUCTION_EN,\n        None => return Err("Invalid reply language"),\n    };\n    let prompt = compose_prompt(ARTICULATION, disabled_rules);\n    if disabled_rules.contains(&"language") {\n        Ok(prompt)\n    } else {\n        Ok(format!("{prompt}\\n{instruction}"))\n    }\n}\n`;
@@ -74,6 +75,16 @@ out += `        _ => &["boundary", "responsibility", "attribution"],
     parts.join("\\n")
 }
 `;
+// Flat, individually addressable string keys; rule names map to their generated constants.
+const defaults = Object.fromEntries([...items,
+  ...Object.entries(languageRules).map(([key, value]) => [`INSTRUCTION_${key === 'zh-CN' ? 'ZH_CN' : key.toUpperCase()}`, value])]);
+out += `\npub const DEFAULT_ENTRIES: &[(&str, &str)] = &[\n`;
+for (const key of Object.keys(defaults)) out += `    ("${key}", ${key}),\n`;
+out += `];\npub const TASK_RULES: &[(&str, &[&str])] = &[\n`;
+for (const [name, contract] of Object.entries({ formation, evaluation, articulation, forecast, learningReview })) {
+  out += `    (${name === 'learningReview' ? 'LEARNING_REVIEW' : name.toUpperCase()}, &[${taskRules[contract].map(n => `"${rustName(n)}"`).join(', ')}]),\n`;
+}
+out += `];\n`;
 const formatted = execFileSync('rustfmt', ['--edition', '2021', '--emit', 'stdout'], {
   input: out,
   encoding: 'utf8',
@@ -85,5 +96,13 @@ if (process.argv.includes('--check')) {
   console.log('提示词生成物一致');
 } else {
   fs.writeFileSync(target, formatted);
+  const index = process.argv.indexOf('--runtime-dir');
+  if (index >= 0 && !process.argv[index + 1]) throw new Error('--runtime-dir requires a directory');
+  const directory = path.resolve(index >= 0 ? process.argv[index + 1] : path.join(root, '.runtime'));
+  fs.mkdirSync(directory, { recursive: true });
+  const overlay = path.join(directory, 'prompts.json');
+  fs.writeFileSync(`${overlay}.tmp`, JSON.stringify(defaults, null, 2) + '\n');
+  fs.renameSync(`${overlay}.tmp`, overlay);
+  console.log(`已写入 ${overlay}`);
   console.log(`已写入 ${path.relative(root, target)}（${Buffer.byteLength(formatted)} 字节）`);
 }

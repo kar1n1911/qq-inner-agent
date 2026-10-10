@@ -7,10 +7,10 @@ use crate::{
 use anyhow::Result;
 use serde_json::Value;
 
-/// 这是追加到 articulation user 内容的运行时片段，不属于 prompts.rs 生成产物。
-pub const FACE_ONLY_INSTRUCTIONS: &str = "仅当 faceOnlyAllowed=true 时，轻松附和可以返回空文本与 decorations.faceIds 中的单个 faceId，emoji 必须为 null；否则必须给出正文。被点名、求助、难过时禁止只发表情。不要返回多个 face 或额外消息。";
+/// 追加到 articulation user 内容的运行时片段，默认值由 prompts.mjs 生成。
+pub use crate::prompts::FACE_ONLY_INSTRUCTIONS as FACE_ONLY_INSTRUCTIONS;
 /// 多气泡（门控）：允许模型额外返回 `bubbles` 数组模拟连续多气泡。
-pub const MULTI_BUBBLE_INSTRUCTIONS: &str = "当 multiBubble=true 时，你可以额外返回 `bubbles` 字符串数组（2–3 条短句）来模拟连续多气泡；每条是一句独立消息，总长度与 text 相当。不要返回多余字段。";
+pub use crate::prompts::MULTI_BUBBLE_INSTRUCTIONS as MULTI_BUBBLE_INSTRUCTIONS;
 
 /// 原始段标记单独保存，避免把用户输入的字面量 [QQface:...] 误当真实 face。
 /// 只在学习开关开启后采集；旧消息没有段证据，按冷启动处理，不猜测回填。

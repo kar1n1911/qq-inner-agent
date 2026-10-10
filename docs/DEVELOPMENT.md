@@ -51,9 +51,27 @@ agent "是谁、怎么说话"这一整条链。
 
 ### 提示词
 
-- **源**:`src/prompts.mjs`(仓库根,JS);**生成物**:`rust/src/prompts.rs`。
-- 改动提示词:`src/prompts.mjs` → `node rust/tools/gen-prompts.mjs` → `node rust/tools/gen-prompts.mjs --check`。
-- 运行时片段(不进入生成物):`persona/humanize.rs` / `persona/recall.rs` / `persona/backstory.rs` 的常量,由 engine 追加到 payload。
+设计依据：调提示词不应需要重新编译或重启；修改覆盖层文件后，下一轮 FORM 与 ARTICULATE 的 system 必须出现新文本，一轮中途不得切换提示词。
+
+三层关系：
+
+| 层 | 位置与用途 | 更新方式 |
+| --- | --- | --- |
+| 唯一真源 | `src/prompts.mjs`，包含任务契约、规则、语言变体、ORIENT 与 humanize/recall/backstory 运行时片段 | 所有持久的提示词修改先改这里；`src/orientation.mjs` 只重新导出 ORIENT 契约 |
+| 编译默认值 | `rust/src/prompts.rs`，覆盖层不可用时的逐项回退值 | 生成器更新，`--check` 与真源逐字核对；要更新二进制内置回退值仍需编译 |
+| 运行时覆盖层 | 服务 `--root` 下 `.runtime/prompts.json`，不入 Git，与自定义 `storage.directory` 无关 | UTF-8 JSON 对象，键是生成常量名，值是字符串；生成器原子写入，监视器约每秒检测 |
+
+运行 `node rust/tools/gen-prompts.mjs` 同时更新编译默认值和仓库根 `.runtime/prompts.json`；服务使用其它 root 时加 `--runtime-dir /服务root/.runtime`。然后运行 `node rust/tools/gen-prompts.mjs --check`。热调试不需要执行 cargo build 或重启；`--check` 仅检查编译默认值，既不读取也不覆盖运行时文件。重新运行生成器会覆盖临时运行时编辑，需保留的编辑应回写真源。
+
+JSON 逐项包含 `IDENTITY`、`OUTPUT_CONTRACT`、`FORMATION`、`EVALUATION`、`ARTICULATION`、`FORECAST`、`LEARNING_REVIEW`、`ORIENTATION`；规则名由 camelCase 转为大写下划线（如 `replyStyle` → `REPLY_STYLE`），语言键为 `INSTRUCTION_AUTO` / `INSTRUCTION_ZH_CN` / `INSTRUCTION_EN`，运行时片段为 `FACE_ONLY_INSTRUCTIONS` / `MULTI_BUBBLE_INSTRUCTIONS` / `RECALL_RULE` / `RECALL_CONTRACT` / `BACKSTORY_RULE`。任务的规则选择顺序仍由真源生成，覆盖的是文本而非程序控制流。
+
+缺文件、读取失败、坏 JSON 或顶层非对象时全部用内置值；缺键或非字符串时仅该项用内置值，其余有效项继续覆盖。空字符串是有效覆盖，未知键忽略。删除文件可整体回退；删除单键可单项回退。错误不会阻止启动，也不会沿用上一次有效覆盖来掩盖当前错误。
+
+覆盖层字节的 SHA-256 与配置 revision 一起进入既有监视器，遵守 `.settings-write` 写入屏障和加载前 revision 复核。每个 Engine 持有不可变快照；热加载沿用配置的 stop/drain/replace 流程，取消并等待旧任务结束后才启用新 Engine，因此旧 cycle 不会混入新文本。与配置重载一致，正在执行的一轮可能取消，下一轮使用新快照；文件变化到监视器应用之前仍使用旧快照。配置本身非法时整次重载拒绝，旧配置与提示词继续运行。
+
+`state.get`（经 `status.json`）提供 `prompts.source`（`builtin` / `overlay`）、`prompts.revision`（文件字节 SHA-256；缺失或无法读取为 null）、`prompts.errors` 与 `prompts.overriddenKeys`。部分覆盖时 source 为 overlay，errors 列出回退项。`appliedRevision` 保持原有配置 revision 协议；提示词 revision 单独报告。
+
+测试分两层：`prompt_overlay` 单测覆盖逐项回退、坏文件、全部生成键及语言；`engine_parity` 覆盖 FORM 等待期间编辑文件后同轮 ARTICULATE 仍用旧快照；`prompt_hotload` 启动真实服务、通过本地假 OneBot 输入和假 HTTP 模型捕获请求，并从控制总线 `state.get` 验证来源、revision、错误与写入屏障。目标测试在同一 PID、同一磁盘二进制下修改文件，等待真实监视器应用，再断言下一轮 FORM/ARTICULATE 的 system 都包含新文本。
 
 ---
 

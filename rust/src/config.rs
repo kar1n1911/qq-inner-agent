@@ -1083,6 +1083,7 @@ pub struct Config {
 }
 
 pub struct Loaded {
+    pub prompts: std::sync::Arc<crate::prompt_overlay::Snapshot>,
     /// 完整强类型运行时视图。
     pub config: Config,
     /// JS loadConfig 返回的完整对象，含未知字段、派生键和归一化 ID。
@@ -1190,7 +1191,11 @@ pub fn load_with_env(root: &Path, env: impl Fn(&str) -> Option<String>) -> Resul
     config.agent.ocr.script = absolute(root, &config.agent.ocr.script)?
         .to_string_lossy()
         .into_owned();
-    Ok(Loaded { config, raw })
+    Ok(Loaded {
+        config,
+        raw,
+        prompts: std::sync::Arc::new(crate::prompt_overlay::Snapshot::load(root)),
+    })
 }
 
 pub fn readiness(c: &Config) -> Vec<String> {

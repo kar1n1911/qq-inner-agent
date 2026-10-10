@@ -157,6 +157,7 @@ impl OrientationProvider for Provider {
 }
 
 pub struct GroupOrientation {
+    pub(crate) prompts: Arc<crate::prompt_overlay::Snapshot>,
     store: Arc<Mutex<Store>>,
     agent: Agent,
     provider: Arc<dyn OrientationProvider>,
@@ -175,6 +176,7 @@ impl GroupOrientation {
         signal: watch::Receiver<bool>,
     ) -> Result<Self> {
         let this = Self {
+            prompts: Arc::default(),
             store,
             agent,
             provider,
@@ -336,7 +338,7 @@ impl GroupOrientation {
         if !titled.is_empty() {
             payload["sources"]["titledMembers"] = json!(titled);
         }
-        let result = self.provider.json(ORIENTATION, payload).await;
+        let result = self.provider.json(self.prompts.get(ORIENTATION), payload).await;
         if !self.fresh(chat, epoch)? {
             return Ok(false);
         }

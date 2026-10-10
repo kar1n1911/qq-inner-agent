@@ -206,11 +206,14 @@ fn mode(c: &config::Config) -> &'static str {
         "active"
     }
 }
+fn runtime_revision(root: &Path) -> Result<String> {
+    Ok(format!("{}:{}", settings::revision(root)?, qq_inner_core::prompt_overlay::revision(root)))
+}
 fn changed(root: &Path, applied: &str) -> Result<Option<String>> {
     if root.join(".settings-write").exists() {
         return Ok(None);
     }
-    let next = settings::revision(root)?;
+    let next = runtime_revision(root)?;
     Ok((next != applied).then_some(next))
 }
 struct Runtime {
@@ -241,6 +244,8 @@ impl Runtime {
         log: Logger,
         existing_bot: Option<Arc<OneBot>>,
     ) -> Result<Self> {
+        // Record the bytes actually loaded, including startup edits during resource setup.
+        let applied = format!("{}:{}", applied.split(':').next().unwrap_or(&applied), loaded.prompts.watch_revision());
         let c = loaded.config;
         let provider = Arc::new(Provider::new(
             c.provider.clone(),
@@ -255,6 +260,7 @@ impl Runtime {
             provider.clone(),
             bot.clone(),
             Options {
+                prompts: loaded.prompts.clone(),
                 now: now.clone(),
                 log: log.clone(),
                 ..Options::default()
@@ -362,7 +368,8 @@ impl Runtime {
         let bot = self.bot.state();
         // Exactly src/main.mjs status(): nulls are retained and cycle timestamps are seconds.
         Ok(json!({"updatedAt":iso(now), "pid":pid, "mode":mode(c),
-            "appliedRevision":self.applied, "reloading":self.reloading, "reloadError":self.reload_error,
+            "prompts":self.engine.prompt_status(),
+            "appliedRevision":self.applied.split(':').next(), "reloading":self.reloading, "reloadError":self.reload_error,
             "scheduleActive":active, "activityRhythm":activity, "missing":config::readiness(c),
             "onebotConnected":bot.connected, "qqOnline":bot.online, "selfId":bot.self_id,
             "reconnects":bot.reconnects, "activeChats":self.engine.chats().len(),
@@ -410,7 +417,10 @@ impl Runtime {
             return Ok(());
         }
         let next = config::load_config(root)?;
-        if root.join(".settings-write").exists() || settings::revision(root)? != revision {
+        if root.join(".settings-write").exists()
+            || runtime_revision(root)? != revision
+            || revision.split_once(':').map(|(_, prompt)| prompt) != Some(next.prompts.watch_revision())
+        {
             return Ok(());
         }
         anyhow::ensure!(
@@ -473,7 +483,7 @@ impl Runtime {
             );
         }
         *self = replacement;
-        (self.log)("config_applied", json!({"revision": &self.applied[..12]}));
+        (self.log)("config_applied", json!({"revision": &self.applied[..12], "prompts": self.engine.prompt_status()}));
         Ok(())
     }
     async fn shutdown(mut self) -> Result<()> {
@@ -541,7 +551,7 @@ async fn run(root: PathBuf) -> Result<()> {
         event_log.publish(event, data.clone());
         file_log(event, data);
     });
-    let mut rt = Runtime::new(loaded, store, settings::revision(&root)?, now, log, None)?;
+    let mut rt = Runtime::new(loaded, store, runtime_revision(&root)?, now, log, None)?;
     rt.engine.restore()?;
     (rt.log)(
         "started",
@@ -636,7 +646,7 @@ mod tests {
             Runtime::new(
                 loaded,
                 Arc::new(Mutex::new(Store::in_memory().unwrap())),
-                settings::revision(&self.0).unwrap(),
+                runtime_revision(&self.0).unwrap(),
                 Arc::new(|| 1_700_000_000.125),
                 Arc::new(|_, _| {}),
                 None,
@@ -654,7 +664,7 @@ mod tests {
     fn revision_and_write_barrier() {
         let dir = Temp::new();
         dir.config(json!({}));
-        let applied = settings::revision(&dir.0).unwrap();
+        let applied = runtime_revision(&dir.0).unwrap();
         assert!(changed(&dir.0, &applied).unwrap().is_none());
         fs::write(dir.0.join(".settings-write"), "journal").unwrap();
         // An unreadable config proves the marker is checked BEFORE reading/hash/loading.
@@ -665,7 +675,7 @@ mod tests {
         dir.config(json!({"agent":{"dryRun":true}}));
         fs::remove_file(dir.0.join(".settings-write")).unwrap();
         assert!(changed(&dir.0, &applied).unwrap().is_some());
-        let applied = settings::revision(&dir.0).unwrap();
+        let applied = runtime_revision(&dir.0).unwrap();
         fs::write(dir.0.join("secrets.json"), "{\"apiKey\":\"test\"}").unwrap();
         assert!(changed(&dir.0, &applied).unwrap().is_some());
     }
@@ -691,7 +701,7 @@ mod tests {
         rt.engine.inherit_chats(vec![("private:2".into(), state)]);
         dir.config(json!({"agent":{"allowedUsers":["1"],"dryRun":true}}));
         let (_stop, mut shutdown) = watch::channel(false);
-        let revision = settings::revision(&dir.0).unwrap();
+        let revision = runtime_revision(&dir.0).unwrap();
         rt.reload(&dir.0, revision.clone(), &mut shutdown, &mut timer(5))
             .await
             .unwrap();
@@ -717,7 +727,7 @@ mod tests {
         assert!(rt
             .reload(
                 &dir.0,
-                settings::revision(&dir.0).unwrap(),
+                runtime_revision(&dir.0).unwrap(),
                 &mut shutdown,
                 &mut timer(5)
             )
@@ -729,7 +739,7 @@ mod tests {
         assert!(rt
             .reload(
                 &dir.0,
-                settings::revision(&dir.0).unwrap(),
+                runtime_revision(&dir.0).unwrap(),
                 &mut shutdown,
                 &mut timer(5)
             )
@@ -753,7 +763,7 @@ mod tests {
         let (stop, mut shutdown) = watch::channel(false);
         rt.reload(
             &dir.0,
-            settings::revision(&dir.0).unwrap(),
+            runtime_revision(&dir.0).unwrap(),
             &mut shutdown,
             &mut timer(5),
         )
@@ -768,7 +778,7 @@ mod tests {
         stop.send_replace(true);
         rt.reload(
             &dir.0,
-            settings::revision(&dir.0).unwrap(),
+            runtime_revision(&dir.0).unwrap(),
             &mut shutdown,
             &mut timer(5),
         )
@@ -796,7 +806,10 @@ mod tests {
             let mut reads = 0;
             while reader_running.load(std::sync::atomic::Ordering::Relaxed) {
                 let v: Value = serde_json::from_slice(&fs::read(&reader_file).unwrap()).unwrap();
-                assert_eq!(v.as_object().unwrap().len(), 19);
+                assert_eq!(v.as_object().unwrap().len(), 20);
+                assert_eq!(v["prompts"]["source"], "builtin");
+                assert!(v["prompts"]["revision"].is_null());
+                assert!(!v["prompts"]["errors"].as_array().unwrap().is_empty());
                 reads += 1;
                 if reads == 1 {
                     ready.send(()).unwrap();

@@ -335,6 +335,7 @@ fn setup(case: &Value) -> (Arc<Engine>, Arc<Harness>) {
             .into_iter(),
     );
     let options = Options {
+        prompts: case["promptRoot"].as_str().map(|root| Arc::new(qq_inner_core::prompt_overlay::Snapshot::load(std::path::Path::new(root)))).unwrap_or_default(),
         now: Arc::new(move || clock.now()),
         random: Arc::new(move || {
             draw_source.model.lock().unwrap()["decisionDraw"]
@@ -3315,4 +3316,62 @@ async fn goal_conversation_continues_after_a_recent_unaddressed_reply() {
             0
         );
     }
+}
+
+// Design basis: docs/DEVELOPMENT.md:54 — prompt tuning needs no build/restart;
+// a cycle must retain one snapshot even when the file changes during FORM.
+// Use real Engine cycles and capture the provider's actual system messages.
+#[tokio::test]
+async fn editing_overlay_changes_next_form_and_articulate_without_build_or_restart() {
+    use qq_inner_core::{prompt_overlay::{Snapshot, FILE}, prompts, settings};
+    let root = std::env::temp_dir().join(format!("hot-prompts-{}", rand::random::<u64>()));
+    std::fs::create_dir_all(root.join(".runtime")).unwrap();
+    let write = |version: &str| {
+        settings::atomic_json(&root.join(FILE), &json!({
+            "FORMATION":format!("{}\nFORM-{version}", prompts::FORMATION),
+            "ARTICULATION":format!("{}\nARTICULATE-{version}", prompts::ARTICULATION)
+        })).unwrap();
+    };
+    write("before");
+    let mut case = base("hot prompts", json!({}), vec![]);
+    case["promptRoot"] = json!(root);
+    let (engine, h) = setup(&case);
+    *h.hold.lock().unwrap() = Some("FORM".into());
+    engine.ingest(&h.event(&json!({"id":"first"}))).unwrap();
+    engine.tick().unwrap();
+    entered(&h).await;
+    write("after"); // Edit while FORM is in flight: ARTICULATE must still use before.
+    *h.hold.lock().unwrap() = None;
+    h.release.add_permits(1);
+    engine.wait_idle().await;
+    for task in ["FORM", "ARTICULATE"] {
+        let systems = h.model_systems.lock().unwrap();
+        let system = &systems.iter().find(|(stage, _)| stage == task).unwrap().1;
+        assert!(system.contains(&format!("{task}-before")));
+        assert!(!system.contains(&format!("{task}-after")));
+    }
+    // The service's configuration reload drains the old Engine then inherits chats.
+    engine.stop().await;
+    let clock = h.clone();
+    let next = Engine::new(engine.config.clone(), h.store.clone(), h.clone(), h.clone(), Options {
+        prompts: Arc::new(Snapshot::load(&root)),
+        now: Arc::new(move || clock.now()),
+        random: Arc::new(|| 0.),
+        ..Options::default()
+    }).unwrap();
+    next.inherit_chats(engine.chats());
+    *h.engine.lock().unwrap() = Arc::downgrade(&next);
+    *h.now.lock().unwrap() += 61.;
+    h.model_systems.lock().unwrap().clear();
+    next.ingest(&h.event(&json!({"id":"second"}))).unwrap();
+    next.tick().unwrap();
+    next.wait_idle().await;
+    for task in ["FORM", "ARTICULATE"] {
+        let systems = h.model_systems.lock().unwrap();
+        let system = &systems.iter().find(|(stage, _)| stage == task).unwrap().1;
+        assert!(system.contains(&format!("{task}-after")));
+        assert!(!system.contains(&format!("{task}-before")));
+    }
+    next.stop().await;
+    std::fs::remove_dir_all(root).unwrap();
 }
