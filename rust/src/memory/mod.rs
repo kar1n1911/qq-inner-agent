@@ -53,6 +53,13 @@ pub fn memory_subjects(chat: &str, sender: &str) -> Result<Vec<String>> {
         vec![format!("person:{sender}")]
     })
 }
+// Use the persisted boundary, so history reloads, backfill and OCR retain the
+// same evidence rule. Mixed messages are conservatively group-only as well.
+fn contains_forward(message: &Value) -> bool {
+    let body = text(message, "text");
+    body.contains("[合并转发]") || body.contains("[forward]")
+}
+
 pub fn parse_memory_updates(
     value: &Value,
     history: &[Value],
@@ -83,6 +90,7 @@ pub fn parse_memory_updates(
             return Ok(json!({"verdict":"skip", "reason":trim(text(v,"reason"))}));
         }
         ensure!(allowed.iter().any(|s|v["subject"]==*s)&&matches!(text(v,"layer"),"long_term"|"traits")&&matches!(text(v,"operation"),"upsert"|"forget")&&valid_text(&v["key"],64)&&v["sourceIds"].is_array()&&(1..=6).contains(&array(&v["sourceIds"]).len())&&array(&v["sourceIds"]).iter().all(|id|id.as_str().is_some_and(|id|humans.contains_key(id))),"invalid_memory_updates");
+        ensure!(v["subject"] == "group" || array(&v["sourceIds"]).iter().all(|id| !contains_forward(humans[id.as_str().unwrap()])), "memory_forward_person_evidence");
         let mut ids=HashSet::new();
         let sources:Vec<_>=array(&v["sourceIds"]).iter().filter(|id|ids.insert(id.as_str().unwrap())).map(|id|{let m=humans[id.as_str().unwrap()];json!({"id":id,"sender":m["sender"],"ts":m["ts"]})}).collect();
         // 来源必须是本 chat 的人类消息；QQ-ID 归属不依赖昵称，群结论需要多人。
@@ -338,7 +346,13 @@ impl<'a> LayeredMemory<'a> {
             return Ok(());
         }
         let chat = text(message, "chat");
-        let subjects = memory_subjects(chat, text(message, "sender"))?;
+        let mut subjects = memory_subjects(chat, text(message, "sender"))?;
+        if contains_forward(message) {
+            subjects.retain(|subject| subject == "group");
+        }
+        if subjects.is_empty() {
+            return Ok(());
+        }
         // 首次接入已有库时只初始化一次人数索引；正常启动 configure 已完成此步骤。
         if !self.store.memory_pending.borrow().contains_key(chat) {
             self.refresh_people(chat, now, true)?;
@@ -375,8 +389,10 @@ impl<'a> LayeredMemory<'a> {
             let mut pending = self.store.memory_pending.borrow_mut();
             let p = pending.get_mut(chat).expect("initialized chat");
             p.added += 1;
-            p.people
-                .insert(format!("person:{}", text(message, "sender")));
+            if !contains_forward(message) {
+                p.people
+                    .insert(format!("person:{}", text(message, "sender")));
+            }
             p.added >= settings.short_limit.max(1.) as usize
                 || p.people.len() > settings.max_people as usize
                 || now - p.since >= 3600.

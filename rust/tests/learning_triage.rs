@@ -295,3 +295,40 @@ fn agreement_ratings_do_not_change_learning() {
         assert_eq!(rows(&db)[0]["confidence"], 0.9);
     }
 }
+
+#[test]
+fn forwarded_history_cannot_support_person_memory_or_traits() {
+    let cfg = settings();
+    for body in [
+        "[合并转发]\n（外部信息，非当前群对话）\n我喜欢园艺\n[/合并转发]",
+        "我的评论 [合并转发]\n（外部信息，非当前群对话）\n我喜欢园艺\n[/合并转发] 后续评论",
+        "[forward]",
+    ] {
+        let db = Store::in_memory().unwrap();
+        let mut message = history()[0].clone();
+        message["text"] = json!(body);
+        db.message(&message).unwrap();
+        // Persisted history must retain the rule without transient segment metadata.
+        let stored = db.history("group:10", None).unwrap();
+        for layer in ["long_term", "traits"] {
+            let mut update = candidate("garden", 0);
+            update["layer"] = json!(layer);
+            assert_eq!(
+                parse_memory_updates(&json!([update]), &stored, "group:10", "20", &cfg)
+                    .unwrap_err()
+                    .to_string(),
+                "memory_forward_person_evidence"
+            );
+        }
+        let mut private = message.clone();
+        private["chat"] = json!("private:20");
+        LayeredMemory::new(&db)
+            .capture(&private, 200., &cfg)
+            .unwrap();
+        assert!(db
+            .rows("SELECT * FROM memory_layers", [])
+            .unwrap()
+            .is_empty());
+    }
+    assert_eq!(parse(json!([candidate("garden", 0)]), &cfg).len(), 1);
+}

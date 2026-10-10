@@ -649,7 +649,7 @@ async fn forward_fetch_normalize_text_only_and_fallback() {
         assert_eq!(req["params"], json!({"id":"opaque-forward"}));
         let mut data = json!({});
         data[field] = json!([
-            {"sender":{"nickname":"外部用户"},"content":[{"type":"text","data":{"text":"first node"}},
+            {"sender":{"nickname":"外部用户","user_id":654},"nickname":"备用昵称","uin":"987","content":[{"type":"text","data":{"text":"first node"}},
                 {"type":"at","data":{"qq":"123"}}, {"type":"file","data":{"text":"secret file"}},
                 {"type":"forward","data":{"forwardId":"nested"}}]},
             {"type":"node","data":{"sender":{"user_id":321},"message":[{"type":"text","data":{"text":"second node"}}]}},
@@ -657,7 +657,24 @@ async fn forward_fetch_normalize_text_only_and_fallback() {
         ]);
         m.frames.send(response(&req, data, json!(0), "ok")).unwrap();
         let message = call.await.unwrap();
-        assert_eq!(message.text, "before [合并转发]\n（外部信息，非当前群对话）\n外部用户: first node\n321: second node\nanonymous node\n[/合并转发] after");
+        assert_eq!(message.text, "before [合并转发]\n（外部信息，非当前群对话）\nfirst node\nsecond node\nanonymous node\n[/合并转发] after");
+        for identity in ["外部用户", "321", "备用昵称", "654", "987"] {
+            assert!(!message.text.contains(identity));
+        }
+        let db = qq_inner_core::store::Store::in_memory().unwrap();
+        let value = serde_json::to_value(&message).unwrap();
+        let config = forward_config();
+        let memory = qq_inner_core::memory::LayeredMemory::new(&db);
+        memory.capture(&value, 1000., &config.agent.memory).unwrap();
+        let rows = db
+            .rows("SELECT subject, text FROM memory_layers", [])
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["subject"], "group");
+        assert!(rows[0]["text"].as_str().unwrap().contains("first node"));
+        assert!(rows
+            .iter()
+            .all(|row| !row["subject"].as_str().unwrap().starts_with("person:")));
         assert_eq!(message.hint, qq_inner_core::engine::policy::Hint::Open);
         assert!(m.requests.try_recv().is_err());
     }
@@ -822,7 +839,8 @@ async fn backfill_forward_skips_age_but_keeps_admission_checks() {
     m.frames.send(response(&req, json!({"messages":[{"sender":{"nickname":"历史作者"},"content":[{"type":"text","data":{"text":"很久以前的外部对话，足够长以验证截断保留边界"}}]}]}), json!(0), "ok")).unwrap();
     let message = call.await.unwrap();
     assert_eq!(message.ts, 1.);
-    assert!(message.text.contains("历史作者: 很久以前的外部对话"));
+    assert!(message.text.contains("很久以前的外部对话"));
+    assert!(!message.text.contains("历史作者"));
     assert!(message.text.contains("[/合并转发]"));
     stop(s, t).await;
 }

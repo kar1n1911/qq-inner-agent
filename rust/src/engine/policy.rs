@@ -613,24 +613,8 @@ fn forward_text(
         if text.trim().is_empty() {
             continue;
         }
-        let speaker = [
-            &node["sender"]["nickname"],
-            &node["nickname"],
-            &node["sender"]["user_id"],
-            &node["user_id"],
-            &node["uin"],
-        ]
-        .into_iter()
-        .find_map(|value| match value {
-            serde_json::Value::String(s) if !s.trim().is_empty() => Some(s.clone()),
-            serde_json::Value::Number(n) => Some(n.to_string()),
-            _ => None,
-        });
-        let line = match speaker {
-            Some(speaker) => format!("{speaker}: {text}"),
-            None => text,
-        };
-        let line = clip_chars(&line, limit.saturating_sub(length));
+        // Only node content crosses the chat boundary, never sender identity.
+        let line = clip_chars(&text, limit.saturating_sub(length));
         length += line.chars().count() + 1;
         lines.push(line);
         if length >= limit {
