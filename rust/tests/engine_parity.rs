@@ -265,7 +265,7 @@ impl OrientationProvider for Harness {
                     formed
                 }
                 "EVALUATE" => {
-                    json!({"ratings":payload["candidates"].as_array().unwrap().iter().map(|c|json!({"id":c["id"],"motivation":m.get("score").unwrap_or(&json!(5)),"relevance":4,"originality":4,"for":["relevance","bad","coherence","balance"],"against":["balance"]})).collect::<Vec<_>>()})
+                    json!({"ratings":payload["candidates"].as_array().unwrap().iter().map(|c|json!({"id":c["id"],"motivation":m.get("score").unwrap_or(&json!(5)),"relevance":4,"originality":4,"for":m.get("forTags").unwrap_or(&json!(["relevance","bad","coherence","balance"])),"against":m.get("againstTags").unwrap_or(&json!(["balance"]))})).collect::<Vec<_>>()})
                 }
                 "FORECAST" => {
                     json!({"shouldSend":m["veto"]!=true,"outcomes":{"reply":0.6,"silence":0.4,"negative":0},"responseMode":if m["veto"]==true {"wait"} else {"answer"},"plan":"接住当前问题"})
@@ -284,13 +284,6 @@ impl OrientationProvider for Harness {
                         }
                         response
                     }
-                }
-                "LEARNING_REVIEW" => {
-                    // Deliberately approve every claim: the runtime mood guard
-                    // must protect storage even when the reviewer misses venting.
-                    json!({"reviews":payload["candidates"].as_array().unwrap().iter()
-                        .map(|v| json!({"index":v["index"],"action":"keep","reason":"mock approval"}))
-                        .collect::<Vec<_>>()})
                 }
                 "ORIENT" => json!({"style":"谨慎接话","summary":"园艺讨论","topics":["园艺"]}),
                 _ => panic!("unexpected stage"),
@@ -3314,5 +3307,109 @@ async fn goal_conversation_continues_after_a_recent_unaddressed_reply() {
             h.store.lock().unwrap().counts("group:10", h.now()).unwrap()["proactive"],
             0
         );
+    }
+}
+
+
+#[tokio::test]
+async fn topic_lifecycle_delivery_targets_and_necessity() {
+    // Design §11 + DEVELOPMENT: recent optional quote; ended mandatory precise
+    // quote; remote conservative necessity, then the same precise quote contract.
+    for (age, necessary, model_target, expected) in [
+        (60., false, None, Some(None)),
+        (600., false, None, Some(Some("topic-message"))),
+        (600., false, Some("missing"), Some(Some("topic-message"))),
+        (
+            600.,
+            false,
+            Some("topic-alternative"),
+            Some(Some("topic-alternative")),
+        ),
+        (2820., false, None, None),
+        (2820., true, None, Some(Some("topic-message"))),
+    ] {
+        let case = base(
+            "topic_lifecycle",
+            json!({"sending":{"enabled":false}}),
+            vec![],
+        );
+        let (e, h) = setup(&case);
+        let now = h.now();
+        {
+            let db = h.store.lock().unwrap();
+            for (id, content, ts) in [
+                ("topic-message", "建议从土壤湿度判断浇水", now - age),
+                ("topic-alternative", "土壤湿度判断浇水 再见", now - age + 1.),
+            ] {
+                db.message(&json!({"chat":"group:10","id":id,"sender":"20","text":content,"ts":ts,"self":false})).unwrap();
+            }
+        }
+        *h.model.lock().unwrap() = json!({"reply":"建议从土壤湿度判断浇水",
+            "replyTo":model_target,"forTags":if necessary {json!(["urgency"])} else {json!(["relevance"])}});
+        // A later unrelated @ must never become the tier-2 fallback.
+        // For tier 1 use an open trigger to verify that no reply is required.
+        e.ingest(&h.event(&json!({"id":"latest-call","text":if age == 60. {"天气晴朗"} else {"[CQ:at,qq=99]天气晴朗"}}))).unwrap();
+        e.tick().unwrap();
+        e.wait_idle().await;
+        assert_eq!(
+            *h.sends.lock().unwrap(),
+            usize::from(expected.is_some()),
+            "age={age},necessary={necessary}"
+        );
+        if let Some(target) = expected {
+            assert_eq!(
+                *h.targets.lock().unwrap(),
+                vec![json!({"replyTo":target,"mention":null})]
+            );
+            if let Some(target) = target {
+                let trace = h.trace.lock().unwrap();
+                let sent = trace
+                    .iter()
+                    .find(|v| v[0] == "log" && v[1] == "message_sent")
+                    .unwrap();
+                assert_eq!(
+                    sent[2]["segments"][0][0],
+                    json!({"type":"reply","data":{"id":target}})
+                );
+            }
+        }
+        e.stop().await;
+    }
+}
+
+#[tokio::test]
+async fn remote_topic_necessity_also_gates_proactive_pause_delivery() {
+    // Design: the reported 47-minute incident; necessity applies to proactive
+    // sends without changing the pause trigger's proactive accounting.
+    for necessary in [false, true] {
+        let (e, h) = setup(&base(
+            "remote_pause",
+            json!({"pauseSeconds":300,"activeWindowSeconds":3600}),
+            vec![],
+        ));
+        h.model.lock().unwrap()["empty"] = json!(true);
+        e.ingest(&h.event(&json!({"id":"hamburger","text":"建议从土壤湿度判断浇水"})))
+            .unwrap();
+        e.tick().unwrap();
+        e.wait_idle().await;
+        *h.now.lock().unwrap() += 2820.;
+        *h.model.lock().unwrap() = json!({"forTags":if necessary {json!(["information_gap"])} else {json!(["relevance"])}});
+        e.tick().unwrap();
+        e.wait_idle().await;
+        assert_eq!(e.last_error(), None);
+        assert_eq!(*h.sends.lock().unwrap(), usize::from(necessary));
+        if necessary {
+            assert_eq!(
+                h.rows("SELECT proactive FROM deliveries"),
+                vec![json!({"proactive":1})]
+            );
+            assert_eq!(
+                *h.targets.lock().unwrap(),
+                vec![json!({"replyTo":"hamburger","mention":null})]
+            );
+        } else {
+            assert!(h.rows("SELECT * FROM deliveries").is_empty());
+        }
+        e.stop().await;
     }
 }

@@ -214,6 +214,18 @@ pub const LEGACY_PERSONAS: [&str;2]=[
 ];
 
 pub fn validate(c: &Value) -> std::result::Result<(), ConfigError> {
+    if let Some(v) = c.get("agent").and_then(|a| a.get("topicLifecycle")) {
+        let c: TopicLifecycle = serde_json::from_value(v.clone())
+            .map_err(|e| ConfigError(format!("agent.topicLifecycle: {e}")))?;
+        check(
+            c.recent_seconds.is_finite()
+                && c.recent_seconds > 0.
+                && c.remote_seconds.is_finite()
+                && c.remote_seconds > c.recent_seconds,
+            "agent.topicLifecycle requires 0 < recentSeconds < remoteSeconds",
+        )?;
+    }
+
     let a = &c["agent"];
     if let Some(v) = a.get("ocr") {
         let settings: crate::media::ocr::Settings = serde_json::from_value(v.clone())
@@ -945,9 +957,27 @@ impl Default for Backfill {
     }
 }
 
+/// Stateless delivery policy; conversation::Stage remains the only topic classifier.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct TopicLifecycle {
+    pub recent_seconds: f64,
+    pub remote_seconds: f64,
+}
+impl Default for TopicLifecycle {
+    fn default() -> Self {
+        Self {
+            recent_seconds: 300.,
+            remote_seconds: 1800.,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Agent {
+    #[serde(default)]
+    pub topic_lifecycle: TopicLifecycle,
     #[serde(default)]
     pub ocr: crate::media::ocr::Settings,
     #[serde(default)]

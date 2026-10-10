@@ -155,6 +155,7 @@
     "maxProactivePerHour": 6,
     "maxMessagesPerHour": 30,
     "activeWindowSeconds": 900,
+    "topicLifecycle": {"recentSeconds": 300, "remoteSeconds": 1800},
     "thoughtTtlSeconds": 1800,
     "thoughtLimit": 12,
     "historyLimit": 24,
