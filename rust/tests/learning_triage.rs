@@ -218,7 +218,10 @@ fn low_group_or_person_mood_skips_heated_traits_and_preserves_partials() {
         affect_state(&db, subject, "mood", -0.8);
         let mut v = candidate("garden", 1);
         v["sourceIds"] = json!(["m1", "m2", "m3", "m4", "m5", "m6"]);
-        let updates = parse(json!([v, candidate("heated", 7)]), &cfg);
+        v["emotional"] = json!(true);
+        let mut heated = candidate("heated", 7);
+        heated["emotional"] = json!(true);
+        let updates = parse(json!([v, heated]), &cfg);
         LayeredMemory::new(&db)
             .with_affect(true)
             .apply("group:10", &updates, 200., &cfg)
@@ -293,5 +296,165 @@ fn agreement_ratings_do_not_change_learning() {
             .unwrap();
         assert!(rows(&db)[0].get("pending").is_none());
         assert_eq!(rows(&db)[0]["confidence"], 0.9);
+    }
+}
+
+// Exercise the actual update path at production-sized amplitudes, rather than
+// inserting an unreachable-in-one-turn -0.8 or relying on six-source promotion.
+fn small_mood(db: &Store, subject: &str, signal: f64) {
+    use qq_inner_core::persona::affect::{self, Dimension};
+    affect::enable(db).unwrap();
+    db.message(&history()[0]).unwrap();
+    affect::rate(db, "group:10", "m0", signal, -1., 1., 200.).unwrap();
+    affect::update(
+        db,
+        "group:10",
+        subject,
+        Dimension::Mood,
+        Dimension::Mood,
+        signal,
+        1.,
+        "m0",
+        200.,
+    )
+    .unwrap();
+}
+
+#[test]
+fn small_low_mood_skips_only_emotional_claims_without_banking_evidence() {
+    for subject in ["group", "person:20"] {
+        for signal in [-0.013, -0.03, -0.24] {
+            let db = Store::in_memory().unwrap();
+            let cfg = settings();
+            let mut partial = candidate("pending", 0);
+            partial["verdict"] = json!("partial");
+            LayeredMemory::new(&db)
+                .apply("group:10", &parse(json!([partial]), &cfg), 200., &cfg)
+                .unwrap();
+            let before = rows(&db)[0].clone();
+            small_mood(&db, subject, signal);
+            let mut heated = candidate("heated", 1);
+            heated["emotional"] = json!(true);
+            heated["confidence"] = json!(1.);
+            let mut promote = candidate("pending", 1);
+            promote["emotional"] = json!(true);
+            promote["sourceIds"] = json!(["m1", "m2", "m3", "m4", "m5", "m6"]);
+            let mut ordinary = candidate("ordinary", 2);
+            ordinary["emotional"] = json!(false);
+            LayeredMemory::new(&db)
+                .with_affect(true)
+                .apply(
+                    "group:10",
+                    &parse(json!([heated, promote, ordinary]), &cfg),
+                    200.,
+                    &cfg,
+                )
+                .unwrap();
+            let saved = rows(&db);
+            assert_eq!(saved.len(), 2);
+            assert_eq!(
+                saved.iter().find(|r| r["slot"] == "pending").unwrap(),
+                &before
+            );
+            let fact = saved.iter().find(|r| r["slot"] == "ordinary").unwrap();
+            assert!(fact.get("pending").is_none());
+            assert_eq!(fact["confidence"], 0.9);
+            assert_eq!(
+                db.rows("SELECT * FROM decisions WHERE action='skipped'", [])
+                    .unwrap()
+                    .len(),
+                2
+            );
+            // Ordinary independent evidence still promotes at the original threshold.
+            for id in [1, 2] {
+                LayeredMemory::new(&db)
+                    .with_affect(true)
+                    .apply(
+                        "group:10",
+                        &parse(json!([candidate("pending", id)]), &cfg),
+                        201.,
+                        &cfg,
+                    )
+                    .unwrap();
+            }
+            assert!(rows(&db)
+                .iter()
+                .find(|r| r["slot"] == "pending")
+                .unwrap()
+                .get("pending")
+                .is_none());
+        }
+    }
+}
+
+#[test]
+fn normal_and_decayed_mood_allow_single_source_learning() {
+    for (signal, elapsed) in [(0., 0.), (0.013, 0.), (-0.013, 12. * 3600.)] {
+        let db = Store::in_memory().unwrap();
+        let cfg = settings();
+        small_mood(&db, "person:20", signal);
+        let mut emotional = candidate("emotional", 1);
+        emotional["emotional"] = json!(true);
+        LayeredMemory::new(&db)
+            .with_affect(true)
+            .apply(
+                "group:10",
+                &parse(json!([candidate("ordinary", 0), emotional]), &cfg),
+                200. + elapsed,
+                &cfg,
+            )
+            .unwrap();
+        assert_eq!(rows(&db).len(), 2);
+        assert!(rows(&db)
+            .iter()
+            .all(|r| r.get("pending").is_none() && r["confidence"] == 0.9));
+    }
+}
+
+#[test]
+fn emotional_flag_is_validated_and_survives_review() {
+    let cfg = settings();
+    for invalid in [json!(null), json!("true"), json!(1)] {
+        let mut v = candidate("bad", 0);
+        v["emotional"] = invalid;
+        assert_eq!(
+            parse_memory_updates(
+                &json!([candidate("valid", 1), v]),
+                &history(),
+                "group:10",
+                "20",
+                &cfg
+            )
+            .unwrap_err()
+            .to_string(),
+            "invalid_memory_emotional"
+        );
+    }
+    let mut v = candidate("heated", 0);
+    v["emotional"] = json!(true);
+    let parsed = parse(json!([v]), &cfg);
+    let reviewed = apply_learning_review(
+        &parsed,
+        &json!({"reviews":[{"index":0,
+        "action":"rewrite", "reason":"限缩结论", "text":"一时不喜欢园艺"}]}),
+        &cfg,
+    )
+    .unwrap();
+    assert_eq!(reviewed[0]["emotional"], true);
+}
+
+#[test]
+fn observed_scale_detects_negative_mood_but_not_neutral_tail() {
+    use qq_inner_core::persona::affect::clearly_low_mood;
+    for subject in ["group", "person:20"] {
+        let db = Store::in_memory().unwrap();
+        // A typical +0.007 input step, close to the measured group scale.
+        small_mood(&db, subject, 0.07);
+        affect_state(&db, subject, "mood", -0.0026);
+        assert!(clearly_low_mood(&db, "group:10", subject, 200.).unwrap());
+        affect_state(&db, subject, "mood", -0.0001);
+        assert!(!clearly_low_mood(&db, "group:10", subject, 200.).unwrap());
+        assert!(!clearly_low_mood(&db, "group:other", subject, 200.).unwrap());
+        assert!(!clearly_low_mood(&db, "group:10", "person:other", 200.).unwrap());
     }
 }

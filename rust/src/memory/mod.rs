@@ -13,6 +13,9 @@ use anyhow::{ensure, Result};
 use rusqlite::params;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
+/// Rust-only learning extension, appended to FORM without changing shared generated prompts.
+pub const AFFECT_LEARNING_CONTRACT: &str = "learning.layers[] 的 upsert 候选应提供 emotional 布尔值：仅当候选结论本身把本轮气话、宣泄或一时情绪当成稳定特质时为 true；可独立核实的普通事实为 false，即使原话带情绪。省略按 false 兼容旧输出。情绪化结论仍遵守 skip 分诊，程序还会依据群级/人物级 mood 阻止此类结论落库或升格；不能由 agreement 推断 emotional。";
+
 pub(crate) fn text<'a>(v: &'a Value, k: &str) -> &'a str {
     v[k].as_str().unwrap_or("")
 }
@@ -97,6 +100,10 @@ pub fn parse_memory_updates(
         ensure!(unit(&confidence),"invalid_memory_confidence");
         let mut seen=HashSet::new();let keywords:Vec<_>=array(&keywords).iter().map(|k|trim(k.as_str().unwrap())).filter(|k|seen.insert(*k)).collect();
         let mut parsed = json!({"keywords":keywords,"confidence":confidence,"subject":v["subject"],"layer":v["layer"],"key":key,"operation":v["operation"],"text":if v["operation"]=="upsert"{trim(text(v,"text"))}else{""},"importance":if v["operation"]=="upsert"{num(v,"importance")}else{0.},"sources":sources});
+        if let Some(emotional) = v.get("emotional") {
+            ensure!(emotional.is_boolean(), "invalid_memory_emotional");
+            parsed["emotional"] = emotional.clone();
+        }
         if let Some(verdict) = v.get("verdict") {
             parsed["verdict"] = verdict.clone();
         }
@@ -238,29 +245,29 @@ impl<'a> LayeredMemory<'a> {
         v: &Value,
         now: f64,
         base: usize,
-    ) -> Result<(f64, f64, f64)> {
+    ) -> Result<(bool, f64, f64)> {
         if !self.affect_enabled {
-            return Ok((0., 0., base.max(1) as f64));
+            return Ok((false, 0., base.max(1) as f64));
         }
-        use crate::persona::affect::{read, Dimension};
-        let mut mood = if chat.starts_with("group:") {
-            read(self.store, chat, "group", Dimension::Mood, now)?
-        } else {
-            0.
-        };
+        use crate::persona::affect::{clearly_low_mood, read, Dimension};
+        // Classification describes the candidate claim, not the author's mood:
+        // an ordinary fact in an angry message must remain eligible to learn.
+        let emotional = v["emotional"] == true;
+        let mut skip = emotional
+            && chat.starts_with("group:")
+            && clearly_low_mood(self.store, chat, "group", now)?;
         let mut affinity: f64 = 1.;
         // Group conclusions use the most conservative cited author's state.
         for source in array(&v["sources"]) {
             let subject = format!("person:{}", text(source, "sender"));
-            mood = mood.min(read(self.store, chat, &subject, Dimension::Mood, now)?);
+            skip |= emotional && clearly_low_mood(self.store, chat, &subject, now)?;
             affinity = affinity.min(read(self.store, chat, &subject, Dimension::Affinity, now)?);
         }
-        let low_mood = (-mood).max(0.);
         let base = base.max(1) as f64;
         Ok((
-            2. * low_mood,
+            skip,
             1. + (-affinity).max(0.) * base,
-            (base * (1. - 0.5 * affinity) + low_mood * base).max(1.),
+            (base * (1. - 0.5 * affinity)).max(1.),
         ))
     }
 
@@ -418,11 +425,18 @@ impl<'a> LayeredMemory<'a> {
             }
             let mut v = original.clone();
             if v["operation"] == "upsert" {
-                let (confidence_threshold, initial_evidence, promotion_evidence) =
+                let (skip, initial_evidence, promotion_evidence) =
                     self.learning_thresholds(chat, &v, now, settings.partial_evidence)?;
-                // At clearly low mood (<= -0.5), even full confidence cannot promote.
-                // Skipping preserves existing partials and does not bank heated evidence.
-                if num(&v, "confidence") <= confidence_threshold && confidence_threshold > 0. {
+                // Skip before put/pending bookkeeping: heated claims neither enter
+                // memory nor bank evidence for an existing partial's promotion.
+                if skip {
+                    self.store.decision(
+                        chat,
+                        "skipped",
+                        0.,
+                        &json!({"reason":"affect_learning_guard", "key":v["key"]}),
+                        now,
+                    )?;
                     continue;
                 }
                 let distinct = array(&v["sources"])

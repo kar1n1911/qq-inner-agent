@@ -1470,6 +1470,10 @@ impl Engine {
             t.payload["affectInstructions"] = json!(crate::persona::affect::CONTRACT);
         }
         let mut formation_system = prompts::compose_prompt(prompts::FORMATION, &[]);
+        if a.affect.enabled && t.learn_now {
+            formation_system.push('\n');
+            formation_system.push_str(crate::memory::AFFECT_LEARNING_CONTRACT);
+        }
         if t.payload.get("backlogDigest").is_some() {
             formation_system.push('\n');
             formation_system.push_str(backlog::INSTRUCTIONS);
