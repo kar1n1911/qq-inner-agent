@@ -395,3 +395,54 @@ Node 热重载测试需要已构建的内核；`QQ_CORE_BIN` 可指向其他构�
 - **可用性**：`rust/src/update/tests.rs` 用临时 Git 仓库作为假远端、脚本作为 Cargo；覆盖无新提交不构建、脏工作区、非快进、构建失败清理、产物版本不匹配、缺失备份、并发互斥、状态与备份、原子替换和控制套接字路由。`rust/src/main.rs` 的运行时测试另外验证生产 `run()` 确实接入管理方法，并验证退出排空。
 - **目标**：`control_entry_restarts_new_artifact_and_rollback_restarts_old_artifact` 对应 UPDATE-1：通过真实 `Server → Admin → Updater` 套接字调用升级，逐字节比较磁盘文件与假构建预期产物，等待旧子进程正常退出，再由测试监督者从相同 ExecStart 路径启动；断言新 PID、运行 revision、备份内容；再调用回滚，断言磁盘内容和启动进程都恢复旧版。两个可执行脚本作为可区分的假产物，复用已编译的测试服务程序；测试不拉 GitHub、不嵌套运行 Cargo、不操作真实 systemd。
 - **发送安全**：运行时排空测试对应 UPDATE-2；现有引擎与 OneBot 测试验证发送结果落库、uncertain 和无自动重放。测试代码标注上述设计行号，按本文件“两层都过才算完成”的规则验收。
+### 话题生命周期发送口径（Rust，设计 §十一的发送闸门）
+
+`agent.topicLifecycle.recentSeconds` 默认 **300 秒**，
+`agent.topicLifecycle.remoteSeconds` 默认 **1800 秒**；必须满足
+`0 < recentSeconds < remoteSeconds`。5 分钟容纳普通群聊的停顿、绝大多数自然接话；
+30 分钟后默认不翻旧账，覆盖线上 47 分钟后无引用捡起汉堡话题的事故。
+这与 `threeLayerDecision`（调度器开关）无关，所有文字发送路径都执行本闸门。
+
+| 距该话题最后活动 | 行为 |
+| --- | --- |
+| ≤ recentSeconds | 第 1 层：自然接话，reply 可选；保留原有点名回复及可选装饰规则 |
+| > recentSeconds 且 ≤ remoteSeconds | 第 2 层：必须精确引用，定位不可靠则不发 |
+| > remoteSeconds | 第 3 层：先判断必要性；无必要不发，有必要仍必须精确引用 |
+
+**活动与回应对象的定义。** 在投递前读取本群 `messages` 表（按 `ts,rowid` 排序，
+包括仍保留的历史和自己的消息），不使用“群最后一条消息”作为话题时钟。
+ARTICULATE 的 `replyTo` 若在本群最近 100 条消息中合法，优先作为回应对象。
+否则先用最终正文 `response.text`、再用选中候选 `thoughts.text`，与本群非自身消息
+计算已有 `memory::text::similarity`；达到已有交流分类 `classification.overlap`
+且唯一最高分的消息才可作为回退引用对象。相同最高分不猜引用对象，旧话题不发。
+没有匹配的正文才回退候选；有歧义的正文不借候选覆盖歧义。
+`thoughts.subject` 是人而不是消息 ID，最后一次 @ 也不是这个回退目标。
+
+以该对象为锚，所有与锚相似度达到同一 overlap 的消息（以及锚本身）组成可观测话题，
+它们中最后一条的 **`messages.ts`** 就是“该话题最后一次活动”。无关新消息不会刷新
+它；同话题后续消息会刷新它，但不会改变已经确定的引用对象。新生成一个旧话题候选
+也不会刷新时钟。候选由选中的 `Candidate.id` 对应 `thoughts.id`，创建时间
+`thoughts.created` **只在完全找不到回应对象时**用于判断它是否为新想法：新想法
+允许自然发言，超过 recentSeconds 的无锚候选保守不发，不把创建时间当成话题活动。
+
+沿用 `persona::conversation::classify` 的 `Stage::Closing` / `NaturalEnd` 判断收束，
+不增加持久化话题状态或第二套状态机；已过时的 `Standalone` 同样需要精确引用。
+分类输入是原消息序列及话题最后活动消息的索引；观察 gap 取已有配置与 recentSeconds
+的较小值，以兼容较短的自定义窗口。日志 `topic_lifecycle` 记录 tier、stage、target、
+lastActivity、allowed。这仍是词汇关联启发式，不保证识别无共同词汇的改写，或区分重复
+出现的同词异义话题；无法定位的保留候选默认拦截。没有改动提示词或新增模型判断调用。
+
+**第 3 层必要性（默认保守）。** 使用既有 EVALUATE 对**选中候选**的评分与标签：
+relevance ≥ 4、originality ≥ 4，正向标签含 `urgency`（时效需求）或
+`information_gap`（需要补充的信息），且负向标签不含 `relevance`、`coherence`、
+`expected_impact`、`urgency`。单纯高 motivation、调侃、重复旧梗、仅有 originality
+或普通 relevance 标签均不够；缺失必要性证据不放行。此判据是保守的代理信号，
+不是对模型标签正确性的保证。
+
+第 2/3 层引用对象也必须在本群最近 100 条中，过窗则不发。强制 reply 不受可选装饰
+10% 抽签抹除；mention 仍走原规则。多气泡只在第一条带 reply。闸门在创建 delivery
+及预留 burst 之前，不改变 proactive 触发路径、静默、配额、冷却的含义。
+测试依据：`decision::lifecycle_tests` 验证边界/配置/话题时钟，
+`engine_parity::topic_lifecycle_delivery_targets_and_necessity` 逐条验证第 1 层无引用发出、
+第 2 层正确引用（包括非法/缺失 replyTo 和合法模型优先）、第 3 层不发/带引用发出，
+并检查实际发送日志中的 reply 段。

@@ -2002,6 +2002,28 @@ impl Engine {
                 self.finish(&mut core, &db, &t, false)?;
                 return Ok(());
             }
+            let topic = decision::topic_delivery(
+                &db,
+                chat,
+                &selected.candidate,
+                &response,
+                self.now(),
+                &a.topic_lifecycle,
+                &self.media_config.classification,
+            )?;
+            (self.options.log)("topic_lifecycle", json!({"chat":chat,
+                "tier":format!("{:?}",topic.tier),"target":topic.target,
+                "lastActivity":topic.last_activity,"stage":topic.stage,"allowed":topic.allowed}));
+            if !topic.allowed {
+                db.assessment_status(chat, &t.id, "cancelled")?;
+                self.record_decision(
+                    &db, chat, "withhold", selected.adjusted,
+                    &json!(["topic_lifecycle"]), now,
+                )?;
+                db.r#use(&selected.candidate.id)?;
+                self.finish(&mut core, &db, &t, false)?;
+                return Ok(());
+            }
             if a.dry_run {
                 db.assessment_status(chat, &t.id, "dry_run")?;
                 let tags: Vec<_> = selected
@@ -2020,7 +2042,7 @@ impl Engine {
             if behavior.burst {
                 crate::persona::affect::reserve_burst(&db, chat, text(&t.last, "id"))?;
             }
-            let targeting = targeting::validate(
+            let mut targeting = targeting::validate(
                 &db,
                 chat,
                 &self.transport.self_id(),
@@ -2033,6 +2055,11 @@ impl Engine {
                 t.hint,
                 || (self.options.expression_random)(),
             )?;
+            if topic.tier != decision::TopicTier::Recent {
+                // Mandatory precise references bypass only the optional decoration draw.
+                // topic_delivery already prefers the validated model target.
+                targeting.reply_to = topic.target;
+            }
             let delivery_id = db.delivery(chat, initiating, self.now())?;
             if a.emoji.face_only && face_only {
                 db.execute(
