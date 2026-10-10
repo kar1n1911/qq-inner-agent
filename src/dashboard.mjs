@@ -11,7 +11,6 @@ import { DatabaseSync } from 'node:sqlite';
 import { loadConfig } from './config.mjs';
 import { publicSettings, saveSettings, readJson, recoverSettings } from './settings.mjs';
 import { Provider, listModels } from './provider.mjs';
-import { Store } from './store.mjs';
 import { OneBot } from './onebot.mjs';
 import { Diagnostics } from './diagnostics.mjs';
 import { ControlClient } from './control.mjs';
@@ -202,10 +201,12 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
         if (input.subject !== undefined && !(input.subject === 'group' && input.chat.startsWith('group:')) &&
             !(typeof input.subject === 'string' && /^person:[1-9]\d{0,19}$/.test(input.subject) &&
               (input.chat.startsWith('group:') || input.subject.slice(7) === input.chat.slice(8)))) throw fail(400, 'Invalid memory subject');
-        if (control.available) { await control.request('learning.reset', { chat: input.chat, ...(input.subject === undefined ? {} : { subject: input.subject }) }); json(res, 200, { ok: true }); return; }
-        const c = loadConfig(root); fs.mkdirSync(c.dataDir, { recursive: true, mode: 0o700 });
-        const store = new Store(path.join(c.dataDir, 'agent.sqlite'));
-        try { store.resetLearning(input.chat, Date.now()/1000, input.subject ?? null); } finally { store.close(); }
+        if (!control.available) throw fail(503, 'Core control socket unavailable. Start the core service and retry; learning was not reset.');
+        try {
+          await control.request('learning.reset', { chat: input.chat, ...(input.subject === undefined ? {} : { subject: input.subject }) });
+        } catch {
+          throw fail(502, 'Learning reset was not confirmed by the core. Check the core service and refresh learning state before retrying.');
+        }
         json(res, 200, { ok: true }); return;
       }
       if (url.pathname === '/api/service' && req.method === 'POST') {
@@ -215,20 +216,19 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
       }
       if (url.pathname === '/api/test-model' && req.method === 'POST') {
         if (testing) throw fail(409, 'A connection test is in progress');
-        testing = true; let store;
+        testing = true;
         try {
           const c = loadConfig(root); if (!c.apiKey || !c.provider.model) throw fail(400, 'Save an API key and model first');
           if (control.available) {
             await control.request('test.model', {}, { timeoutMs: 120000 });
             json(res, 200, { ok: true, message: 'API authentication and JSON response verified. No QQ message sent.' }); return;
           }
-          store = new Store(path.join(c.dataDir, 'agent.sqlite'));
-          const p = new Provider(c.provider, c.apiKey, store);
+          const p = new Provider(c.provider, c.apiKey, path.join(c.dataDir, 'agent.sqlite'));
           const response = await p.json('只返回 JSON：{"ok":true}。', { test: '仅测试 API 连通性，不包含 QQ 聊天内容' });
           if (response.ok !== true) throw fail(502, 'Unexpected model response');
           json(res, 200, { ok: true, message: 'API authentication and JSON response verified. No QQ message sent.' });
         } catch (e) { throw fail(e.status || 502, e.code || 'Model test failed'); }
-        finally { store?.close(); testing = false; }
+        finally { testing = false; }
         return;
       }
       if (url.pathname === '/api/contacts' && req.method === 'GET') {

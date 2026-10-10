@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, readiness } from './config.mjs';
-import { Store } from './store.mjs';
 import { Provider } from './provider.mjs';
 import { OneBot } from './onebot.mjs';
 import { ControlClient } from './control.mjs';
@@ -21,11 +20,8 @@ if (action === 'core-status') {
   } catch (e) { console.log(JSON.stringify({ available: client.available, error: e.code || e.message })); process.exitCode = 1; }
   finally { client.close(); }
 } else if (action === 'add-memory') {
-  const [chat, ...words] = process.argv.slice(3);
-  if (!/^(group|private):[1-9]\d*$/.test(chat || '') || !words.length) throw Error('Usage: ./agent add-memory group:123 "A short factual note"');
-  const store = new Store(path.join(c.dataDir, 'agent.sqlite'));
-  store.note(chat, words.join(' ').slice(0, 2000), Date.now() / 1000); store.close();
-  console.log('Saved a note scoped to that chat.');
+  console.error('Use ./agent add-memory CHAT TEXT; owner notes are managed by the Rust core.');
+  process.exitCode = 1;
 } else {
   const bot = new OneBot(c.onebot, c.onebotToken), controller = new AbortController();
   let timeout, connectedResolve;
@@ -48,13 +44,10 @@ if (action === 'core-status') {
       console.log('Setup missing: ' + (readiness(c).join(', ') || 'nothing'));
       if (process.argv.includes('--api')) {
         if (!c.apiKey || !c.provider.model) throw Error('API_key_or_model_missing_run_setup');
-        const store = new Store(path.join(c.dataDir, 'agent.sqlite'));
-        try {
-          const p = new Provider(c.provider, c.apiKey, store);
-          const result = await p.json('只返回 JSON：{"ok":true}。', { test: '仅测试连通性，不包含 QQ 消息或历史记录' }, controller.signal);
-          if (result.ok !== true) throw Error('unexpected_model_response');
-          console.log('Model API authentication and JSON response verified. No QQ message sent.');
-        } finally { store.close(); }
+        const p = new Provider(c.provider, c.apiKey, path.join(c.dataDir, 'agent.sqlite'));
+        const result = await p.json('只返回 JSON：{"ok":true}。', { test: '仅测试连通性，不包含 QQ 消息或历史记录' }, controller.signal);
+        if (result.ok !== true) throw Error('unexpected_model_response');
+        console.log('Model API authentication and JSON response verified. No QQ message sent.');
       }
     }
   } catch (e) { console.error('Check failed: ' + (e.code || 'connection_or_configuration_error')); process.exitCode = 1; }
