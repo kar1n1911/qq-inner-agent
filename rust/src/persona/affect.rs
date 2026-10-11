@@ -300,6 +300,11 @@ pub fn reset(store: &Store, chat: &str, subject: &str) -> Result<()> {
     store.execute("DELETE FROM affect_bursts WHERE chat=?", [chat])?;
     Ok(())
 }
+/// §7.4, docs/working/prompt-and-learning-design.md:548–552 counts excess
+/// utterances (preventing unanswered flooding), not internal candidate attempts.
+/// Probability/quiet/gate rejections before delivery reservation do not count.
+/// Reserve before transport for crash/uncertain-delivery safety; this is not a
+/// success-receipt counter and reservations are not refunded on transport failure.
 /// 熔断按 chat 与最后人类消息持久化；无新回应最多三次，预留在传输前完成。
 pub fn burst_allowed(store: &Store, chat: &str, human_id: &str) -> Result<bool> {
     let rows = store.rows(

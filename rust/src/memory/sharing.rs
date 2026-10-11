@@ -102,32 +102,13 @@ fn candidates(
     let chats: HashSet<_> = rows.iter().map(|r| text(r, "chat").to_owned()).collect();
     let mut forbidden = BTreeMap::<String, HashSet<String>>::new();
     for chat in chats {
-        for message in db.rows(
-            "SELECT id,name,sender,text FROM messages WHERE chat=?",
-            [&chat],
-        )? {
-            for key in ["id", "name", "sender", "text"] {
-                let value = text(&message, key);
-                if !value.is_empty() {
-                    forbidden
-                        .entry(chat.clone())
-                        .or_default()
-                        .insert(value.to_lowercase());
-                }
-            }
-        }
+        forbidden.insert(chat.clone(), forbidden_values(db, &chat)?);
     }
     rows.retain(|row| {
         let Ok(safe) = export(row) else {
             return false;
         };
-        let content = format!(
-            "{}\n{}",
-            ["text", "term", "meaning", "situation"]
-                .map(|k| text(&safe, k).to_lowercase())
-                .join("\n"),
-            text(row, "keywords").to_lowercase()
-        );
+        let content = shared_content(row, &safe);
         if forbidden
             .get(text(row, "chat"))
             .is_some_and(|values| values.iter().any(|v| content.contains(v)))
@@ -157,6 +138,41 @@ fn candidates(
         })
     });
     Ok(rows)
+}
+
+// Read each participating chat once, using the messages chat index. These values
+// are vetoes only and never enter features or exported records.
+fn forbidden_values(db: &Store, chat: &str) -> Result<HashSet<String>> {
+    let mut values = HashSet::new();
+    for message in db.rows("SELECT id,name,sender,text FROM messages WHERE chat=?", [chat])? {
+        for key in ["id", "name", "sender", "text"] {
+            let value = text(&message, key);
+            if !value.is_empty() {
+                values.insert(value.to_lowercase());
+            }
+        }
+    }
+    Ok(values)
+}
+
+fn shared_content(row: &Value, safe: &Value) -> String {
+    format!(
+        "{}\n{}",
+        ["text", "term", "meaning", "situation"]
+            .map(|k| text(safe, k).to_lowercase())
+            .join("\n"),
+        text(row, "keywords").to_lowercase()
+    )
+}
+
+fn by_chat(rows: &[Value], expressions: bool) -> BTreeMap<&str, Vec<&Value>> {
+    let mut groups = BTreeMap::<&str, Vec<&Value>>::new();
+    for row in rows {
+        if row["kind"].is_string() == expressions {
+            groups.entry(text(row, "chat")).or_default().push(row);
+        }
+    }
+    groups
 }
 
 /// Keywords are the already summarized topic neighborhood. Count across group
@@ -219,6 +235,13 @@ pub fn recall(
     let Some(own) = cache.features.get(chat) else {
         return Ok(vec![]);
     };
+    // §15.2–15.4, prompt-and-learning-design.md:870–887: both ends must
+    // reject identities/raw text. The actual destination set for this call is
+    // {chat}; other recipients are checked on their own recall, never by scanning
+    // every destination for every row. Keep the hourly features recipient-neutral.
+    let destination_forbidden = forbidden_values(db, chat)?;
+    // Index once rather than rescanning all rows for each source group.
+    let grouped = by_chat(&rows, expressions);
     let mut output = Vec::new();
     for (other, other_features) in &cache.features {
         if other == chat {
@@ -228,9 +251,14 @@ pub fn recall(
         if weight == 0. {
             continue;
         }
-        let eligible: Vec<_> = rows
-            .iter()
-            .filter(|r| text(r, "chat") == other && r["kind"].is_string() == expressions)
+        let eligible: Vec<_> = grouped
+            .get(other.as_str())
+            .into_iter()
+            .flatten()
+            .filter(|row| {
+                let content = shared_content(row, row);
+                !destination_forbidden.iter().any(|value| content.contains(value))
+            })
             .collect();
         let count = (eligible.len() as f64 * weight).ceil() as usize;
         for row in eligible.into_iter().take(count) {
@@ -372,6 +400,83 @@ mod tests {
             .is_empty());
         assert!(!db.group_sharing.borrow().reports.is_empty());
     }
+    #[test]
+    fn target_b4_identity_stripping_is_bidirectional() {
+        // Design: prompt-and-learning-design.md:870–871,879,883–887.
+        // An identity from the recipient must be vetoed just like a source identity.
+        let db = Store::in_memory().unwrap();
+        let (m, e) = settings();
+        for (chat, name, sender, other_name, other_sender) in [
+            ("group:1", "AliceUnique", "881122", "BobUnique", "993344"),
+            ("group:2", "BobUnique", "993344", "AliceUnique", "881122"),
+        ] {
+            db.execute("INSERT INTO messages(chat,id,sender,name,text,ts) VALUES(?,'SOURCE_MESSAGE',?,?,'RAW_UTTERANCE',1000)",
+                params![chat, sender, name]).unwrap();
+            memory(&db, chat, "group", "safe", "rust compiler");
+            for (key, value) in [("name", other_name), ("qq", other_sender)] {
+                memory(&db, chat, "group", key, &format!("rust compiler {value}"));
+            }
+            expression(&db, chat, "group");
+            db.execute("UPDATE expressions SET meaning=? WHERE chat=?",
+                params![format!("compiled language {other_name}"), chat]).unwrap();
+        }
+        for (recipient, source) in [("group:1", "group:2"), ("group:2", "group:1")] {
+            let rows = recall(&db, recipient, 1000., &m, &e, false).unwrap();
+            assert_eq!(rows.len(), 1, "both directions must reject foreign identities");
+            assert_eq!(rows[0]["sourceChat"], source);
+            assert_eq!(rows[0]["text"], "rust compiler");
+            assert!(recall(&db, recipient, 1000., &m, &e, true).unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn destination_veto_is_live_and_covers_all_content() {
+        let db = Store::in_memory().unwrap();
+        let (m, e) = settings();
+        for chat in ["group:1", "group:2", "group:3"] {
+            memory(&db, chat, "group", "safe", "rust compiler");
+        }
+        assert_eq!(recall(&db, "group:2", 1000., &m, &e, false).unwrap().len(), 2);
+        // Added after the hourly feature cache: vetoes must still take effect.
+        db.execute("INSERT INTO messages(chat,id,sender,name,text,ts) VALUES('group:2','TARGET_ID','778899','TargetNick','TARGET_RAW_BODY',1001)", []).unwrap();
+        for (i, secret) in ["TARGET_ID", "778899", "TargetNick", "TARGET_RAW_BODY"].iter().enumerate() {
+            memory(&db, "group:1", "group", &format!("bad{i}"), &format!("rust {secret}"));
+        }
+        memory(&db, "group:1", "group", "keywords", "rust compiler");
+        db.execute("UPDATE memory_layers SET keywords=? WHERE chat='group:1' AND slot='keywords'", [json!(["TargetNick"]).to_string()]).unwrap();
+        assert_eq!(recall(&db, "group:2", 1001., &m, &e, false).unwrap().len(), 2);
+        expression(&db, "group:1", "group");
+        for field in ["term", "meaning", "situation"] {
+            db.execute("UPDATE expressions SET term='RUST',meaning='compiled language',situation='technical discussion'", []).unwrap();
+            db.execute(&format!("UPDATE expressions SET {field}='rust TargetNick'"), []).unwrap();
+            assert!(recall(&db, "group:2", 1001., &m, &e, true).unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn sharing_cost_indexes_rows_once_and_reads_only_destination_messages() {
+        let db = Store::in_memory().unwrap();
+        let mut rows = Vec::new();
+        for i in 1..=100 {
+            let chat = format!("group:{i}");
+            for _ in 0..10 {
+                rows.push(json!({"chat":chat,"layer":"traits"}));
+            }
+            db.execute("INSERT INTO messages(chat,id,sender,name,text,ts) VALUES(?,'ID','QQ',?,'BODY',1000)",
+                params![chat, format!("nickname{i}")]).unwrap();
+        }
+        let grouped = by_chat(&rows, false);
+        assert_eq!(grouped.len(), 100);
+        assert_eq!(grouped.values().map(Vec::len).sum::<usize>(), rows.len());
+        assert!(grouped.values().all(|rows| rows.len() == 10));
+        let forbidden = forbidden_values(&db, "group:1").unwrap();
+        assert_eq!(forbidden.len(), 4);
+        assert!(forbidden.contains("nickname1"));
+        assert!(!forbidden.contains("nickname100"));
+        let plan = db.rows("EXPLAIN QUERY PLAN SELECT id,name,sender,text FROM messages WHERE chat=?", ["group:1"]).unwrap();
+        assert!(plan.iter().any(|r| text(r, "detail").contains("SEARCH messages USING INDEX")));
+    }
+
     #[test]
     fn zero_share_preserves_serialized_context() {
         let db = Store::in_memory().unwrap();

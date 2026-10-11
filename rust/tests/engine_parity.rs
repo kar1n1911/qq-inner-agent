@@ -4170,3 +4170,45 @@ async fn a4_screen_and_tick_use_shared_knobs_while_media_is_disabled() {
         }
     }
 }
+
+#[tokio::test]
+async fn target_b5_counts_excess_utterances_not_blocked_intentions() {
+    // Design: prompt-and-learning-design.md:548–552 says "超额发言" and
+    // "无人应答仍无限刷屏", not candidate attempts. Preserve pre-transport
+    // reservation (including uncertain delivery), rather than count withholds.
+    for (label, agent, model, initial, human, sends, count) in [
+        ("sent", json!({}), json!({}), 2, "m1", 1, 3),
+        ("selection_probability", json!({}), json!({"score":1}), 2, "m1", 0, 2),
+        ("quiet", json!({"quietHours":{"start":11,"end":13,"timezone":"UTC"}}), json!({}), 2, "m1", 0, 2),
+        ("dry_run", json!({"dryRun":true}), json!({}), 2, "m1", 0, 2),
+        ("regular_quota_after_fuse", json!({"maxMessagesPerHour":1}), json!({}), 3, "m1", 0, 3),
+        ("regular_probability_after_fuse", json!({"sending":{"proactiveProbability":0,"addressedProbability":0}}), json!({}), 3, "m1", 0, 3),
+        ("new_response_releases", json!({"maxMessagesPerHour":1}), json!({}), 3, "new", 1, 1),
+        ("uncertain_reservation", json!({}), json!({"delivery":"uncertain"}), 2, "m1", 1, 3),
+    ] {
+        let (e, h) = setup(&base(label, merge(&json!({"affect":{"enabled":true}}), &agent), vec![]));
+        {
+            let db = h.store.lock().unwrap();
+            if agent["maxMessagesPerHour"] == 1 {
+                let delivery = db.delivery("group:10", false, h.now() - 100.).unwrap();
+                db.finish_delivery(&delivery, "sent", None).unwrap();
+            }
+            for dimension in ["mood", "rationality"] {
+                db.execute("INSERT INTO affect_state VALUES('group:10','person:20',?,-1,0,1,?,'[]')",
+                    rusqlite::params![dimension, h.now()]).unwrap();
+            }
+            for _ in 0..initial {
+                qq_inner_core::persona::affect::reserve_burst(&db, "group:10", "m1").unwrap();
+            }
+        }
+        *h.model.lock().unwrap() = model;
+        e.ingest(&h.event(&json!({"id":human,"text":"盆土干了怎么处理？"}))).unwrap();
+        *h.now.lock().unwrap() += 10.;
+        e.tick().unwrap();
+        e.wait_idle().await;
+        assert_eq!(*h.sends.lock().unwrap(), sends, "{label}");
+        let rows = h.rows("SELECT human_id,count FROM affect_bursts WHERE chat='group:10'");
+        assert_eq!(rows[0]["count"], count, "{label}");
+        assert_eq!(rows[0]["human_id"], human, "{label}");
+    }
+}

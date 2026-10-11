@@ -248,3 +248,34 @@ fn decay_and_read_writeback() {
         .unwrap()
         .is_empty());
 }
+
+#[test]
+fn burst_boundary_returns_to_regular_gates_until_new_response_or_reset() {
+    // §7.4, prompt-and-learning-design.md:548–549: N=3, then regular gates.
+    // Checking eligibility, time passage and leaving/reentering Angry do not
+    // spend a reservation or release the fuse; a new human id/reset still does.
+    let s = store();
+    let settings = affect::Settings { enabled: true };
+    let last = json!({"id":"1","sender":"u"});
+    for dimension in ["mood", "rationality"] {
+        s.execute("INSERT INTO affect_state VALUES('a','person:u',?,-1,0,1,100,'[]')", [dimension]).unwrap();
+    }
+    for expected in 1..=3 {
+        for _ in 0..5 {
+            assert!(affect::behavior(&s, &settings, "a", &last, 100.).unwrap().burst);
+        }
+        affect::reserve_burst(&s, "a", "1").unwrap();
+        assert_eq!(s.rows("SELECT count FROM affect_bursts", []).unwrap()[0]["count"], expected);
+    }
+    assert!(!affect::behavior(&s, &settings, "a", &last, 100.).unwrap().burst);
+    for mood in [1., -1.] {
+        s.execute("UPDATE affect_state SET value=? WHERE dimension='mood'", [mood]).unwrap();
+        assert!(!affect::behavior(&s, &settings, "a", &last, 200.).unwrap().burst);
+    }
+    assert!(affect::reserve_burst(&s, "a", "1").is_err());
+    assert!(affect::behavior(&s, &settings, "a", &json!({"id":"new","sender":"u"}), 200.).unwrap().burst);
+    affect::reserve_burst(&s, "a", "new").unwrap();
+    assert_eq!(s.rows("SELECT count FROM affect_bursts", []).unwrap()[0]["count"], 1);
+    affect::reset(&s, "a", "person:u").unwrap();
+    assert!(affect::burst_allowed(&s, "a", "new").unwrap());
+}
