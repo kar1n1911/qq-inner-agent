@@ -1939,7 +1939,9 @@ impl Engine {
             payload["runtimeInstructions"] = json!(self.options.prompts.get(crate::persona::humanize::FACE_ONLY_INSTRUCTIONS));
             payload["faceOnlyAllowed"] = json!(face_only_allowed);
         }
-        if a.multi_bubble {
+        let multi_bubble_allowed = a.multi_bubble
+            && crate::persona::humanize::multi_bubble_allowed(length_target, &t.history);
+        if multi_bubble_allowed {
             payload["multiBubble"] = json!(true);
             payload["bubbleInstructions"] = json!(self.options.prompts.get(crate::persona::humanize::MULTI_BUBBLE_INSTRUCTIONS));
         }
@@ -1975,6 +1977,16 @@ impl Engine {
                 return Err(error);
             }
         };
+        // C2/C3：只校验真实可拆分路径，单条 decorate/装饰门控保持不变。
+        let bubbles = if multi_bubble_allowed {
+            match crate::persona::humanize::multi_bubbles(&response["bubbles"], a.max_output_chars as usize) {
+                Ok(bubbles) => bubbles,
+                Err(error) => {
+                    self.db()?.assessment_status(chat, &t.id, "generation_failed")?;
+                    return Err(error);
+                }
+            }
+        } else { None };
         let (delivery_id, decorated, targeting) = {
             let mut core = self.core();
             let db = self.db()?;
@@ -1983,7 +1995,11 @@ impl Engine {
             let lower = raw.to_ascii_lowercase();
             let face_only = policy::js_trim(raw).is_empty();
             let decorated = decorate(&response, &decorations, a.max_output_chars as usize);
-            if (a.affect.enabled && !crate::persona::affect::content_allowed(raw))
+            if bubbles.as_ref().is_some_and(|items| items.iter().any(|bubble| {
+                (a.affect.enabled && !crate::persona::affect::content_allowed(bubble))
+                    || ["<think>", "</think>", "<analysis>", "</analysis>"]
+                        .iter().any(|tag| bubble.to_ascii_lowercase().contains(tag))
+            })) || (a.affect.enabled && !crate::persona::affect::content_allowed(raw))
                 || !response["text"].is_string()
                 || (face_only
                     && !(face_only_allowed
@@ -2101,48 +2117,46 @@ impl Engine {
         // 46：与 JS 一样，发送不受模型取消信号中断；stop 等待实际投递结果。
         let content = text(&decorated, "text");
         let face = decorated["faceId"].as_str();
-        // 多气泡（门控）：response.bubbles 非空时依次发送，face 挂最后一条，条间加打字延迟。
-        let bubbles: Vec<String> = if a.multi_bubble {
-            array(&response["bubbles"])
-                .iter()
-                .filter_map(|b| b.as_str().map(str::trim))
-                .filter(|s| !s.is_empty())
-                .map(str::to_owned)
-                .collect()
-        } else {
-            Vec::new()
-        };
-        let seq: Vec<String> = if bubbles.is_empty() {
-            vec![content.to_owned()]
-        } else {
-            bubbles
-        };
+        let multi = bubbles.is_some();
+        let seq = bubbles.unwrap_or_else(|| vec![content.to_owned()]);
         let n = seq.len();
         let mut sent = None;
+        let mut stopped = false;
+        let mut attempted = 0;
         let mut sent_segments = Vec::new();
+        let mut bubble_delivery = delivery_id.clone();
         for (i, bubble) in seq.iter().enumerate() {
-            if i > 0 {
-                // 打字延迟：与长度成比例（15ms/字符）+ 固定间隔 700ms + 抖动。
-                // 抖动随当前心情强度缩放（心情越强、打字越不稳）；affect 关闭时 mood 恒为 0。
-                let typing_ms = (bubble.chars().count() as f64 * 15.0) as u64;
-                let mood_arousal = behavior.mood.abs().min(1.0);
-                let jitter_range = (300.0 * (1.0 + mood_arousal)).max(1.0) as u64;
-                let jitter_ms = rand::random::<u64>() % jitter_range;
-                tokio::time::sleep(std::time::Duration::from_millis(
-                    700 + typing_ms + jitter_ms,
-                ))
-                .await;
-            }
-            // face 只挂在最后一条（整体回复的结尾）。
-            // 气泡间有异步打字延迟，每条发出前重新检查值班状态。
-            if t.hint != Hint::SelfChat && !self.available(self.now())? {
-                if sent.is_none() {
-                    sent = Some(Err(OneBotError {
-                        code: "agent_unavailable".into(),
-                        uncertain: false,
-                    }));
+            // 改动 8（human-like-replies.md:185–188）：首条也延迟，等待时不持锁。
+            tokio::time::sleep(std::time::Duration::from_millis(
+                crate::persona::humanize::bubble_delay_ms(bubble.chars().count(), i == 0, rand::random()),
+            )).await;
+            let blocked = {
+                let core = self.core();
+                let db = self.db()?;
+                let now = self.now();
+                let transport = self.transport.state();
+                let counts = db.counts(chat, now)?;
+                // 首条已预留 pending；后续条只在闸门通过后预留。沿用 burst 配额豁免。
+                let reserved = if i == 0 { 1. } else { 0. };
+                self.obsolete(&core, &db, &t)?
+                    || core.get(chat).is_none_or(|s| now - s.last_human.max(t.now) > a.active_window_seconds)
+                    || (t.hint != Hint::SelfChat && (!self.snapshot(&db, now)?.active
+                        || policy::quiet(now, a.quiet_hours.as_ref())))
+                    || !transport.connected || !transport.online
+                    || (multi && !behavior.burst && (num(&counts, "total") - reserved >= a.max_messages_per_hour
+                        || (initiating && num(&counts, "proactive") - reserved >= a.max_proactive_per_hour)))
+            };
+            if blocked {
+                // 未尝试发送不能记成 sent；先前成功的 delivery 保持成功。
+                if multi && i == 0 {
+                    self.db()?.finish_delivery(&bubble_delivery, "failed", None)?;
                 }
+                stopped = true;
+                sent = Some(Err(OneBotError { code: "send_gate_closed".into(), uncertain: false }));
                 break;
+            }
+            if multi && i > 0 {
+                bubble_delivery = self.db()?.delivery(chat, initiating, self.now())?;
             }
             let bubble_face = if i == n - 1 { face } else { None };
             let reply_to = if i == 0 {
@@ -2155,6 +2169,7 @@ impl Engine {
             } else {
                 None
             };
+            attempted += 1;
             let result = self
                 .transport
                 .send(chat, bubble, bubble_face, reply_to, mention)
@@ -2168,7 +2183,26 @@ impl Engine {
                     mention,
                 ));
             }
+            if multi {
+                let db = self.db()?;
+                match &result {
+                    Ok(receipt) => {
+                        db.finish_delivery(&bubble_delivery, "sent", receipt.get("message_id"))?;
+                        let id = if receipt["message_id"].is_null() { bubble_delivery.clone() }
+                            else { js_string(&receipt["message_id"]) };
+                        db.message(&json!({"chat":chat,"id":id,"sender":self.transport.self_id(),"name":a.name.text,"text":bubble,"ts":self.now(),"self":true}))?;
+                        if a.emoji.face_only {
+                            db.execute("INSERT OR REPLACE INTO humanize_reply_state VALUES(?,0)", [chat])?;
+                        }
+                    }
+                    Err(error) => db.finish_delivery(&bubble_delivery,
+                        if error.uncertain { "uncertain" } else { "failed" }, None)?,
+                }
+            }
+            let failed = result.is_err();
             sent = Some(result);
+            // human-like-replies.md:178：失败即停，不确定投递也不自动重发。
+            if failed { break; }
         }
         let sent = sent.expect("at least one bubble");
         let mut core = self.core();
@@ -2182,7 +2216,9 @@ impl Engine {
                         [chat],
                     )?;
                 }
-                db.finish_delivery(&delivery_id, "sent", sent.get("message_id"))?;
+                if !multi {
+                    db.finish_delivery(&delivery_id, "sent", sent.get("message_id"))?;
+                }
                 ExpressionMemory::new(&db).used(
                     chat,
                     array(&t.payload["expressions"]),
@@ -2204,12 +2240,14 @@ impl Engine {
                         &json!(prediction),
                     )?;
                 }
-                let id = if sent["message_id"].is_null() {
-                    delivery_id
-                } else {
-                    js_string(&sent["message_id"])
-                };
-                db.message(&json!({"chat":chat,"id":id,"sender":self.transport.self_id(),"name":a.name.text,"text":content,"ts":self.now(),"self":true}))?;
+                if !multi {
+                    let id = if sent["message_id"].is_null() {
+                        delivery_id
+                    } else {
+                        js_string(&sent["message_id"])
+                    };
+                    db.message(&json!({"chat":chat,"id":id,"sender":self.transport.self_id(),"name":a.name.text,"text":content,"ts":self.now(),"self":true}))?;
+                }
                 self.record_decision(
                     &db,
                     chat,
@@ -2234,8 +2272,10 @@ impl Engine {
                 } else {
                     "failed"
                 };
-                db.finish_delivery(&delivery_id, status, None)?;
-                db.assessment_status(chat, &t.id, status)?;
+                if !multi {
+                    db.finish_delivery(&delivery_id, status, None)?;
+                }
+                db.assessment_status(chat, &t.id, if stopped { "cancelled" } else { status })?;
                 self.record_decision(
                     &db,
                     chat,
@@ -2251,7 +2291,7 @@ impl Engine {
                 core.last_error = Some(error.code.clone());
                 (self.options.log)(
                     "delivery_error",
-                    json!({"chat":chat,"code":error.code,"segments":sent_segments}),
+                    json!({"chat":chat,"code":error.code,"segments":sent_segments,"attempted":attempted,"unsent":&seq[attempted..]}),
                 );
             }
         }

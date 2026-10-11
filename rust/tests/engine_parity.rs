@@ -25,6 +25,7 @@ struct Harness {
     transport: Mutex<State>,
     sends: Mutex<usize>,
     targets: Mutex<Vec<Value>>,
+    send_times: Mutex<Vec<tokio::time::Instant>>,
     orientation_reads: Mutex<Vec<String>>,
     identity_reads: Mutex<Vec<(String, Value)>>,
     budget: f64,
@@ -142,13 +143,24 @@ impl EngineTransport for Harness {
                 .unwrap()
                 .push(json!({"replyTo":reply_to,"mention":mention}));
             self.push(json!(["send", chat, text, face]));
+            self.send_times.lock().unwrap().push(tokio::time::Instant::now());
             let n = {
                 let mut n = self.sends.lock().unwrap();
                 *n += 1;
                 *n
             };
             let m = self.model.lock().unwrap().clone();
-            if let Some(status) = m["delivery"].as_str() {
+            if n == 1 {
+                if let Some(now) = m["afterFirstSendNow"].as_f64() {
+                    *self.now.lock().unwrap() = now;
+                }
+                if m["afterFirstSendOffline"] == true {
+                    self.transport.lock().unwrap().online = false;
+                }
+            }
+            if let Some(status) = m["deliverySequence"][n - 1].as_str().filter(|s| *s != "sent")
+                .or_else(|| m["delivery"].as_str()) {
+
                 return Err(OneBotError {
                     code: "mock_delivery".into(),
                     uncertain: status == "uncertain",
@@ -327,6 +339,7 @@ fn setup(case: &Value) -> (Arc<Engine>, Arc<Harness>) {
         }),
         sends: Mutex::new(0),
         targets: Mutex::new(vec![]),
+        send_times: Mutex::new(vec![]),
         orientation_reads: Mutex::new(Vec::new()),
         identity_reads: Mutex::new(Vec::new()),
         budget: case["budget"].as_f64().unwrap_or(1000.),
@@ -3236,11 +3249,13 @@ async fn precise_reply_engine_applies_gate_and_private_exclusion() {
 
 #[tokio::test]
 async fn precise_reply_only_targets_first_bubble() {
-    let case = base("precise_reply", json!({"multiBubble":true}), vec![]);
+    // C3（human-like-replies.md:176,179）：用允许拆分的 medium 轻松附和验证引用。
+    let mut case = base("precise_reply", json!({"multiBubble":true}), vec![]);
+    case["expressionDraws"] = json!([0.6]);
     let (e, h) = setup(&case);
     *h.model.lock().unwrap() =
-        json!({"replyTo":"forged","mention":"99","bubbles":["先看看土","干了再浇水"]});
-    e.ingest(&h.event(&json!({"id":"m1"}))).unwrap();
+        json!({"replyTo":"forged","mention":"99","bubbles":["笑死了","这个真的好笑"]});
+    e.ingest(&h.event(&json!({"id":"m1","text":"[CQ:at,qq=99]哈哈"}))).unwrap();
     e.tick().unwrap();
     e.wait_idle().await;
     assert_eq!(
@@ -3965,4 +3980,145 @@ async fn backstory_related_evidence_and_append_reach_model_with_learning_disable
             assert_eq!(system.matches(qq_inner_core::prompts::BACKSTORY_RULE).count(), 1);
         }
     }
+}
+
+
+fn bubbles_case(draw: f64, agent: Value) -> Value {
+    let mut case = base("multi_bubbles", merge(&json!({"threshold":1,"interruptThreshold":1,
+        "multiBubble":true,"emoji":{"enabled":false}}), &agent), vec![]);
+    case["expressionDraws"] = json!([draw]);
+    case
+}
+async fn bubbles_turn(e: &Arc<Engine>, h: &Arc<Harness>, human: &str, response: Value, hooks: Value) {
+    *h.model.lock().unwrap() = merge(&json!({"score":5,"invalidStage":"ARTICULATE","invalid":response}), &hooks);
+    e.ingest(&h.event(&json!({"id":"bubble-human","text":human}))).unwrap();
+    e.tick().unwrap();
+    e.wait_idle().await;
+}
+
+#[tokio::test]
+async fn bubbles_failure_stops_and_keeps_individual_receipts() {
+    // C1 目标：human-like-replies.md:178；第二条失败，预设第三条成功也不得掩盖。
+    // 自身记录依据 docs/ARCHITECTURE.md:114：只落库真正成功发出的内容。
+    for status in ["failed", "uncertain"] {
+        let (e, h) = setup(&bubbles_case(0.6, json!({})));
+        bubbles_turn(&e, &h, "哈哈", json!({"text":"完整正文","bubbles":["第一条","第二条","第三条"]}),
+            json!({"deliverySequence":["sent",status,"sent"]})).await;
+        assert_eq!(*h.sends.lock().unwrap(), 2);
+        assert_eq!(h.rows("SELECT status,message_id FROM deliveries ORDER BY rowid"),
+            vec![json!({"status":"sent","message_id":"sent1"}),json!({"status":status,"message_id":null})]);
+        assert_eq!(h.rows("SELECT text,id FROM messages WHERE self=1"), vec![json!({"text":"第一条","id":"sent1"})]);
+        assert_eq!(h.rows("SELECT status FROM send_assessments")[0]["status"], status);
+        e.tick().unwrap(); e.wait_idle().await;
+        assert_eq!(*h.sends.lock().unwrap(), 2, "失败/不确定均不自动重放");
+        e.stop().await;
+    }
+}
+
+#[tokio::test]
+async fn bubbles_length_limits_reject_before_any_send() {
+    // C2 目标：human-like-replies.md:175，prompt-and-learning-design.md:537。
+    // 每条合法但合计 91 字必须零发送；也验证 maxOutputChars 对单条和合计的硬上限。
+    for (max, parts, expected) in [
+        (800, vec!["甲".repeat(45), "乙".repeat(45)], 2),
+        (800, vec!["甲".repeat(45), "乙".repeat(46)], 0),
+        (40, vec!["甲".repeat(20), "乙".repeat(20)], 2),
+        (40, vec!["甲".repeat(20), "乙".repeat(21)], 0),
+        (40, vec!["甲".repeat(41), "乙".to_owned()], 0),
+    ] {
+        let (e, h) = setup(&bubbles_case(0.6, json!({"maxOutputChars":max})));
+        bubbles_turn(&e, &h, "哈哈", json!({"text":"备用正文","bubbles":parts}), json!({})).await;
+        assert_eq!(*h.sends.lock().unwrap(), expected);
+        let status = if expected == 0 { "generation_failed" } else { "sent" };
+        assert_eq!(h.rows("SELECT status FROM send_assessments")[0]["status"], status);
+        assert_eq!(h.rows("SELECT * FROM deliveries").len(), expected);
+        assert_eq!(h.rows("SELECT * FROM messages WHERE self=1").len(), expected);
+        e.stop().await;
+    }
+}
+
+#[tokio::test]
+async fn bubbles_gates_preserve_single_reply_and_cap_count() {
+    // C3 目标：human-like-replies.md:172,176,179；任务进一步禁止 short 拆分。
+    for (draw, human, parts, expected) in [
+        (0., "哈哈", json!(["甲","乙"]), 1),
+        (0.2, "哈哈", json!(["甲","乙"]), 1),
+        (0.95, "哈哈", json!(["甲","乙"]), 1),
+        (0.6, "帮我看看程序为什么报错", json!(["甲","乙"]), 1),
+        (0.6, "哈哈但我真的很难过", json!(["甲","乙"]), 1),
+        (0.6, "不熟悉的语境", json!(["甲","乙"]), 1),
+        (0.6, "哈哈", json!([]), 1),
+        (0.6, "哈哈", json!(["甲"]), 1),
+        (0.6, "哈哈", json!(["甲","乙"]), 2),
+        (0.6, "哈哈", json!(["甲","乙","丙"]), 3),
+        (0.6, "哈哈", json!(["甲","乙","丙","丁"]), 0),
+    ] {
+        let (e, h) = setup(&bubbles_case(draw, json!({})));
+        bubbles_turn(&e, &h, human, json!({"text":"原单条正文","bubbles":parts}), json!({})).await;
+        assert_eq!(*h.sends.lock().unwrap(), expected, "{draw} {human}");
+        if expected == 1 {
+            assert_eq!(h.rows("SELECT text FROM messages WHERE self=1"), vec![json!({"text":"原单条正文"})]);
+        }
+        e.stop().await;
+    }
+}
+
+#[tokio::test]
+async fn bubbles_first_delay_and_inter_bubble_delay_reach_transport() {
+    // C4 目标：human-like-replies.md:185–186（改动 8），真实 send 不能立即发生。
+    for parts in [json!([]), json!(["甲","乙"])] {
+        let (e, h) = setup(&bubbles_case(0.6, json!({})));
+        let start = tokio::time::Instant::now();
+        bubbles_turn(&e, &h, "哈哈", json!({"text":"甲","bubbles":parts}), json!({})).await;
+        let times = h.send_times.lock().unwrap().clone();
+        assert!(times[0].duration_since(start).as_millis() >= 420);
+        if times.len() == 2 {
+            assert!(times[1].duration_since(times[0]).as_millis() >= 720);
+        }
+        e.stop().await;
+    }
+}
+
+#[tokio::test]
+async fn bubbles_recheck_quiet_window_quota_and_online_between_sends() {
+    // C5 目标：human-like-replies.md:188；第一条发出后进入静默，余下两条不发。
+    // 其它闸门沿用已有判据，已发部分仍计配额，未发送部分没有虚假 message/delivery。
+    for (agent, hooks) in [
+        (json!({"activeWindowSeconds":10000,"quietHours":{"start":13,"end":14,"timezone":"UTC"}}), json!({"afterFirstSendNow":46800.})),
+        (json!({"activeWindowSeconds":10}), json!({"afterFirstSendNow":43211.})),
+        (json!({"maxMessagesPerHour":1}), json!({})),
+        (json!({}), json!({"afterFirstSendOffline":true})),
+    ] {
+        let (e, h) = setup(&bubbles_case(0.6, agent));
+        bubbles_turn(&e, &h, "哈哈", json!({"text":"完整正文","bubbles":["第一条","第二条","第三条"]}), hooks).await;
+        assert_eq!(*h.sends.lock().unwrap(), 1);
+        assert_eq!(h.rows("SELECT status FROM deliveries"), vec![json!({"status":"sent"})]);
+        assert_eq!(h.rows("SELECT text FROM messages WHERE self=1"), vec![json!({"text":"第一条"})]);
+        assert_eq!(h.rows("SELECT status FROM send_assessments")[0]["status"], "cancelled");
+        e.stop().await;
+    }
+}
+
+#[tokio::test]
+async fn bubbles_delay_rechecks_quiet_before_first_send() {
+    // C4/C5 目标：human-like-replies.md:185,188；延迟内进入静默，首条也不能漏发。
+    let (e, h) = setup(&bubbles_case(0.6, json!({"activeWindowSeconds":10000,
+        "quietHours":{"start":13,"end":14,"timezone":"UTC"}})));
+    *h.model.lock().unwrap() = json!({"score":5,"invalidStage":"ARTICULATE",
+        "invalid":{"text":"完整正文","bubbles":["甲","乙"]}});
+    e.ingest(&h.event(&json!({"id":"bubble-human","text":"哈哈"}))).unwrap();
+    e.tick().unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while h.rows("SELECT * FROM deliveries").is_empty() {
+            tokio::task::yield_now().await;
+        }
+    }).await.unwrap();
+    assert_eq!(*h.sends.lock().unwrap(), 0);
+    *h.now.lock().unwrap() = 46800.;
+    e.wait_idle().await;
+    assert_eq!(*h.sends.lock().unwrap(), 0);
+    assert_eq!(h.rows("SELECT status FROM deliveries"), vec![json!({"status":"failed"})]);
+    assert_eq!(h.rows("SELECT status FROM send_assessments")[0]["status"], "cancelled");
+    assert!(h.rows("SELECT * FROM messages WHERE self=1").is_empty());
+    e.stop().await;
 }

@@ -191,3 +191,25 @@ fn learned_frequency_respects_existing_probability_and_cooldown() {
         json!(["14"])
     );
 }
+
+
+#[test]
+fn multi_bubble_bounds_and_delay_formula() {
+    use qq_inner_core::persona::humanize::{bubble_delay_ms, multi_bubbles, multi_bubble_allowed};
+    // C2/C3 可用性：human-like-replies.md:172,175–179；不修改长度抽签本身。
+    assert!(multi_bubbles(&json!(["甲", "乙"]), 2).unwrap().is_some());
+    for invalid in [json!(["甲", "乙丙"]), json!(["", "乙"]), json!(["甲", 1]), json!(["甲","乙","丙","丁"])] {
+        assert!(multi_bubbles(&invalid, 2).is_err());
+    }
+    for length in ["tiny", "short", "medium", "long"] {
+        assert_eq!(multi_bubble_allowed(length, &[json!({"text":"哈哈","self":false})]), length == "medium");
+        assert!(!multi_bubble_allowed(length, &[json!({"text":"求助：编译失败","self":false})]));
+    }
+    // C4 可用性：human-like-replies.md:185–186；封顶和抖动边界，空正文也有延迟。
+    assert_eq!(bubble_delay_ms(0, true, 0), 400);
+    assert_eq!(bubble_delay_ms(5, true, 100), 600);
+    assert_eq!(bubble_delay_ms(10000, true, 0), 2500);
+    for jitter in 0..1000 {
+        assert!((300..=800).contains(&(bubble_delay_ms(5, false, jitter) - bubble_delay_ms(5, true, jitter))));
+    }
+}

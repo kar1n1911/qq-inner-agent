@@ -158,3 +158,40 @@ pub fn face_only_allowed(
         .collect();
     Ok(!humans.is_empty() && humans.iter().all(|m| light_reaction(text(m, "text"))))
 }
+
+/// human-like-replies.md:176,179；本批 C3 将 short 进一步收紧，仅 medium 可拆。
+/// 保守复用纯附和白名单；本轮人类消息含未知/求助/技术内容即保持单条。
+pub fn multi_bubble_allowed(length: &str, history: &[Value]) -> bool {
+    let start = history.iter().rposition(|m| m["self"] == true || m["self"] == 1)
+        .map_or(0, |i| i + 1);
+    let humans: Vec<_> = history[start..].iter()
+        .filter(|m| m["self"] != true && m["self"] != 1).collect();
+    length == "medium" && !humans.is_empty()
+        && humans.iter().all(|m| light_reaction(text(m, "text")))
+}
+
+/// human-like-replies.md:172,175：整批先校验，拒绝而非截断独立句子。
+/// 空数组/单元素沿用原单条正文；真正拆分必须 2–3 条且合计在 medium 上限内。
+pub fn multi_bubbles(value: &Value, max_chars: usize) -> Result<Option<Vec<String>>> {
+    let Some(items) = value.as_array() else { return Ok(None) };
+    if items.len() <= 1 { return Ok(None); }
+    anyhow::ensure!(items.len() <= 3, "invalid_bubbles_count");
+    let mut total = 0;
+    let mut bubbles = Vec::new();
+    for item in items {
+        let bubble = item.as_str().unwrap_or_default().trim();
+        let length = bubble.chars().count();
+        anyhow::ensure!(length > 0 && length <= max_chars, "invalid_bubble_length");
+        total += length;
+        anyhow::ensure!(total <= max_chars.min(90), "invalid_bubbles_total");
+        bubbles.push(bubble.to_owned());
+    }
+    Ok(Some(bubbles))
+}
+
+/// human-like-replies.md:185–186（改动 8）：独立随机源，不消耗长度/装饰抽签。
+/// 每条 400ms + 20ms/字符（基础封顶 2500ms）+ 0–100ms 抖动；条间另加 300–800ms。
+pub fn bubble_delay_ms(chars: usize, first: bool, jitter: u64) -> u64 {
+    400_u64.saturating_add((chars as u64).saturating_mul(20)).min(2500)
+        + jitter % 101 + if first { 0 } else { 300 + jitter % 501 }
+}
