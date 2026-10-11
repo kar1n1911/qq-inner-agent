@@ -2075,7 +2075,7 @@ async fn backstory_engine_rejects_unsafe_requests_and_stored_evidence() {
                 .lock()
                 .unwrap()
                 .execute(
-                    "INSERT INTO notes(chat,text) VALUES('group:10','真实记忆')",
+                    "INSERT INTO notes(chat,text) VALUES('group:10','耐心思考的真实记忆')",
                     [],
                 )
                 .unwrap();
@@ -3936,6 +3936,33 @@ async fn section14_persona_and_system_reach_both_generation_stages() {
                 assert!(system.contains("不得转述第三方的具体言行"));
                 assert!(system.contains("被直接问是否 AI 时不主动冒充真人"));
             }
+        }
+    }
+}
+
+// Design: docs/working/prompt-and-learning-design.md L1411, L1415, L1429.
+#[tokio::test]
+async fn backstory_related_evidence_and_append_reach_model_with_learning_disabled() {
+    for related in [false, true] {
+        let (e, h) = setup(&base("backstory-topic", json!({"backstory":{"enabled":true},"learning":{"enabled":false}}), vec![]));
+        h.store.lock().unwrap().execute("INSERT INTO notes(chat,text) VALUES('group:10',?)", [if related { "曾耐心梳理问题" } else { "讨论盆栽浇水" }]).unwrap();
+        for (id, offset) in [("first", 0.), ("detail", 100.), ("repeat", 200.)] {
+            *h.now.lock().unwrap() += offset;
+            face_turn(&e, &h, id, "[CQ:at,qq=99]基于经历评价耐心", 10, 5., json!({"text":format!("本轮回应{id}")})).await;
+        }
+        let payloads = h.payloads.lock().unwrap();
+        assert_eq!(payloads.len(), 3);
+        if related {
+            assert!(payloads.iter().all(|p| p["backstories"] == json!([])));
+        } else {
+            assert_eq!(payloads[0]["backstories"][0]["details"], json!([]));
+            assert_eq!(payloads[1]["backstories"][0]["details"].as_array().unwrap().len(), 1);
+            assert_eq!(payloads[1]["backstories"], payloads[2]["backstories"]);
+            assert_eq!(payloads[2]["backstories"], json!(qq_inner_core::persona::backstory::recall(&h.store.lock().unwrap(), "group:10", h.now(), 8).unwrap()));
+        }
+        // Design L126–127, L139–145: production assembly contains the named rule exactly once.
+        for (_, system) in h.model_systems.lock().unwrap().iter().filter(|(stage, _)| stage == "ARTICULATE") {
+            assert_eq!(system.matches(qq_inner_core::prompts::BACKSTORY_RULE).count(), 1);
         }
     }
 }

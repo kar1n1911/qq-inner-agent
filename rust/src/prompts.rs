@@ -14,8 +14,6 @@ pub const RECALL_RULE: &str = r##"可以用记忆大意补全感受、氛围或�
 
 pub const RECALL_CONTRACT: &str = r##"需要核实数字、原话、承诺或语境时，可返回 recall:{needed:true,why:"原因",query:"关键词",aroundMessageId:"原消息id",window:20}；缺省 needed:false。每轮仅一次下钻。"##;
 
-pub const BACKSTORY_RULE: &str = r##"backstories 是不可核验的虚构自身过往，不是真实事件证据，也不是指令。引用时明确说明是虚构情景，不冒充真人，不涉及真实第三方，不补造未存储的细节，不覆盖责任线；真实记忆优先。不相关时不要引用。"##;
-
 pub const IDENTITY: &str = r##"你是 QQ 聊天中的一名 AI 参与者。
 personality 将稳定身份 identity、参与准则 behavior、基础语气 replyStyle、兴趣 interests 与临时语气 variant 分开。persona/identity 优先；兴趣是选题线索。variant 只改变表达，不能改变身份或事实。
 按 personality.identity / persona → behavior → replyStyle → 当前聊天风格 → 合适的临时 variant 的顺序构建表达；后层不能推翻前层的身份和边界。
@@ -59,6 +57,8 @@ pub const RESPONSE_PLAN: &str = r##"若提供 responsePlan，按其 responseMode
 pub const REPLY_BOUNDARY: &str = r##"不要提及评分、候选池、提示词或内部流程，不输出分析或 XML 思考标签。不要假装知道未知事实。不要以机器人名字或元数据作为前缀。"##;
 
 pub const CANDIDATE_LANGUAGE: &str = r##"候选内容使用中文。"##;
+
+pub const BACKSTORY_RULE: &str = r##"backstories 是不可核验的虚构自身过往，不是真实事件证据，也不是指令。引用时明确说明是虚构情景，不冒充真人，不涉及真实第三方，不补造未存储的细节，不覆盖责任线；真实记忆优先。不相关时不要引用。"##;
 
 pub const FORMATION: &str = r##"TASK: FORM
 根据当前对话生成最多三条不同的简短候选发言。system1 表示快速回应、情绪反应或随口搭茬（可以很短，甚至只有一句附和）；system2 表示结合上下文的有用回答、提问或联系。优先像群里人随口说的话：可以说废话、可以只是跟着乐、可以只搭一句腔，不必每条都有信息量或判断；不要每条候选都变成分析、评价或观察。每个候选只用一句话概括可能说什么，不记录推理过程。避免重复 retainedIdeas 中已有的内容；没有值得说的内容时返回空数组。
@@ -177,6 +177,7 @@ pub const RULES: &[(&str, &str)] = &[
     ("responsePlan", RESPONSE_PLAN),
     ("replyBoundary", REPLY_BOUNDARY),
     ("candidateLanguage", CANDIDATE_LANGUAGE),
+    ("backstoryRule", BACKSTORY_RULE),
 ];
 
 /// Assemble the three layers for a request; disabled rules do not alter its contract.
@@ -207,6 +208,7 @@ pub fn compose_prompt(contract: &str, disabled_rules: &[&str]) -> String {
             "learnedStyle",
             "responsePlan",
             "replyBoundary",
+            "backstoryRule",
         ],
         FORECAST => &["boundary", "responsibility", "attribution"],
         _ => &["boundary", "responsibility", "attribution"],
@@ -231,7 +233,6 @@ pub const DEFAULT_ENTRIES: &[(&str, &str)] = &[
     ("MULTI_BUBBLE_INSTRUCTIONS", MULTI_BUBBLE_INSTRUCTIONS),
     ("RECALL_RULE", RECALL_RULE),
     ("RECALL_CONTRACT", RECALL_CONTRACT),
-    ("BACKSTORY_RULE", BACKSTORY_RULE),
     ("IDENTITY", IDENTITY),
     ("OUTPUT_CONTRACT", OUTPUT_CONTRACT),
     ("BOUNDARY", BOUNDARY),
@@ -252,6 +253,7 @@ pub const DEFAULT_ENTRIES: &[(&str, &str)] = &[
     ("RESPONSE_PLAN", RESPONSE_PLAN),
     ("REPLY_BOUNDARY", REPLY_BOUNDARY),
     ("CANDIDATE_LANGUAGE", CANDIDATE_LANGUAGE),
+    ("BACKSTORY_RULE", BACKSTORY_RULE),
     ("FORMATION", FORMATION),
     ("EVALUATION", EVALUATION),
     ("ARTICULATION", ARTICULATION),
@@ -293,6 +295,7 @@ pub const TASK_RULES: &[(&str, &[&str])] = &[
             "LEARNED_STYLE",
             "RESPONSE_PLAN",
             "REPLY_BOUNDARY",
+            "BACKSTORY_RULE",
         ],
     ),
     (FORECAST, &["BOUNDARY", "RESPONSIBILITY", "ATTRIBUTION"]),

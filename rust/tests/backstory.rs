@@ -62,6 +62,7 @@ fn immutable_scoped_temporal_and_append_only() {
     assert_eq!(rows[0]["text"], "虚构过往");
     assert_eq!(rows[0]["details"][0]["text"], "细节");
 }
+// Design: docs/working/prompt-and-learning-design.md L1415.
 #[test]
 fn whitelist_and_real_evidence_fail_closed() {
     for request in [
@@ -76,11 +77,10 @@ fn whitelist_and_real_evidence_fail_closed() {
             .is_empty());
     }
     for sql in [
-        "INSERT INTO notes(chat,text) VALUES('group:1','真实笔记')",
-        "INSERT INTO memory_layers(id,chat,subject,layer,slot,text,sources) VALUES('m','group:1','group','events','s','真实经历','[]')",
-        "INSERT INTO learned_memories(chat,text) VALUES('group:1','真实经历')",
-        "INSERT INTO messages(chat,id,text,self) VALUES('group:1','m','真实经历',0)",
-        "INSERT INTO messages(chat,id,text,self) VALUES('group:1','m','真实经历',1)",
+        "INSERT INTO notes(chat,text) VALUES('group:1','耐心的真实笔记')",
+        "INSERT INTO memory_layers(id,chat,subject,layer,slot,text,sources) VALUES('m','group:1','group','events','s','耐心的真实经历','[]')",
+        "INSERT INTO learned_memories(chat,text) VALUES('group:1','耐心的真实经历')",
+        "INSERT INTO messages(chat,id,text,self) VALUES('group:1','m','耐心的真实经历',0)",
     ] {
         let db = Store::in_memory().unwrap();
         db.execute(sql,[]).unwrap();
@@ -90,10 +90,14 @@ fn whitelist_and_real_evidence_fail_closed() {
     let first = backstory::prepare(&db, "group:1", "基于经历评价耐心", 10.).unwrap();
     assert_eq!(first.len(), 1);
     assert!(first[0]["text"].as_str().unwrap().contains("虚构"));
-    assert_eq!(
-        backstory::prepare(&db, "group:1", "基于经历评价反复修改", 11.).unwrap(),
-        first
-    );
+    // Design: docs/working/prompt-and-learning-design.md L1411, L1420, L1429.
+    let appended = backstory::prepare(&db, "group:1", "基于经历评价耐心", 11.).unwrap();
+    assert_eq!(appended[0]["text"], first[0]["text"]);
+    assert_eq!(appended[0]["details"].as_array().unwrap().len(), 1);
+    assert_eq!(backstory::recall(&db, "group:1", 11., 8).unwrap(), appended);
+    assert_eq!(backstory::prepare(&db, "group:1", "基于经历评价耐心", 12.).unwrap(), appended);
+    assert_eq!(backstory::prepare(&db, "group:1", "普通聊天", 13.).unwrap(), appended);
+
 }
 
 #[test]
@@ -111,4 +115,59 @@ fn reopen_preserves_stories_and_database_guards() {
         assert_eq!(backstory::recall(&db, "group:1", 12., 8).unwrap(), before);
     }
     std::fs::remove_file(path).unwrap();
+}
+
+// Design: docs/working/prompt-and-learning-design.md L1415: unrelated evidence must not block.
+#[test]
+fn unrelated_expired_other_chat_and_self_messages_do_not_block() {
+    for sql in [
+        "INSERT INTO notes(chat,text) VALUES('group:1','今天讨论盆栽')",
+        "INSERT INTO learned_memories(chat,text) VALUES('group:1','今天讨论盆栽')",
+        "INSERT INTO memory_layers(id,chat,subject,layer,slot,text,sources) VALUES('m','group:1','group','events','s','今天讨论盆栽','[]')",
+        "INSERT INTO messages(chat,id,text,self) VALUES('group:1','m','今天讨论盆栽',0)",
+        "INSERT INTO messages(chat,id,text,self) VALUES('group:1','m','我很有耐心',1)",
+        "INSERT INTO messages(chat,id,text,self) VALUES('group:1','m','[@99]基于经历评价耐心',0)",
+        "INSERT INTO notes(chat,text) VALUES('group:2','耐心的经历')",
+        "INSERT INTO learned_memories(chat,text,expires) VALUES('group:1','耐心的经历',10)",
+        "INSERT INTO memory_layers(id,chat,subject,layer,slot,text,sources,expires) VALUES('m','group:1','group','events','s','耐心的经历','[]',10)",
+    ] {
+        let db = Store::in_memory().unwrap();
+        db.execute(sql, []).unwrap();
+        assert_eq!(backstory::prepare(&db, "group:1", "基于经历评价耐心", 10.).unwrap().len(), 1, "{sql}");
+    }
+}
+
+// Design: docs/working/prompt-and-learning-design.md L126–127, L139–145.
+#[test]
+fn backstory_named_rule_is_switchable_in_runtime_snapshot_and_js_parity() {
+    use qq_inner_core::{prompt_overlay::Snapshot, prompts};
+    let snapshot = Snapshot::default();
+    for disabled in [vec![], vec!["backstoryRule"]] {
+        let actual = snapshot.compose_prompt(prompts::ARTICULATION, &disabled);
+        assert_eq!(actual.contains(backstory::RULE), disabled.is_empty());
+        assert_eq!(actual, prompts::compose_prompt(prompts::ARTICULATION, &disabled));
+        let script = format!(
+            "import {{composePrompt,articulation}} from './src/prompts.mjs'; process.stdout.write(composePrompt(articulation, {{disabledRules:{}}}));",
+            serde_json::to_string(&disabled).unwrap()
+        );
+        let output = std::process::Command::new("node")
+            .args(["--input-type=module", "-e", &script])
+            .current_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap())
+            .output().unwrap();
+        assert!(output.status.success());
+        assert_eq!(actual, String::from_utf8(output.stdout).unwrap());
+    }
+}
+
+// Design: docs/working/prompt-and-learning-design.md L1411, L1415: real evidence also gates additions.
+#[test]
+fn revision_topic_and_later_real_evidence_gate_detail_creation() {
+    let db = Store::in_memory().unwrap();
+    let first = backstory::prepare(&db, "group:1", "基于经历评价反复修改", 10.).unwrap();
+    db.execute("INSERT INTO notes(chat,text) VALUES('group:1','曾经反复润色文章')", []).unwrap();
+    assert_eq!(backstory::prepare(&db, "group:1", "基于经历评价反复修改", 11.).unwrap(), first);
+    let other = backstory::prepare(&db, "group:2", "基于经历评价反复修改", 10.).unwrap();
+    let appended = backstory::prepare(&db, "group:2", "你以前是否反复修改过表达", 11.).unwrap();
+    assert_eq!(appended[0]["id"], other[0]["id"]);
+    assert_eq!(appended[0]["details"].as_array().unwrap().len(), 1);
 }

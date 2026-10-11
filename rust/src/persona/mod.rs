@@ -168,7 +168,7 @@ pub struct Proposal {
     pub avatar: Option<String>,
     pub signature: String,
 }
-pub fn propose(store: &Store, chat: &str, name: &str, persona: &str, now: f64) -> Result<Proposal> {
+pub fn propose(store: &Store, chat: &str, _name: &str, persona: &str, now: f64) -> Result<Proposal> {
     ensure!(
         chat.strip_prefix("group:")
             .is_some_and(|id| id.parse::<u64>().is_ok_and(|id| id > 0)),
@@ -188,13 +188,7 @@ pub fn propose(store: &Store, chat: &str, name: &str, persona: &str, now: f64) -
     let labels = styles(&texts);
     let label = labels.first().map(|i| STYLES[*i].1).unwrap_or("共学");
     // 模型不可用时保留确定性的 traits 蒸馏兜底；正常路径由模型昵称替换。
-    // 拟人：不强调 AI 属性，用基座名字 + 学到的风格标签自然外显；防仿冒靠黑名单 + 成员名去重。
-    let base = name.trim();
-    let nickname = if base.is_empty() {
-        label.to_string()
-    } else {
-        format!("{base}·{label}")
-    };
+    let nickname = label.to_string();
     Ok(Proposal {
         chat: chat.into(),
         nickname: nickname.clone(),

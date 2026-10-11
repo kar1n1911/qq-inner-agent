@@ -87,22 +87,47 @@ fn candidate(request: &str) -> Option<&'static str> {
     }
 }
 
-/// 在引擎已确认本轮有效后调用。存储中存在任何真实记忆时保守放弃，
-/// 不把召回未命中等同于没有记忆；与 learning/memoryRecall 开关无关。
+// 与精确请求白名单配套的主题词；命中一个即保守视为相关，不依赖学习/召回开关。
+fn topic(text: &str) -> (&'static [&'static str], &'static str) {
+    if text.contains("调整措辞") {
+        (&["修改", "措辞", "表达", "修饰", "改写", "润色"], "虚构情景的追加细节：当时我先保留要表达的核心意思，再逐句删去重复的修饰。")
+    } else {
+        (&["耐心", "思考", "思路", "结论", "急躁", "沉住气"], "虚构情景的追加细节：当时我把尚未想清楚的部分逐项列出，再按顺序慢慢梳理。")
+    }
+}
+
+/// 在引擎已确认本轮有效后调用；真实记忆优先，与 learning/memoryRecall 开关无关。
 pub fn prepare(store: &Store, chat: &str, request: &str, now: f64) -> Result<Vec<Value>> {
     if !chat.starts_with("group:") {
         return Ok(vec![]);
     }
     init(store)?;
     let tx = store.immediate()?;
-    let prior = store.rows(
-        "SELECT id FROM persona_backstory WHERE chat=? LIMIT 1",
-        [chat],
-    )?;
-    if prior.is_empty() {
-        if let Some(text) = candidate(request) {
-            let evidence = store.rows("SELECT 1 AS present FROM memory_layers WHERE chat=?1 UNION ALL SELECT 1 FROM learned_memories WHERE chat=?1 UNION ALL SELECT 1 FROM notes WHERE chat=?1 UNION ALL SELECT 1 FROM messages WHERE chat=?1 AND (self=1 OR text<>?2) LIMIT 1", params![chat,request])?;
-            if evidence.is_empty() {
+    if let Some(text) = candidate(request) {
+        let (keywords, detail) = topic(text);
+        // 有效的持久化记忆、笔记和人类历史原文都是证据；自身发言和经历询问不是经历证据。
+        let evidence = store.rows(
+            "SELECT text FROM memory_layers WHERE chat=?1 AND (expires IS NULL OR expires>?2) AND (created IS NULL OR created<=?2)
+             UNION ALL SELECT text FROM learned_memories WHERE chat=?1 AND (expires IS NULL OR expires>?2) AND (created IS NULL OR created<=?2)
+             UNION ALL SELECT text FROM notes WHERE chat=?1 AND (created IS NULL OR created<=?2)
+             UNION ALL SELECT text FROM messages WHERE chat=?1 AND self=0 AND (ts IS NULL OR ts<=?2)",
+            params![chat, now],
+        )?;
+        let relevant = evidence.iter().filter_map(|row| row["text"].as_str()).any(|value| {
+            candidate(value).is_none() && keywords.iter().any(|key| value.contains(key))
+        });
+        if !relevant {
+            let prior = store.rows(
+                "SELECT id FROM persona_backstory WHERE chat=? AND text=? AND created<=? ORDER BY created,id LIMIT 1",
+                params![chat, text, now],
+            )?;
+            if let Some(row) = prior.first() {
+                let id = row["id"].as_str().expect("backstory id");
+                // 仅再次明确询问同一主题时追加一次；不在普通聊天或每次召回时制造细节。
+                if store.rows("SELECT id FROM persona_backstory_detail WHERE backstory_id=? AND text=? LIMIT 1", params![id, detail])?.is_empty() {
+                    add_detail(store, id, detail, now)?;
+                }
+            } else {
                 create(store, chat, text, now)?;
             }
         }

@@ -1966,8 +1966,6 @@ impl Engine {
                 crate::persona::backstory::recall(&db, chat, self.now(), 8)?
             };
             payload["backstories"] = json!(stories);
-            system.push('\n');
-            system.push_str(self.options.prompts.get(crate::persona::backstory::RULE));
         }
         let response = match self.model(&system, payload).await {
             Ok(value) => value,
