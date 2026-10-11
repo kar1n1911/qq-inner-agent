@@ -1,5 +1,5 @@
 //! 与 JS 共用 SQLite 文件；所有时间参数均为秒，REAL 保留小数秒。
-use anyhow::{Context, Result};
+use anyhow::{ensure, Context, Result};
 use rusqlite::{types::ValueRef, Connection, Params};
 use serde_json::{json, Map, Value};
 use std::path::Path;
@@ -14,6 +14,8 @@ pub struct Store {
     pub(crate) memory_last_maintenance: std::cell::Cell<Option<f64>>,
 }
 impl Store {
+    pub const UNKNOWN_RECEIVED_AT: f64 = -1.;
+
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Self::initialize(Connection::open(path).context("open store")?)
     }
@@ -22,6 +24,21 @@ impl Store {
     }
     fn initialize(db: Connection) -> Result<Self> {
         db.set_prepared_statement_cache_capacity(64);
+        let old_messages = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='messages')",
+            [],
+            |row| row.get::<_, bool>(0),
+        )?;
+        if old_messages {
+            let mut statement = db.prepare("PRAGMA table_info(messages)")?;
+            let columns = statement
+                .query_map([], |row| row.get::<_, String>(1))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            ensure!(
+                columns.iter().any(|column| column == "received_at"),
+                "database migration required; run ./agent update full"
+            );
+        }
         db.execute_batch(include_str!("store/schema.sql"))?;
         let store = Self {
             db,
@@ -48,6 +65,46 @@ impl Store {
         }
         store.initialize_group_hours()?;
         Ok(store)
+    }
+
+    /// One-shot migration for the pre-release received-at schema change.
+    /// The dedicated marker is intentionally not a general migration ledger.
+    pub fn migrate_received_at(path: impl AsRef<Path>) -> Result<()> {
+        let mut db = Connection::open(path).context("open store for migration")?;
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let messages: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='messages')",
+            [],
+            |row| row.get(0),
+        )?;
+        ensure!(messages, "messages table missing");
+        let mut statement = tx.prepare("PRAGMA table_info(messages)")?;
+        let columns = statement
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        drop(statement);
+        if !columns.iter().any(|column| column == "received_at") {
+            tx.execute_batch(
+                "ALTER TABLE messages ADD COLUMN received_at REAL NOT NULL DEFAULT -1;",
+            )?;
+        }
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS migration_received_at_v1(
+                completed INTEGER PRIMARY KEY CHECK(completed=1));
+             INSERT OR IGNORE INTO migration_received_at_v1(completed) VALUES(1);",
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn backup_database(source: impl AsRef<Path>, destination: impl AsRef<Path>) -> Result<()> {
+        let db = Connection::open(source).context("open store for backup")?;
+        ensure!(!destination.as_ref().exists(), "database backup already exists");
+        db.execute(
+            "VACUUM INTO ?",
+            [destination.as_ref().to_string_lossy().as_ref()],
+        )?;
+        Ok(())
     }
     /// 独立 UTC 绝对小时桶；消息容量裁剪不回减计数。事务保证迁移只回填一次。
     fn initialize_group_hours(&self) -> Result<()> {

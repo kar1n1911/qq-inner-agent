@@ -1,4 +1,5 @@
 use super::*;
+use std::fs;
 #[test]
 fn schema_migration_and_constraints() -> Result<()> {
     let db = Connection::open_in_memory()?;
@@ -28,6 +29,44 @@ fn schema_migration_and_constraints() -> Result<()> {
         .is_err());
     let again = Store::initialize(s.db)?;
     assert_eq!(again.schema()?["tables"].as_object().unwrap().len(), 18);
+    Ok(())
+}
+
+#[test]
+fn received_at_migration_is_idempotent_and_marks_unknown_history() -> Result<()> {
+    // Goal: UPDATE-1/UPDATE-2 plus the user's migration rule forbid a new
+    // binary from opening the old shape and forbid invented historical time.
+    let path = std::env::temp_dir().join(format!(
+        "qq-received-at-{}-{}.sqlite",
+        std::process::id(),
+        rand::random::<u64>()
+    ));
+    let db = Connection::open(&path)?;
+    db.execute_batch(
+        "CREATE TABLE messages(chat TEXT,id TEXT,sender TEXT,name TEXT,text TEXT,ts REAL,self INTEGER DEFAULT 0,PRIMARY KEY(chat,id));
+         INSERT INTO messages VALUES('g','old','1','n','text',123,0);",
+    )?;
+    drop(db);
+    let error = match Store::open(&path) {
+        Ok(_) => panic!("old schema opened without migration"),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("database migration required"));
+    Store::migrate_received_at(&path)?;
+    Store::migrate_received_at(&path)?;
+    let store = Store::open(&path)?;
+    let row = &store.rows(
+        "SELECT ts,received_at FROM messages WHERE id='old'",
+        [],
+    )?[0];
+    assert_eq!(row["ts"], 123.);
+    assert_eq!(row["received_at"], Store::UNKNOWN_RECEIVED_AT);
+    assert_eq!(
+        store.rows("SELECT count(*) AS n FROM migration_received_at_v1", [])?[0]["n"],
+        1
+    );
+    drop(store);
+    fs::remove_file(path)?;
     Ok(())
 }
 
@@ -331,14 +370,14 @@ fn group_hours_migrates_once_and_ingests_atomically() -> Result<()> {
         ("self", 100., 1),
     ] {
         legacy.execute(
-            "INSERT INTO messages VALUES('g',?,'u','n','text',?,?)",
+            "INSERT INTO messages(chat,id,sender,name,text,ts,self) VALUES('g',?,'u','n','text',?,?)",
             rusqlite::params![id, now - age, own],
         )?;
     }
     // Existing retention-limited active group must be awake immediately after upgrade.
     for i in 0..507 {
         legacy.execute(
-            "INSERT INTO messages VALUES('busy',?,'u','n','text',?,0)",
+            "INSERT INTO messages(chat,id,sender,name,text,ts,self) VALUES('busy',?,'u','n','text',?,0)",
             rusqlite::params![i.to_string(), now - (i - 20).max(0) as f64 * 40.],
         )?;
     }

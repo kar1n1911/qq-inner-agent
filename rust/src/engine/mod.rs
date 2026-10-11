@@ -479,7 +479,8 @@ impl Engine {
         ) {
             m.hint = Hint::SelfChat;
         }
-        let value = serde_json::to_value(&m)?;
+        let mut value = serde_json::to_value(&m)?;
+        value["received_at"] = json!(now);
         // 指令先去重再执行；命中后不 capture、不触发普通回复或常规学习。
         let raw = if let Some(s) = event["message"].as_str() {
             s.to_owned()

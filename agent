@@ -27,5 +27,5 @@ case "${1:-help}" in
   logs) exec journalctl --user -u qq-inner-agent.service -f ;;
   stop) exec systemctl --user stop qq-inner-agent.service ;;
   restart) exec systemctl --user restart qq-inner-agent.service ;;
-  *) echo 'Usage: ./agent {setup|update {apply|status|rollback}|check|contacts|install-service|install-dashboard|dashboard|dashboard-key|start|core-status|status|logs|stop|restart|test|add-memory CHAT TEXT}' ;;
+  *) echo 'Usage: ./agent {setup|update {apply|status|rollback|full}|check|contacts|install-service|install-dashboard|dashboard|dashboard-key|start|core-status|status|logs|stop|restart|test|add-memory CHAT TEXT}' ;;
 esac

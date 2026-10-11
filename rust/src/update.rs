@@ -5,6 +5,7 @@ use futures_util::future::BoxFuture;
 use serde_json::{json, Value};
 use std::{
     fs,
+    io::ErrorKind,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{
@@ -15,6 +16,72 @@ use std::{
 use tokio::sync::watch;
 
 pub const REVISION: &str = env!("QQ_BUILD_REVISION");
+const SERVICE: &str = "qq-inner-agent.service";
+
+fn schema_change_reason(root: &Path, before: &str, after: &str) -> Result<Option<String>> {
+    let output = Command::new("git")
+        .current_dir(root)
+        .args(["diff", "--name-status", before, after, "--"])
+        .output()?;
+    ensure!(output.status.success(), "cannot inspect schema impact");
+    let changed = String::from_utf8(output.stdout).context("invalid git diff output")?;
+    for line in changed.lines() {
+        let mut fields = line.split('\t');
+        let status = fields.next().unwrap_or_default();
+        let paths = fields.collect::<Vec<_>>();
+        ensure!(
+            status.len() == 1 && paths.len() == 1,
+            "schema impact uncertain ({line}); use ./agent update full"
+        );
+        let path = paths[0];
+        if path == "rust/src/store.rs"
+            || path.starts_with("rust/src/store/")
+            || path.starts_with("rust/src/media/")
+            || path.starts_with("rust/src/persona/")
+        {
+            return Ok(Some(format!("schema-owning path changed: {path}")));
+        }
+        let known = path.ends_with(".rs")
+            || path.ends_with(".toml")
+            || path.ends_with(".lock")
+            || path.ends_with(".md")
+            || path.ends_with(".mjs")
+            || path.ends_with(".js")
+            || path.ends_with(".json")
+            || path.ends_with(".py")
+            || path.ends_with(".sh")
+            || path.ends_with(".sql")
+            || path == "agent"
+            || path == ".gitignore";
+        ensure!(
+            known,
+            "schema impact uncertain for {path}; use ./agent update full"
+        );
+    }
+    let output = Command::new("git")
+        .current_dir(root)
+        .args(["diff", "-U0", before, after, "--", "*.rs", "*.sql"])
+        .output()?;
+    ensure!(output.status.success(), "cannot inspect schema diff");
+    let diff = String::from_utf8(output.stdout).context("invalid schema diff output")?;
+    let ddl = [
+        "create table",
+        "alter table",
+        "drop table",
+        "create index",
+        "drop index",
+        "create trigger",
+        "drop trigger",
+        "pragma table_info",
+    ];
+    if let Some(line) = diff.lines().filter(|line| line.starts_with(['+', '-'])).find(|line| {
+        let lower = line.to_ascii_lowercase();
+        ddl.iter().any(|token| lower.contains(token))
+    }) {
+        return Ok(Some(format!("database DDL changed: {}", line.trim())));
+    }
+    Ok(None)
+}
 
 pub struct Updater {
     root: PathBuf,
@@ -158,6 +225,9 @@ impl Updater {
         if revision == before {
             return Ok(false);
         }
+        if let Some(reason) = schema_change_reason(&self.root, &before, &revision)? {
+            anyhow::bail!("schema_change_requires_full_update: {reason}; use ./agent update full");
+        }
         self.clean()?;
         let target = self.dir.join("build");
         if target.exists() {
@@ -257,6 +327,141 @@ impl Updater {
         });
         Ok(json!({"accepted":true,"statusMethod":"update.status"}))
     }
+}
+
+fn service(command: &Path, action: &str) -> Result<()> {
+    let status = Command::new(command)
+        .args(["--user", action, SERVICE])
+        .status()
+        .with_context(|| format!("systemctl {action}"))?;
+    ensure!(status.success(), "systemctl {action} failed ({status})");
+    Ok(())
+}
+
+fn restore_database(database: &Path, backup: &Path) -> Result<()> {
+    for suffix in ["-wal", "-shm"] {
+        let sidecar = PathBuf::from(format!("{}{suffix}", database.display()));
+        match fs::remove_file(sidecar) {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    fs::copy(backup, database).context("restore database backup")?;
+    fs::File::open(database)?.sync_all()?;
+    Ok(())
+}
+
+fn restore_binary(updater: &Updater) -> Result<()> {
+    let state = updater.state.lock().unwrap().clone();
+    let previous = state["previousBinary"]
+        .as_str()
+        .context("no_previous_binary")?;
+    let stage = updater.binary.with_extension("full-restore.tmp");
+    fs::copy(previous, &stage).context("stage previous binary")?;
+    fs::File::open(&stage)?.sync_all()?;
+    fs::rename(stage, &updater.binary).context("restore previous binary")?;
+    fs::File::open(updater.binary.parent().context("binary parent")?)?.sync_all()?;
+    Ok(())
+}
+
+fn full_update_with(
+    root: &Path,
+    binary: &Path,
+    running: &str,
+    database: &Path,
+    systemctl: &Path,
+    build: &Path,
+    step: &dyn Fn(&str),
+) -> Result<Value> {
+    let (restart, _) = watch::channel(false);
+    let mut updater = Updater::new(root.to_owned(), binary.to_owned(), running.to_owned(), restart)?;
+    Arc::get_mut(&mut updater).context("full updater ownership")?.build = build.to_owned();
+    updater.clean()?;
+    updater.git(&["pull", "--ff-only"])?;
+    updater.clean()?;
+    let revision = updater.git(&["rev-parse", "HEAD"])?;
+    if revision == running {
+        return Ok(json!({"result":"already_latest","revision":revision}));
+    }
+    let backup = updater
+        .dir
+        .join(format!("database-before-{}-{}.sqlite", &revision[..12], rand::random::<u64>()));
+    StoreMigration::backup(database, &backup)?;
+    step("backup");
+    service(systemctl, "stop")?;
+    step("stop");
+    let result = (|| -> Result<()> {
+        step("migrate");
+        StoreMigration::migrate(database)?;
+        let target = updater.dir.join("full-build");
+        if target.exists() {
+            fs::remove_dir_all(&target)?;
+        }
+        step("build");
+        let built = (|| -> Result<()> {
+            let log = fs::File::create(updater.dir.join("build.log"))?;
+            let status = Command::new(&updater.build)
+                .current_dir(root.join("rust"))
+                .args([
+                    "build",
+                    "--release",
+                    "--bin",
+                    "qq-inner-core",
+                    "--target-dir",
+                ])
+                .arg(&target)
+                .env("QQ_BUILD_REVISION", &revision)
+                .stdout(Stdio::from(log.try_clone()?))
+                .stderr(Stdio::from(log))
+                .status()?;
+            ensure!(status.success(), "build_failed ({status}); see .runtime/update/build.log");
+            updater.clean()?;
+            ensure!(updater.git(&["rev-parse", "HEAD"])? == revision, "source_changed_during_build");
+            updater.install(&target.join("release/qq-inner-core"), &revision)
+        })();
+        if target.exists() {
+            fs::remove_dir_all(target)?;
+        }
+        built?;
+        step("restart");
+        service(systemctl, "reset-failed")?;
+        step("start");
+        service(systemctl, "start")?;
+        Ok(())
+    })();
+    if let Err(error) = result {
+        if updater.installed.load(Ordering::SeqCst) {
+            restore_binary(&updater)?;
+        }
+        restore_database(database, &backup)?;
+        step("restore");
+        let _ = service(systemctl, "start");
+        return Err(error);
+    }
+    Ok(json!({"result":"completed","revision":revision,"databaseBackup":backup}))
+}
+
+struct StoreMigration;
+impl StoreMigration {
+    fn backup(database: &Path, backup: &Path) -> Result<()> {
+        crate::store::Store::backup_database(database, backup)
+    }
+    fn migrate(database: &Path) -> Result<()> {
+        crate::store::Store::migrate_received_at(database)
+    }
+}
+
+pub fn full_update(root: &Path, binary: &Path, database: &Path) -> Result<Value> {
+    full_update_with(
+        root,
+        binary,
+        REVISION,
+        database,
+        Path::new("systemctl"),
+        Path::new("cargo"),
+        &|_| {},
+    )
 }
 
 pub struct Admin {

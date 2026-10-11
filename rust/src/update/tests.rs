@@ -45,7 +45,7 @@ impl Fixture {
         fs::create_dir(remote.join("rust")).unwrap();
         fs::write(remote.join("rust/placeholder"), "fixture").unwrap();
         fs::write(remote.join(".gitignore"), ".runtime/\nrust/target/\n").unwrap();
-        fs::write(remote.join("artifact"), Self::artifact("old")).unwrap();
+        fs::write(remote.join("artifact.sh"), Self::artifact("old")).unwrap();
         git(&remote, &["add", "."]);
         git(&remote, &["commit", "-m", "old"]);
         let old = git(&remote, &["rev-parse", "HEAD"]);
@@ -59,7 +59,7 @@ impl Fixture {
             &Self::artifact("old").replace("REVISION_PLACEHOLDER", &old),
         );
         let build = base.join("fake-cargo");
-        executable(&build, "#!/bin/sh\nset -eu\nprintf build >> ../.runtime/build-count\nmkdir -p \"$6/release\"\nsed \"s/REVISION_PLACEHOLDER/$QQ_BUILD_REVISION/g\" ../artifact > \"$6/release/qq-inner-core\"\nchmod 755 \"$6/release/qq-inner-core\"\n");
+        executable(&build, "#!/bin/sh\nset -eu\nprintf build >> ../.runtime/build-count\nmkdir -p \"$6/release\"\nsed \"s/REVISION_PLACEHOLDER/$QQ_BUILD_REVISION/g\" ../artifact.sh > \"$6/release/qq-inner-core\"\nchmod 755 \"$6/release/qq-inner-core\"\n");
         Self {
             base,
             root,
@@ -72,10 +72,19 @@ impl Fixture {
         format!("#!/bin/sh\n# {label} build artifact\nif [ \"${{1:-}}\" = build-revision ]; then echo REVISION_PLACEHOLDER; exit; fi\nexport QQ_FIXTURE_REV=REVISION_PLACEHOLDER\nexec \"$QQ_FIXTURE_TEST_EXE\" --exact update::tests::service_child --nocapture\n")
     }
     fn publish(&self) -> String {
-        fs::write(self.remote.join("artifact"), Self::artifact("new")).unwrap();
+        fs::write(self.remote.join("artifact.sh"), Self::artifact("new")).unwrap();
         git(&self.remote, &["add", "."]);
         git(&self.remote, &["commit", "-m", "new"]);
         git(&self.remote, &["rev-parse", "HEAD"])
+    }
+    fn publish_schema_change(&self) {
+        fs::write(
+            self.remote.join("rust/schema.sql"),
+            "ALTER TABLE messages ADD COLUMN changed INTEGER;\n",
+        )
+        .unwrap();
+        git(&self.remote, &["add", "."]);
+        git(&self.remote, &["commit", "-m", "schema"]);
     }
     fn updater(&self) -> (Arc<Updater>, watch::Receiver<bool>) {
         let (tx, rx) = watch::channel(false);
@@ -164,6 +173,112 @@ async fn build_failure_preserves_binary_and_removes_partial_output() {
         .unwrap()
         .contains("compiler-error"));
     assert!(!*restart.borrow());
+}
+
+#[tokio::test]
+async fn hot_update_allows_code_only_change_and_rejects_schema_change() {
+    let code = Fixture::new();
+    code.publish();
+    let (updater, _) = code.updater();
+    updater.start("update.apply").unwrap();
+    assert_eq!(done(&updater).await["result"], "restart_pending");
+
+    let schema = Fixture::new();
+    schema.publish_schema_change();
+    let old = schema.binary();
+    let (updater, restart) = schema.updater();
+    updater.start("update.apply").unwrap();
+    let status = done(&updater).await;
+    assert!(status["error"]
+        .as_str()
+        .unwrap()
+        .contains("schema_change_requires_full_update"), "{status}");
+    assert_eq!(schema.binary(), old);
+    assert!(!schema.root.join(".runtime/build-count").exists());
+    assert!(!*restart.borrow());
+}
+
+fn old_database(path: &Path) {
+    let db = rusqlite::Connection::open(path).unwrap();
+    db.execute_batch(
+        "CREATE TABLE messages(chat TEXT,id TEXT,sender TEXT,name TEXT,text TEXT,ts REAL,self INTEGER DEFAULT 0,PRIMARY KEY(chat,id));
+         INSERT INTO messages VALUES('g','old','1','n','text',123,0);",
+    )
+    .unwrap();
+}
+
+#[test]
+fn full_update_orders_steps_and_never_starts_new_binary_on_old_schema() {
+    let fixture = Fixture::new();
+    let revision = fixture.publish();
+    let database = fixture.base.join("agent.sqlite");
+    old_database(&database);
+    let systemctl = fixture.base.join("systemctl");
+    executable(&systemctl, "#!/bin/sh\nexit 0\n");
+    let steps = Mutex::new(Vec::new());
+    let result = full_update_with(
+        &fixture.root,
+        &fixture.root.join("rust/target/release/qq-inner-core"),
+        &fixture.old,
+        &database,
+        &systemctl,
+        &fixture.build,
+        &|step| steps.lock().unwrap().push(step.to_owned()),
+    )
+    .unwrap();
+    assert_eq!(result["revision"], revision);
+    assert_eq!(
+        *steps.lock().unwrap(),
+        ["backup", "stop", "migrate", "build", "restart", "start"]
+    );
+    let db = rusqlite::Connection::open(database).unwrap();
+    let received: f64 = db
+        .query_row("SELECT received_at FROM messages WHERE id='old'", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(received, crate::store::Store::UNKNOWN_RECEIVED_AT);
+    // Goal: UPDATE-1/UPDATE-2 plus the user's migration rule require the old
+    // process to drain before migration and the new artifact to see the new schema.
+    assert_eq!(steps.lock().unwrap()[1], "stop");
+    assert_eq!(steps.lock().unwrap()[2], "migrate");
+}
+
+#[test]
+fn failed_migration_restores_consistent_backup() {
+    let fixture = Fixture::new();
+    fixture.publish();
+    let database = fixture.base.join("agent.sqlite");
+    old_database(&database);
+    let systemctl = fixture.base.join("systemctl");
+    executable(
+        &systemctl,
+        &format!(
+            "#!/bin/sh\nset -eu\nif [ \"$2\" = stop ]; then printf X | dd of={} bs=1 count=1 conv=notrunc 2>/dev/null; fi\n",
+            database.display()
+        ),
+    );
+    let steps = Mutex::new(Vec::new());
+    let error = full_update_with(
+        &fixture.root,
+        &fixture.root.join("rust/target/release/qq-inner-core"),
+        &fixture.old,
+        &database,
+        &systemctl,
+        &fixture.build,
+        &|step| steps.lock().unwrap().push(step.to_owned()),
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("file is not a database"));
+    let db = rusqlite::Connection::open(database).unwrap();
+    assert_eq!(
+        db.query_row("SELECT text FROM messages WHERE id='old'", [], |row| row.get::<_, String>(0))
+            .unwrap(),
+        "text"
+    );
+    // Goal: the user's rollback requirement forbids any half-migrated database.
+    assert_eq!(
+        *steps.lock().unwrap(),
+        ["backup", "stop", "migrate", "restore"]
+    );
 }
 #[tokio::test]
 async fn success_installs_exact_artifact_and_retains_backup() {

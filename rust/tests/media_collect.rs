@@ -576,7 +576,7 @@ fn old_media_schema_migrates_conservatively_and_backfills_only_known_humans() {
     CREATE TABLE media_contexts(chat TEXT NOT NULL,hash TEXT NOT NULL,message_id TEXT NOT NULL,role TEXT NOT NULL,PRIMARY KEY(chat,hash,message_id,role));
     INSERT INTO media_assets VALUES('group:10','legacy','image','media/group:10/legacy.bin',50,1,9,3,'{}');
     INSERT INTO media_assets VALUES('group:11','missing-history','image','media/group:11/old.bin',99,1,9,3,'{}');
-    INSERT INTO messages VALUES('group:10','1','20','','',1,0),('group:10','2','20','','',2,0),('group:10','3','21','','',3,0),('group:10','4','99','','',4,1),('group:10','5','22','','',5,0);
+    INSERT INTO messages(chat,id,sender,name,text,ts,self) VALUES('group:10','1','20','','',1,0),('group:10','2','20','','',2,0),('group:10','3','21','','',3,0),('group:10','4','99','','',4,1),('group:10','5','22','','',5,0);
     INSERT INTO media_contexts VALUES('group:10','legacy','1','usage'),('group:10','legacy','2','usage'),('group:10','legacy','3','usage'),('group:10','legacy','4','usage'),('group:10','legacy','5','before'),('group:10','legacy','deleted','usage');").unwrap();
     s.enable_media().unwrap();
     s.enable_media().unwrap();

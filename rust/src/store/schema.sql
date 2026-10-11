@@ -1,6 +1,6 @@
 -- 集中保留 JS 五个模块的建表定义；所有 REAL 时间列均为秒。
 PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
-      CREATE TABLE IF NOT EXISTS messages(chat TEXT, id TEXT, sender TEXT, name TEXT, text TEXT, ts REAL, self INTEGER DEFAULT 0, PRIMARY KEY(chat,id));
+      CREATE TABLE IF NOT EXISTS messages(chat TEXT, id TEXT, sender TEXT, name TEXT, text TEXT, ts REAL, self INTEGER DEFAULT 0, received_at REAL NOT NULL DEFAULT -1, PRIMARY KEY(chat,id));
       CREATE TABLE IF NOT EXISTS thoughts(id TEXT PRIMARY KEY, chat TEXT, text TEXT, kind TEXT, created REAL, used INTEGER DEFAULT 0, score REAL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS notes(id TEXT PRIMARY KEY, chat TEXT, text TEXT, created REAL);
       CREATE TABLE IF NOT EXISTS decisions(id TEXT PRIMARY KEY, chat TEXT, ts REAL, action TEXT, score REAL, tags TEXT);

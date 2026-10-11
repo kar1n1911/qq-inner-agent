@@ -48,7 +48,7 @@ impl Store {
     pub fn message(&self, m: &Value) -> Result<bool> {
         // IGNORE 保留原行；REPLACE 会删除旧行再插入，不能用于消息去重。
         Ok(self.execute(
-            "INSERT OR IGNORE INTO messages VALUES(?,?,?,?,?,?,?)",
+            "INSERT OR IGNORE INTO messages(chat,id,sender,name,text,ts,self,received_at) VALUES(?,?,?,?,?,?,?,?)",
             params![
                 m["chat"].as_str(),
                 m["id"].as_str(),
@@ -56,7 +56,10 @@ impl Store {
                 m["name"].as_str(),
                 m["text"].as_str(),
                 m["ts"].as_f64(),
-                truthy(&m["self"]) as i32
+                truthy(&m["self"]) as i32,
+                m["received_at"]
+                    .as_f64()
+                    .unwrap_or(Store::UNKNOWN_RECEIVED_AT)
             ],
         )? > 0)
     }

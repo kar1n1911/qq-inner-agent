@@ -37,7 +37,7 @@ enum Command {
     BuildRevision,
     /// Human-triggered binary deployment via the local control socket.
     Update {
-        #[arg(value_parser = ["apply", "status", "rollback"])]
+        #[arg(value_parser = ["apply", "status", "rollback", "full"])]
         action: String,
     },
     /// Run the agent until SIGINT, SIGTERM or SIGHUP.
@@ -76,6 +76,16 @@ async fn main() -> Result<()> {
     match cli.command {
         Command::BuildRevision => println!("{}", qq_inner_core::update::REVISION),
         Command::Update { action } => {
+            if action == "full" {
+                let loaded = config::load_config(&root)?;
+                let result = qq_inner_core::update::full_update(
+                    &fs::canonicalize(&root)?,
+                    &std::env::current_exe()?,
+                    &loaded.config.data_dir.join("agent.sqlite"),
+                )?;
+                println!("{}", serde_json::to_string_pretty(&result)?);
+                return Ok(());
+            }
             use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
             let dir = config::load_config(&root)?.config.data_dir;
             let mut socket = tokio::net::UnixStream::connect(dir.join("control.sock")).await?;
@@ -943,6 +953,10 @@ mod tests {
         rt.engine.ingest(&json!({"post_type":"message", "message_type":"private",
             "self_id":99,"user_id":1950202917u64,"message_id":1,
             "time":1700000000,"message":"/忘记 临时测试","sender":{"nickname":"Owner"}})).unwrap();
+        assert_eq!(
+            store.lock().unwrap().rows("SELECT received_at FROM messages WHERE id='1'", []).unwrap()[0]["received_at"],
+            1_700_000_000.125
+        );
         rt.engine.tick().unwrap();
         tokio::time::timeout(Duration::from_secs(3), received.recv()).await.unwrap().unwrap();
         assert_eq!(store.lock().unwrap().rows("SELECT status FROM deliveries", []).unwrap()[0]["status"], "pending");
