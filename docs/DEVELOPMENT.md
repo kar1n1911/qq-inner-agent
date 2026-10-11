@@ -339,7 +339,20 @@ cd rust && cargo test -- --test-threads=1
 实测发生过一次:我未提交的 4 个文档被裹进了功能提交里(内容无害,但属于范围外改动、无人审过)。
 
 ```bash
-git status --porcelain      # 必须为空,再派发
+git status --porcelain      # 派发前必须为空
+```
+
+**⚠️ 补充(踩过两次):自己提交文档时,绝不使用 `git add -A`。**
+
+任务进行中,工作区里**一定有 agent 的未提交改动**。这时你若 `git add -A` 提交自己的文档,
+会**把 agent 的半成品一起卷进一个名字完全不相干的提交**(实测发生过两次:一次把 4 个文档卷进功能提交,
+一次把 codex 一个**测试还是红的** relay 改动卷进"记录模拟器计划")。
+
+**正确做法 —— 只写显式路径:**
+
+```bash
+git add TODO.md docs/DEVELOPMENT.md      # ✅ 显式列出
+git add -A                               # ❌ 任务进行中永远不要用
 ```
 
 ### 工作模式：**不使用 Git worktree**（2026-10-10 起）
