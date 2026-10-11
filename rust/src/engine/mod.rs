@@ -172,6 +172,13 @@ pub struct ChatState {
     pub pending: bool,
     pub pause_done: bool,
     pub last_think: f64,
+    /// A5: deferred consideration, not permission to send. Deadline is captured
+    /// at creation: last_human + activeWindowSeconds (existing relevance window,
+    /// default 900s after the human message, not another full window after reply).
+    /// Repeated replies do not renew it. Process restart/status.json and hot
+    /// reload deliberately discard this transient intent; see inherit_chats.
+    #[serde(skip)]
+    pub pending_topic_until: Option<f64>,
     pub busy: bool,
     pub due: f64,
     #[serde(skip)]
@@ -188,6 +195,7 @@ impl Default for ChatState {
             pending: false,
             pause_done: true,
             last_think: 0.,
+            pending_topic_until: None,
             busy: false,
             due: 0.,
             last_screen: None,
@@ -606,6 +614,7 @@ impl Engine {
             if policy::allowed(&chat, &self.config.agent) {
                 state.busy = false;
                 state.last_think = 0.;
+                state.pending_topic_until = None;
                 core.chats.push((chat, state));
             }
         }
@@ -769,6 +778,13 @@ impl Engine {
                         core.last_error = Some(e.to_string());
                     }
                 }));
+            }
+        }
+        // Expire even while offline, busy, outside due, or out of concurrency
+        // slots. Expiration is explicit and does not depend on chat eviction.
+        for (_, s) in &mut core.chats {
+            if s.pending_topic_until.is_some_and(|until| now >= until) {
+                s.pending_topic_until = None;
             }
         }
         let available = self.available(now)?;
@@ -970,8 +986,17 @@ impl Engine {
                 s.last_think = now;
                 s.due = now + a.min_think_interval_seconds.max(60.);
                 if screened.reply.is_none() {
+                    // §九 independent gates + L781 reply priority; user
+                    // 2026-10-10: reply now, retain topic consideration for later.
+                    if screened.topic.is_none() && s.pending_topic_until.is_none() {
+                        s.pending_topic_until = Some(s.last_human + a.active_window_seconds);
+                    }
                     "message"
                 } else if screened.topic.is_none() {
+                    // Consume one consideration only after today's topic gates
+                    // pass. A losing draw also consumes it; never save an old
+                    // probability or run a second draw/task for the same tick.
+                    s.pending_topic_until = None;
                     if (self.options.random)() >= screened.probability {
                         continue;
                     }

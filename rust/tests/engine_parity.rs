@@ -1727,6 +1727,175 @@ async fn topic_probability_rejection_and_reply_priority() {
     assert!(!trace.iter().any(|v| v[0] == "model" && v[3] == "topic"));
 }
 
+// A5: prompt-and-learning-design.md §九 L642–654 (independent gates),
+// L781 (reply priority, currently §十二), and user 2026-10-10:
+// reply now, remember topic intent, consider it next round under its own gates.
+fn deferred_topic_setup(extra: Value) -> (Arc<Engine>, Arc<Harness>) {
+    let (e, h) = topic_setup(merge(&json!({"sending":{"expectationSeconds":1}}), &extra));
+    e.ingest(&h.event(&json!({"id":"deferred"}))).unwrap();
+    *h.now.lock().unwrap() += 600.;
+    h.store.lock().unwrap().mark_handled("group:10", "deferred", true).unwrap();
+    (e, h)
+}
+
+#[tokio::test]
+async fn a5_reply_now_remember_topic_then_redeem_with_current_probability() {
+    for draw in [0., 0.99] {
+        let (e, h) = deferred_topic_setup(json!({}));
+        {
+            let db = h.store.lock().unwrap();
+            let screen = qq_inner_core::engine::decision::screen(
+                &db, "group:10", &e.chats()[0].1, &e.config.agent, h.now(),
+            ).unwrap();
+            assert_eq!((screen.reply, screen.topic), (None, None));
+        }
+        h.model.lock().unwrap()["decisionDraw"] = json!(0.99);
+        e.tick().unwrap();
+        let deadline = e.chats()[0].1.last_human + e.config.agent.active_window_seconds;
+        assert_eq!(e.chats()[0].1.pending_topic_until, Some(deadline));
+        e.tick().unwrap(); // busy: no duplicate task
+        e.wait_idle().await;
+        assert_eq!(*h.sends.lock().unwrap(), 1);
+        assert!(!e.chats()[0].1.pending);
+        assert_eq!(e.chats()[0].1.pending_topic_until, Some(deadline));
+        {
+            let trace = h.trace.lock().unwrap();
+            assert!(trace.iter().any(|v| v[0] == "model" && v[3] == "message"));
+            assert!(!trace.iter().any(|v| v[0] == "model" && v[3] == "topic"));
+        }
+        *h.now.lock().unwrap() = e.chats()[0].1.due;
+        h.model.lock().unwrap()["decisionDraw"] = json!(draw);
+        h.model.lock().unwrap()["reply"] = json!("最近有什么有趣的新发现吗？");
+        {
+            let db = h.store.lock().unwrap();
+            let screen = qq_inner_core::engine::decision::screen(
+                &db, "group:10", &e.chats()[0].1, &e.config.agent, h.now(),
+            ).unwrap();
+            assert_eq!(screen.reply, Some("no_new_message"));
+            assert_eq!(screen.topic, None);
+            assert!(screen.probability > 0. && screen.probability < 0.99);
+        }
+        e.tick().unwrap();
+        assert_eq!(e.chats()[0].1.pending_topic_until, None);
+        e.tick().unwrap();
+        e.wait_idle().await;
+        e.tick().unwrap(); // same due interval: no retry of the consumed intent
+        e.wait_idle().await;
+        assert_eq!(*h.sends.lock().unwrap(), if draw == 0. { 2 } else { 1 });
+        assert_eq!(h.trace.lock().unwrap().iter().any(|v| v[0] == "model" && v[3] == "topic"), draw == 0.);
+        assert_eq!(e.last_error(), None);
+    }
+}
+
+#[tokio::test]
+async fn deferred_topic_dispatch_gate_combinations() {
+    for reply in [false, true] {
+        for topic in [false, true] {
+            let extra = json!({"proactive":topic});
+            let (e, h) = if reply { deferred_topic_setup(extra) } else { topic_setup(extra) };
+            e.tick().unwrap();
+            assert_eq!(e.chats()[0].1.pending_topic_until.is_some(), reply && topic);
+            e.wait_idle().await;
+            let trace = h.trace.lock().unwrap();
+            assert_eq!(trace.iter().any(|v| v[0] == "model" && v[3] == "message"), reply);
+            assert_eq!(trace.iter().any(|v| v[0] == "model" && v[3] == "topic"), !reply && topic);
+            assert_eq!(*h.sends.lock().unwrap(), usize::from(reply || topic));
+        }
+    }
+}
+
+#[tokio::test]
+async fn deferred_topic_waits_for_cooldown_and_quiet_hours() {
+    for blocker in ["proactive_cooldown", "quiet"] {
+        let extra = if blocker == "quiet" {
+            json!({"quietHours":{"start":13,"end":14,"timezone":"UTC"},"thoughtTtlSeconds":10000})
+        } else {
+            json!({"proactiveCooldownSeconds":900})
+        };
+        let (e, h) = deferred_topic_setup(extra);
+        if blocker == "quiet" {
+            // Evidence that the group is awake when quiet hours end at 14:00.
+            let db = h.store.lock().unwrap();
+            for i in 0..6 {
+                db.message(&json!({"chat":"group:10","id":format!("afternoon{i}"),"sender":"20","name":"Human","text":"好的","ts":4. * 86400. + 14. * 3600. + i as f64,"self":false})).unwrap();
+            }
+        }
+        {
+            let db = h.store.lock().unwrap();
+            let screen = qq_inner_core::engine::decision::screen(
+                &db, "group:10", &e.chats()[0].1, &e.config.agent, h.now(),
+            ).unwrap();
+            assert_eq!((screen.reply, screen.topic), (None, None));
+        }
+        e.tick().unwrap();
+        e.wait_idle().await;
+        let deadline = e.chats()[0].1.pending_topic_until;
+        assert!(deadline.is_some());
+        {
+            let trace = h.trace.lock().unwrap();
+            assert!(trace.iter().any(|v| v[0] == "model" && v[3] == "message"));
+            assert!(!trace.iter().any(|v| v[0] == "model" && v[3] == "topic"));
+        }
+        let sent_at = h.now();
+        h.model.lock().unwrap()["reply"] = json!("最近有什么有趣的新发现吗？");
+        *h.now.lock().unwrap() = if blocker == "quiet" { 5. * 86400. + 13. * 3600. } else { sent_at + 60. };
+        {
+            let db = h.store.lock().unwrap();
+            let screen = qq_inner_core::engine::decision::screen(
+                &db, "group:10", &e.chats()[0].1, &e.config.agent, h.now(),
+            ).unwrap();
+            assert!(screen.reply.is_some());
+            assert_eq!(screen.topic, Some(blocker));
+        }
+        e.tick().unwrap();
+        e.wait_idle().await;
+        assert_eq!(e.chats()[0].1.pending_topic_until, deadline);
+        assert_eq!(*h.sends.lock().unwrap(), 1);
+        *h.now.lock().unwrap() = if blocker == "quiet" { 5. * 86400. + 14. * 3600. } else { sent_at + 900. };
+        {
+            let db = h.store.lock().unwrap();
+            let screen = qq_inner_core::engine::decision::screen(
+                &db, "group:10", &e.chats()[0].1, &e.config.agent, h.now(),
+            ).unwrap();
+            assert_eq!(screen.topic, None, "{blocker}: release gate");
+        }
+        e.tick().unwrap();
+        e.wait_idle().await;
+        assert_eq!(e.chats()[0].1.pending_topic_until, None);
+        assert_eq!(*h.sends.lock().unwrap(), 2);
+    }
+}
+
+#[tokio::test]
+async fn deferred_topic_expires_without_renewal_and_is_not_inherited_or_serialized() {
+    let (e, h) = deferred_topic_setup(json!({}));
+    e.tick().unwrap();
+    e.wait_idle().await;
+    let deadline = e.chats()[0].1.pending_topic_until.unwrap();
+    h.model.lock().unwrap()["reply"] = json!("最近有什么有趣的新发现吗？");
+    e.ingest(&h.event(&json!({"id":"again"}))).unwrap();
+    *h.now.lock().unwrap() += 600.;
+    h.store.lock().unwrap().mark_handled("group:10", "again", true).unwrap();
+    e.tick().unwrap();
+    assert_eq!(e.chats()[0].1.pending_topic_until, Some(deadline));
+    e.wait_idle().await;
+    let state = e.chats()[0].1.clone();
+    assert!(serde_json::to_value(&state).unwrap().get("pendingTopicUntil").is_none());
+    assert_eq!(qq_inner_core::engine::ChatState::default().pending_topic_until, None);
+    let (next, _) = setup(&base("deferred-reload", json!({}), vec![]));
+    next.inherit_chats(e.chats());
+    assert_eq!(next.chats()[0].1.pending_topic_until, None);
+    e.ingest(&h.event(&json!({"id":"keep-pending"}))).unwrap();
+    h.transport.lock().unwrap().online = false;
+    *h.now.lock().unwrap() = deadline - 1.;
+    e.tick().unwrap();
+    assert_eq!(e.chats()[0].1.pending_topic_until, Some(deadline));
+    *h.now.lock().unwrap() = deadline;
+    e.tick().unwrap();
+    assert_eq!(e.chats()[0].1.pending_topic_until, None);
+    assert_eq!(*h.sends.lock().unwrap(), 2);
+}
+
 #[tokio::test]
 async fn grown_persona_reaches_form_and_articulate_without_replacing_seed() {
     let (engine, h) = setup(&base(
