@@ -60,6 +60,7 @@ impl Default for Attention {
 pub struct Config {
     pub enabled: bool,
     pub sharing: bool,
+    /// Shared topic-screen/media knobs; media enabled only gates media selection.
     pub p_active: f64,
     pub p_quiet: f64,
     pub quiet_cap: f64,
@@ -220,7 +221,7 @@ pub fn attention(
         return None;
     }
     let quietness = 1. - a.activity.clamp(0., 1.);
-    let ceiling = if accepted_wild {
+    let ceiling = if a.quiet && accepted_wild {
         2. + ((quietness - 2. / 3.) * 3.).clamp(0., 1.)
     } else {
         2.

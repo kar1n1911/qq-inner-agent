@@ -973,7 +973,7 @@ impl Engine {
             // 开关关闭整个新分支都不执行，不增加抽样、查询或改变 JS 状态。
             let trigger = if a.three_layer_decision {
                 let db = self.db()?;
-                let screened = crate::engine::decision::screen(&db, chat, s, a, now)?;
+                let screened = crate::engine::decision::screen(&db, chat, s, a, &self.media_config, now)?;
                 let reasons = (screened.reply, screened.topic);
                 if s.last_screen != Some(reasons) {
                     (self.options.log)(
@@ -1268,8 +1268,9 @@ impl Engine {
                 if state.version != version {
                     return Ok(());
                 }
-                let screened =
-                    crate::engine::decision::recheck(&*self.db()?, chat, state, a, self.now())?;
+                let screened = crate::engine::decision::recheck(
+                    &*self.db()?, chat, state, a, &self.media_config, self.now(),
+                )?;
                 if (trigger == "topic" && screened.topic.is_some())
                     || (trigger == "message" && screened.reply.is_some())
                 {

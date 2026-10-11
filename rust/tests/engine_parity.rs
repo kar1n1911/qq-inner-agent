@@ -378,7 +378,12 @@ fn setup(case: &Value) -> (Arc<Engine>, Arc<Harness>) {
         log: Arc::new(move |event, data| logger.push(json!(["log", event, data]))),
     };
     let c = Config::from_value(&merge(&defaults(), &case["config"])).unwrap();
-    let engine = Engine::new(c, store, h.clone(), h.clone(), options).unwrap();
+    let engine = if let Some(media) = case.get("mediaSelect") {
+        Engine::new_with_media(c, store, h.clone(), h.clone(), options,
+            serde_json::from_value(media.clone()).unwrap(), Default::default()).unwrap()
+    } else {
+        Engine::new(c, store, h.clone(), h.clone(), options).unwrap()
+    };
     *h.engine.lock().unwrap() = Arc::downgrade(&engine);
     (engine, h)
 }
@@ -1657,14 +1662,20 @@ async fn decision_screen_zero_calls() {
 }
 
 fn topic_setup(extra: Value) -> (Arc<Engine>, Arc<Harness>) {
-    let (e, h) = setup(&base(
+    topic_setup_with_media(extra, json!({}))
+}
+
+fn topic_setup_with_media(extra: Value, media: Value) -> (Arc<Engine>, Arc<Harness>) {
+    let mut case = base(
         "topic",
         merge(
             &json!({"threeLayerDecision":true,"pauseSeconds":300,"activeWindowSeconds":10000}),
             &extra,
         ),
         vec![],
-    ));
+    );
+    case["mediaSelect"] = media;
+    let (e, h) = setup(&case);
     *h.now.lock().unwrap() = 5. * 86400. + 43200.;
     {
         let db = h.store.lock().unwrap();
@@ -1732,6 +1743,7 @@ async fn independent_topic_gates_and_probability() {
                 "group:10",
                 &state,
                 &e.config.agent,
+                &Default::default(),
                 h.now(),
             )
             .unwrap();
@@ -1753,6 +1765,7 @@ async fn independent_topic_gates_and_probability() {
             "group:10",
             &state,
             &e.config.agent,
+            &Default::default(),
             h.now(),
         )
         .unwrap();
@@ -1766,6 +1779,7 @@ async fn independent_topic_gates_and_probability() {
                 "group:10",
                 &state,
                 &e.config.agent,
+                &Default::default(),
                 h.now()
             )
             .unwrap()
@@ -1774,9 +1788,9 @@ async fn independent_topic_gates_and_probability() {
         );
         let mut g =
             qq_inner_core::media::media_select::group_activity(&db, "group:10", h.now(), 300.).unwrap();
-        let p = qq_inner_core::engine::decision::topic_probability(&g, 1000., 300.);
+        let p = qq_inner_core::engine::decision::topic_probability(&g, 1000., 300., &Default::default());
         g.since_human *= 2.;
-        assert!(qq_inner_core::engine::decision::topic_probability(&g, 2000., 300.) >= p);
+        assert!(qq_inner_core::engine::decision::topic_probability(&g, 2000., 300., &Default::default()) >= p);
         // 用均匀抽样网格检查触发比例，避免随机测试抖动；启发式只断言区间。
         let accepted = (0..1000).filter(|i| (*i as f64 / 1000.) < p).count();
         assert!((10..300).contains(&accepted));
@@ -1837,7 +1851,7 @@ async fn a5_reply_now_remember_topic_then_redeem_with_current_probability() {
         {
             let db = h.store.lock().unwrap();
             let screen = qq_inner_core::engine::decision::screen(
-                &db, "group:10", &e.chats()[0].1, &e.config.agent, h.now(),
+                &db, "group:10", &e.chats()[0].1, &e.config.agent, &Default::default(), h.now(),
             ).unwrap();
             assert_eq!((screen.reply, screen.topic), (None, None));
         }
@@ -1861,7 +1875,7 @@ async fn a5_reply_now_remember_topic_then_redeem_with_current_probability() {
         {
             let db = h.store.lock().unwrap();
             let screen = qq_inner_core::engine::decision::screen(
-                &db, "group:10", &e.chats()[0].1, &e.config.agent, h.now(),
+                &db, "group:10", &e.chats()[0].1, &e.config.agent, &Default::default(), h.now(),
             ).unwrap();
             assert_eq!(screen.reply, Some("no_new_message"));
             assert_eq!(screen.topic, None);
@@ -1915,7 +1929,7 @@ async fn deferred_topic_waits_for_cooldown_and_quiet_hours() {
         {
             let db = h.store.lock().unwrap();
             let screen = qq_inner_core::engine::decision::screen(
-                &db, "group:10", &e.chats()[0].1, &e.config.agent, h.now(),
+                &db, "group:10", &e.chats()[0].1, &e.config.agent, &Default::default(), h.now(),
             ).unwrap();
             assert_eq!((screen.reply, screen.topic), (None, None));
         }
@@ -1934,7 +1948,7 @@ async fn deferred_topic_waits_for_cooldown_and_quiet_hours() {
         {
             let db = h.store.lock().unwrap();
             let screen = qq_inner_core::engine::decision::screen(
-                &db, "group:10", &e.chats()[0].1, &e.config.agent, h.now(),
+                &db, "group:10", &e.chats()[0].1, &e.config.agent, &Default::default(), h.now(),
             ).unwrap();
             assert!(screen.reply.is_some());
             assert_eq!(screen.topic, Some(blocker));
@@ -1947,7 +1961,7 @@ async fn deferred_topic_waits_for_cooldown_and_quiet_hours() {
         {
             let db = h.store.lock().unwrap();
             let screen = qq_inner_core::engine::decision::screen(
-                &db, "group:10", &e.chats()[0].1, &e.config.agent, h.now(),
+                &db, "group:10", &e.chats()[0].1, &e.config.agent, &Default::default(), h.now(),
             ).unwrap();
             assert_eq!(screen.topic, None, "{blocker}: release gate");
         }
@@ -2526,7 +2540,7 @@ async fn goal_backfill_after_sending_cannot_answer_the_agents_expectation() {
     {
         let db = h.store.lock().unwrap();
         db.add_thought("group:10", &json!({"text":"聊聊花园","kind":"system2"}), h.now()).unwrap();
-        let screen = qq_inner_core::engine::decision::screen(&db, "group:10", &e.chats()[0].1, &e.config.agent, h.now()).unwrap();
+        let screen = qq_inner_core::engine::decision::screen(&db, "group:10", &e.chats()[0].1, &e.config.agent, &Default::default(), h.now()).unwrap();
         assert_eq!(screen.reply, Some("no_new_message"));
         assert_eq!(screen.topic, Some("expectation"));
     }
@@ -3610,6 +3624,7 @@ async fn unaddressed_followup_ignores_initiation_gates_and_recovery() {
                         "group:10",
                         &state,
                         &agent,
+                        &Default::default(),
                         h.now(),
                     )
                     .unwrap();
@@ -4121,4 +4136,37 @@ async fn bubbles_delay_rechecks_quiet_before_first_send() {
     assert_eq!(h.rows("SELECT status FROM send_assessments")[0]["status"], "cancelled");
     assert!(h.rows("SELECT * FROM messages WHERE self=1").is_empty());
     e.stop().await;
+}
+
+
+#[tokio::test]
+async fn a4_screen_and_tick_use_shared_knobs_while_media_is_disabled() {
+    use qq_inner_core::{engine::decision, media::media_select};
+    for quiet in [false, true] {
+        for (active, cold, cap) in [(0., 0.08, 0.15), (0.08, 0., 0.15), (0.08, 0.08, 0.)] {
+            let media = json!({"enabled":false,"p_active":active,"p_quiet":cold,"quiet_cap":cap});
+            let c: media_select::Config = serde_json::from_value(media.clone()).unwrap();
+            let (e, h) = topic_setup_with_media(json!({}), media);
+            if !quiet {
+                let db = h.store.lock().unwrap();
+                for i in 0..200 {
+                    db.message(&json!({"chat":"group:10","id":format!("burst{i}"),"sender":"20","text":"好的","ts":h.now()-300.,"self":false})).unwrap();
+                }
+            }
+            let expected_positive = if quiet { cold > 0. && cap > 0. } else { active > 0. };
+            {
+                let db = h.store.lock().unwrap();
+                let g = media_select::group_activity(&db, "group:10", h.now(), 300.).unwrap();
+                assert_eq!(g.quiet, quiet);
+                let screened = decision::screen(&db, "group:10", &e.chats()[0].1, &e.config.agent, &c, h.now()).unwrap();
+                assert_eq!(screened.topic, None);
+                assert_eq!(screened.probability > 0., expected_positive);
+                assert_eq!(screened.probability, decision::topic_probability(&g, h.now(), 300., &c));
+            }
+            e.tick().unwrap();
+            e.wait_idle().await;
+            assert_eq!(h.trace.lock().unwrap().iter().any(|v| v[0] == "model" && v[3] == "topic"), expected_positive);
+            assert_eq!(e.last_error(), None);
+        }
+    }
 }

@@ -12,8 +12,15 @@ pub struct Screen {
 }
 
 /// 集中列出确定性闸门；每层独立得出阻断原因，调度器只负责回复优先。
-pub fn screen(db: &Store, chat: &str, s: &ChatState, a: &Agent, now: f64) -> Result<Screen> {
-    screen_inner(db, chat, s, a, now, true)
+pub fn screen(
+    db: &Store,
+    chat: &str,
+    s: &ChatState,
+    a: &Agent,
+    c: &media_select::Config,
+    now: f64,
+) -> Result<Screen> {
+    screen_inner(db, chat, s, a, c, now, true)
 }
 
 /// 已获 tick 准入的同版本任务复核其余闸门，不被自身刚设置的冷却拦截。
@@ -22,9 +29,10 @@ pub(super) fn recheck(
     chat: &str,
     s: &ChatState,
     a: &Agent,
+    c: &media_select::Config,
     now: f64,
 ) -> Result<Screen> {
-    screen_inner(db, chat, s, a, now, false)
+    screen_inner(db, chat, s, a, c, now, false)
 }
 
 fn screen_inner(
@@ -32,6 +40,7 @@ fn screen_inner(
     chat: &str,
     s: &ChatState,
     a: &Agent,
+    c: &media_select::Config,
     now: f64,
     cooldown: bool,
 ) -> Result<Screen> {
@@ -92,7 +101,7 @@ fn screen_inner(
             let activity = media_select::group_activity(db, chat, now, a.pause_seconds.max(1.))?;
             if !activity.awake {
                 topic = Some("outside_group_schedule");
-            } else if !activity.quiet || activity.since_human < a.pause_seconds {
+            } else if activity.since_human < a.pause_seconds {
                 topic = Some("group_active");
             } else if db.expectation(chat, now)?.is_some() {
                 topic = Some("expectation");
@@ -100,7 +109,7 @@ fn screen_inner(
                 topic = Some("unanswered_message");
             } else {
                 probability =
-                    topic_probability(&activity, now - num(&counts, "last"), a.pause_seconds);
+                    topic_probability(&activity, now - num(&counts, "last"), a.pause_seconds, c);
             }
         }
     }
@@ -111,13 +120,29 @@ fn screen_inner(
     })
 }
 
-/// 启发式只承诺区间和方向：沉默更久/距自身发言更久，概率不下降；上限保守。
-pub fn topic_probability(g: &media_select::GroupActivity, since_self: f64, pause: f64) -> f64 {
-    if !g.awake || !g.quiet || g.since_human < pause {
+/// L697: independent active/quiet knobs; within each regime, longer silence
+/// increases probability. Reuse the media config even when media is disabled.
+pub fn topic_probability(
+    g: &media_select::GroupActivity,
+    since_self: f64,
+    pause: f64,
+    c: &media_select::Config,
+) -> f64 {
+    if !g.awake || g.since_human < pause {
         return 0.;
     }
     let scale = pause.max(60.);
-    0.15 * (g.since_human / (scale * 3.)).clamp(0., 1.) * (since_self / scale).clamp(0., 1.)
+    let human = g.since_human.max(0.);
+    let own = since_self.max(0.);
+    let base = if g.quiet && c.p_quiet == 0. {
+        0.
+    } else if g.quiet {
+        (c.p_quiet * (human / scale)).min(c.quiet_cap)
+    } else {
+        c.p_active
+    };
+    // Rational ramps approach one without saturating after a few pauses.
+    base * (1. / (1. + 3. * scale / human)) * (1. / (1. + scale / own))
 }
 
 /// Delivery tiers, not persisted conversation states.

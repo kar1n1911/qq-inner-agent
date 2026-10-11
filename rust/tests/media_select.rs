@@ -607,6 +607,7 @@ fn continuous_attention_visits_every_level_without_skipping() {
         let mut anchors = HashSet::new();
         for i in 0..=10000 {
             a.activity = 1. - i as f64 / 10000.;
+            a.quiet = a.activity <= 1. / 3.;
             let current = ms::attention(&a, &Attention::default(), accepted).unwrap();
             let d = current.drift_level as usize;
             let b = current.anchor_policy as usize;
@@ -1345,6 +1346,69 @@ mod engine_bus {
                 );
                 assert_eq!(n(&store.lock().unwrap(), "media_pending"), expected as i64);
                 engine.stop().await;
+            }
+        }
+    }
+}
+
+#[test]
+fn a6_l691_active_groups_never_get_wild_even_with_acceptance_or_override() {
+    // docs/working/prompt-and-learning-design.md L691: quiet AND accepted.
+    for quiet in [false, true] {
+        for accepted in [false, true] {
+            for override_drift in [None, Some(Drift::Wild)] {
+                for i in 0..=1000 {
+                    let mut a = activity(quiet, 900.);
+                    // Include inconsistent snapshots to prove quiet is a hard gate,
+                    // independent of the continuous ceiling and explicit overrides.
+                    a.activity = i as f64 / 1000.;
+                    let c = Attention { drift_level: override_drift, ..Default::default() };
+                    let result = ms::attention(&a, &c, accepted).unwrap();
+                    if !quiet || !accepted {
+                        assert_ne!(result.drift_level, Drift::Wild);
+                    } else if i == 0 {
+                        assert_eq!(result.drift_level, Drift::Wild);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a6_other_drift_levels_and_quiet_boundary_are_unchanged() {
+    for value in [0., 1. / 3. - 1e-9, 1. / 3., 1. / 3. + 1e-9, 1.] {
+        let mut a = activity(false, 900.);
+        a.activity = value;
+        a.quiet = value <= 1. / 3.;
+        for level in [Drift::Subtle, Drift::Active, Drift::Scattered] {
+            let c = Attention { drift_level: Some(level), ..Default::default() };
+            let accepted = ms::attention(&a, &c, true).unwrap();
+            let unaccepted = ms::attention(&a, &c, false).unwrap();
+            assert_eq!(accepted, unaccepted);
+            assert_eq!(accepted.drift_level, level);
+        }
+        if !a.quiet {
+            let c = Attention { drift_level: Some(Drift::Wild), ..Default::default() };
+            assert_ne!(ms::attention(&a, &c, true).unwrap().drift_level, Drift::Wild);
+        }
+    }
+}
+
+#[test]
+fn a4_shared_knobs_preserve_media_probability_semantics() {
+    let stage = classified(Stage::Closing, Relation::Continuation, true);
+    for enabled in [false, true] {
+        let c = Config { enabled, p_active: 0.07, p_quiet: 0.03, quiet_cap: 0.11, ..Default::default() };
+        for t in [299., 300., 600., 9000.] {
+            for i in 0..=10 {
+                let mut a = activity(false, t);
+                a.activity = i as f64 / 10.;
+                a.quiet = a.activity <= 1. / 3.;
+                let expected = if !enabled || t < 300. { 0. } else {
+                    (a.activity * 0.07 + (1. - a.activity) * (0.03 * t / 300.).min(0.11)) * a.media_rate
+                };
+                assert!((ms::probability(&a, &stage, &c, false) - expected).abs() < 1e-12);
             }
         }
     }
