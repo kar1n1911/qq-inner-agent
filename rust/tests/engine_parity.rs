@@ -272,7 +272,7 @@ impl OrientationProvider for Harness {
                     let mut formed = json!({"allocation":m.get("allocation").unwrap_or(&json!("open")),"candidates":if m["empty"]==true {json!([])} else {json!([{"kind":"system2","text":"建议从土壤湿度判断浇水"}])}});
                     if m["relayOnly"] == true {
                         formed["candidates"] = json!(payload["externalTopics"].as_array()
-                            .into_iter().flatten().map(|topic| json!({"kind":"system2","text":topic["item"]["url"]}))
+                            .into_iter().flatten().map(|topic| json!({"kind":"system2","text":format!("{}{}", topic["item"]["url"].as_str().unwrap(), m["relayIdeaSuffix"].as_str().unwrap_or(""))}))
                             .collect::<Vec<_>>());
                     }
                     if let Some(learning) = m.get("learning") {
@@ -2852,6 +2852,101 @@ async fn relay_links_enter_formation_only_after_review_and_local_dedup() {
         }
         // FORM returns no ideas: relay must never bypass the existing pipeline to send.
         assert_eq!(*h.sends.lock().unwrap(), 0, "{mode}");
+    }
+}
+
+#[tokio::test]
+async fn relay_forwarded_tier_reaches_runtime_and_sent_product_keeps_source() {
+    // D4 target: docs/working/prompt-and-learning-design.md §21.7.3 L1274, L1277–1278.
+    // D6 target: same design §21.5.3 L1224: the actual sent product carries its URL.
+    const URL: &str = "https://example.org/esp32";
+    for mode in ["card", "forward", "cq", "drop", "error", "malformed", "private", "disallowed", "current", "unrelated", "already_linked", "punctuated", "bubbles", "budget"] {
+        let (e, h) = if mode == "bubbles" {
+            let mut case = base("relay_bubbles", json!({"relay":{"enabled":true},"multiBubble":true,"learning":{"enabled":true},
+                "threeLayerDecision":true,"pauseSeconds":300,"activeWindowSeconds":10000}), vec![]);
+            case["expressionDraws"] = json!(vec![0.6; 64]);
+            let (e, h) = setup(&case);
+            *h.now.lock().unwrap() = 5. * 86400. + 43200.;
+            for i in 0..24 {
+                h.store.lock().unwrap().message(&json!({"chat":"group:10","id":format!("old{i}"),"sender":"20","text":"哈哈","ts":h.now()-(1+i/6) as f64*86400.,"self":false})).unwrap();
+            }
+            // Multi-bubble eligibility needs light reactions only; relevance comes
+            // from a live group trait, so this fixture must enable memory reads.
+            h.store.lock().unwrap().execute("INSERT INTO memory_layers(id,chat,subject,layer,slot,text,sources,updated,expires) VALUES('relay-interest','group:10','group','traits','interest','esp32','[]',?,?)", rusqlite::params![h.now(), h.now()+86400.]).unwrap();
+            (e, h)
+        } else {
+            topic_setup(json!({"relay":{"enabled":true},"maxOutputChars":if mode == "budget" {20} else {800}}))
+        };
+        *h.model.lock().unwrap() = json!({"relayOnly":mode != "unrelated", "relayError":mode == "error",
+            "relayAudit":if mode == "drop" {json!({"keep":[]})} else if mode == "malformed" {json!({"keep":["0"]})} else {json!({"keep":[0]})},
+            "reply":if mode == "already_linked" {URL} else {"看看这个项目"}, "replyTo":"interest0"});
+        if mode == "punctuated" {
+            h.model.lock().unwrap()["relayIdeaSuffix"] = json!(".");
+        }
+        if mode == "bubbles" {
+            h.model.lock().unwrap()["bubbles"] = json!(["看看", "这个项目"]);
+        }
+        // Exercise the existing card parser: URL is in a readable field, while
+        // metadata-only URLs retain their existing non-extracted semantics.
+        let cfg = Config::from_value(&merge(&defaults(), &base("card", json!({}), vec![])["config"])).unwrap();
+        let event = h.event(&json!({"group":11,"id":"source-card","text":[
+            {"type":"json","data":{"data":{"title":format!("PRIVATE_BODY PRIVATE_NAME {URL}"),"url":"https://secret.example.org/metadata"}}}
+        ]}));
+        let resolved = qq_inner_core::engine::policy::resolve_forwards_backfill(&event, h.as_ref(), &cfg.agent, h.now(), true).await;
+        let card = qq_inner_core::engine::policy::normalize_backfill(&resolved, "99", &cfg.agent, h.now()).unwrap();
+        assert!(card.text.contains("[卡片]"));
+        assert!(!card.text.contains("secret.example.org"));
+        let body = match mode {
+            "forward" => format!("[合并转发]\n（外部信息，非当前群对话）\nPRIVATE_BODY PRIVATE_NAME {URL}\n[/合并转发]"),
+            "cq" => format!("[CQ:json,data=PRIVATE_BODY {URL}]"),
+            _ => card.text,
+        };
+        {
+            let db = h.store.lock().unwrap();
+            db.execute("DELETE FROM thoughts", []).unwrap();
+            let chat = match mode { "private" => "private:20", "disallowed" => "group:12", "current" => "group:10", _ => "group:11" };
+            db.message(&json!({"chat":chat,"id":"source-card","sender":"30","text":body,"ts":h.now()-60.,"self":false})).unwrap();
+            for i in 0..2 {
+                db.message(&json!({"chat":"group:10","id":format!("interest{i}"),"sender":"20","text":if mode == "bubbles" {"哈哈"} else {"esp32"},"ts":h.now()-700.-i as f64,"self":false})).unwrap();
+            }
+        }
+        if mode == "bubbles" {
+            h.store.lock().unwrap().mark_handled("group:10", "interest0", true).unwrap();
+            e.restore().unwrap();
+        }
+        e.tick().unwrap();
+        e.wait_idle().await;
+        if mode == "budget" {
+            assert_eq!(e.last_error().as_deref(), Some("relay_source_exceeds_output_budget"), "source must not be truncated to fit");
+            assert_eq!(*h.sends.lock().unwrap(), 0);
+            continue;
+        }
+        assert_eq!(e.last_error(), None, "{mode}");
+        let allowed = !matches!(mode, "drop" | "error" | "malformed" | "private" | "disallowed" | "current");
+        let inputs = h.model_inputs.lock().unwrap();
+        let topics = inputs.iter().find(|(stage, _)| stage == "FORM").map(|(_, p)| &p["externalTopics"]);
+        assert_eq!(topics.is_some_and(Value::is_array), allowed, "D4 reachable: {mode}: {inputs:?} {:?}", h.trace.lock().unwrap());
+        let articulation = inputs.iter().find(|(stage, _)| stage == "ARTICULATE");
+        assert_eq!(articulation.is_some(), allowed, "{mode}");
+        if let Some((_, payload)) = articulation {
+            if mode == "unrelated" {
+                assert!(payload.get("untrustedExternalSources").is_none());
+            } else {
+                assert_eq!(payload["untrustedExternalSources"], json!([URL]));
+            }
+            assert!(payload.get("externalTopics").is_none());
+            for secret in ["PRIVATE_BODY", "PRIVATE_NAME", "source-card", "group:11", "secret.example.org"] {
+                assert!(!payload.to_string().contains(secret), "{mode}: {secret}");
+            }
+        }
+        let sent = h.rows("SELECT text FROM messages WHERE chat='group:10' AND self=1 ORDER BY rowid");
+        if allowed {
+            assert_eq!(sent[0]["text"].as_str().unwrap().contains(URL), mode != "unrelated", "D6 sent source: {mode}");
+            if mode == "already_linked" { assert_eq!(sent[0]["text"], URL); }
+            if mode == "bubbles" { assert_eq!(sent.len(), 2, "exercise actual multi-bubble delivery: {articulation:?}"); }
+        } else {
+            assert!(sent.is_empty(), "{mode}");
+        }
     }
 }
 

@@ -205,7 +205,7 @@ pub fn decide(
     }
     // A link's provenance must prove this exact URL. 低风险链接只要证据非空即可;
     // 多作者独立证据(independent_evidence)只保留给高风险升档,见上方 classify。
-    if origin.kind == OriginKind::Link
+    if matches!(origin.kind, OriginKind::Link | OriginKind::ForwardedCard)
         && (origin.source != origin.item.url
             || origin.evidence.is_empty()
             || origin.evidence.iter().any(|e| !links::extract(&e.text).contains(&origin.source)))
@@ -223,7 +223,7 @@ pub fn decide(
     {
         return None;
     }
-    if matches!(origin.kind, OriginKind::External | OriginKind::Link)
+    if matches!(origin.kind, OriginKind::External | OriginKind::Link | OriginKind::ForwardedCard)
         && !(origin.item.url.starts_with("https://") || origin.item.url.starts_with("http://"))
     {
         return None;
@@ -258,6 +258,45 @@ pub fn decide(
     })
 }
 
+/// Final-generation projection of reviewed references only (design §21.5.3 L1224).
+/// FORM already has to preserve the URL in its idea; unrelated candidates must
+/// not acquire a source merely because external topics were available this turn.
+pub fn selected_sources(topics: &serde_json::Value, idea: &str) -> Vec<String> {
+    topics.as_array().into_iter().flatten()
+        .filter_map(|topic| topic["item"]["url"].as_str())
+        .filter(|url| {
+            !url.is_empty()
+                && idea.match_indices(*url).any(|(start, _)| {
+                    // Sentence punctuation may follow a preserved URL, but a
+                    // longer path, query, fragment, or hostname is another URL.
+                    idea[start + url.len()..].trim_start_matches(['.', ',', ';', '!'])
+                        .chars().next().is_none_or(|c| {
+                        c.is_whitespace() || "<>\"'`()[]{}，。；！？、".contains(c)
+                    })
+                })
+        })
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+/// Attach exact reviewed URLs after decoration so clipping cannot cut a source.
+/// If the source cannot fit, fail closed rather than send an unattributed relay.
+pub fn with_sources(body: &str, sources: &[String], max_chars: usize) -> anyhow::Result<String> {
+    let mut out = body.to_owned();
+    for source in sources {
+        if !out.split_whitespace().any(|word| word == source) {
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            out.push_str(source);
+        }
+    }
+    anyhow::ensure!(sources.is_empty() || out.chars().count() <= max_chars, "relay_source_exceeds_output_budget");
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -280,7 +319,7 @@ mod tests {
                 tags: vec![],
                 url: "https://example.org/esp32".into(),
             },
-            source: if kind == OriginKind::Link {
+            source: if matches!(kind, OriginKind::Link | OriginKind::ForwardedCard) {
                 "https://example.org/esp32".into()
             } else {
                 "https://example.org/rss".into()
@@ -306,6 +345,24 @@ mod tests {
             self_review: SelfReview::Keep,
             group_level: true,
         }
+    }
+    #[test]
+    fn final_sources_are_minimal_selected_and_fit_without_truncation() {
+        let url = "https://example.org/esp32";
+        let topics = serde_json::json!([{"item":{"url":url,"description":"PRIVATE_BODY"},"source":"PRIVATE_SOURCE"}]);
+        assert!(selected_sources(&topics, "unrelated idea").is_empty());
+        for suffix in ["/other", "?private=1", "#private", ".other"] {
+            assert!(selected_sources(&topics, &format!("{url}{suffix}")).is_empty());
+        }
+        let sources = selected_sources(&topics, &format!("看看 {url}"));
+        assert_eq!(sources, [url]);
+        for idea in [format!("看看 {url}."), format!("[{url}]"), format!("{url}, 看看这个")] {
+            assert_eq!(selected_sources(&topics, &idea), [url]);
+        }
+        assert_eq!(with_sources("看看", &sources, 100).unwrap(), format!("看看\n{url}"));
+        assert_eq!(with_sources(url, &sources, 100).unwrap(), url);
+        assert!(with_sources("看看", &sources, url.chars().count()).is_err());
+        assert_eq!(with_sources("unrelated", &[], 100).unwrap(), "unrelated");
     }
     #[test]
     fn low_risk_sources_use_normal_relevance_and_preserve_source() {

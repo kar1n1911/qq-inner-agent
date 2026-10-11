@@ -102,11 +102,8 @@ pub fn collect(
         let mut links: BTreeMap<String, Vec<Evidence>> = BTreeMap::new();
         for row in rows {
             let body = text(&row, "text");
-            // Flattened forwarded nodes cannot establish independent human authorship.
-            if body.contains("[合并转发]") || body.contains("[卡片]") || body.contains("[CQ:")
-            {
-                continue;
-            }
+            // Only the public URL is exported, never the card body or identities.
+            // Existing card normalization is unchanged; opaque cards yield no URL.
             for url in extract(body) {
                 links.entry(url).or_default().push(Evidence {
                     message_id: text(&row, "id").into(),
@@ -117,7 +114,13 @@ pub fn collect(
         }
         for (url, evidence) in links {
             let origin = Origin {
-                kind: OriginKind::Link,
+                kind: if evidence.iter().any(|e| {
+                    e.text.contains("[合并转发]") || e.text.contains("[卡片]") || e.text.contains("[CQ:")
+                }) {
+                    OriginKind::ForwardedCard
+                } else {
+                    OriginKind::Link
+                },
                 item: Item {
                     title: url.clone(),
                     description: String::new(),
@@ -181,6 +184,9 @@ pub fn shortlist(
     interests: &crate::topic::Interests,
     short_term: &[String],
 ) -> Vec<Origin> {
+    // Design §21.7.3 L1274, L1277–1278: prefer already-forwarded links/cards.
+    let mut origins = origins;
+    origins.sort_by_key(|o| o.kind != OriginKind::ForwardedCard);
     origins
         .into_iter()
         .filter(|o| {
@@ -324,7 +330,7 @@ mod tests {
         assert_eq!(o.evidence.len(), 1);
     }
     #[test]
-    fn excludes_private_current_disallowed_old_bot_and_forwarded_messages() {
+    fn excludes_private_current_disallowed_old_and_bot_messages() {
         for (chat, ts, own, prefix) in [
             ("group:10", 99900., false, ""),
             ("group:12", 99900., false, ""),
@@ -332,8 +338,6 @@ mod tests {
             ("group:11", 1., false, ""),
             ("group:11", 100001., false, ""),
             ("group:11", 99900., true, ""),
-            ("group:11", 99900., false, "[合并转发]"),
-            ("group:11", 99900., false, "[卡片]"),
         ] {
             let db = Store::in_memory().unwrap();
             for (id, author) in [("a", "20"), ("b", "21")] {
@@ -349,6 +353,60 @@ mod tests {
             }
             assert!(candidates(&db).is_empty(), "{chat} {ts} {own} {prefix}");
         }
+    }
+    #[test]
+    fn forwarded_urls_are_reachable_prioritized_and_reviewed_without_exporting_cards() {
+        // docs/working/prompt-and-learning-design.md §21.7.3 L1274, L1277–1278.
+        let interests = crate::topic::interests("esp32", &[]);
+        for marker in ["[合并转发]", "[卡片]", "[CQ:json,data="] {
+            let db = Store::in_memory().unwrap();
+            message(&db, "group:11", "card", "20",
+                &format!("{marker} PRIVATE_BODY PRIVATE_NAME private:42 group:12 {URL}"), 99900., false);
+            let origins = candidates(&db);
+            assert_eq!(origins.len(), 1);
+            assert_eq!(origins[0].kind, OriginKind::ForwardedCard);
+            assert_eq!(origins[0].self_review, SelfReview::Pending);
+            assert!(super::super::decide(&cfg(), &origins[0], &interests, &[]).is_none());
+            for audit in [json!(null), json!({"keep":[]}), json!({"keep":["0"]}), json!({"keep":[1]})] {
+                assert!(reviewed(&cfg(), candidates(&db), &audit, &interests, &[]).is_empty());
+            }
+            let kept = reviewed(&cfg(), candidates(&db), &json!({"keep":[0]}), &interests, &[]);
+            assert_eq!(kept.len(), 1, "already-forwarded tier must be reachable");
+            let exported = serde_json::to_string(&kept).unwrap();
+            for secret in ["PRIVATE_BODY", "PRIVATE_NAME", "private:42", "group:12", "group:11", marker] {
+                assert!(!exported.contains(secret));
+            }
+            let mut forged = candidates(&db).remove(0);
+            forged.self_review = SelfReview::Keep;
+            forged.evidence[0].text = "no link".into();
+            assert!(super::super::decide(&cfg(), &forged, &interests, &[]).is_none());
+            for n in 0..4 {
+                message(&db, "group:11", &format!("plain{n}"), "21",
+                    &format!("https://example.org/esp32/{n}"), 99901., false);
+            }
+            let selected = shortlist(candidates(&db), &cfg(), &interests, &[]);
+            assert_eq!(selected.len(), MAX_LINKS);
+            assert_eq!(selected[0].kind, OriginKind::ForwardedCard);
+        }
+    }
+    #[test]
+    fn forwarded_urls_preserve_scope_and_safety_boundaries() {
+        let interests = crate::topic::interests("esp32", &[]);
+        for chat in ["private:20", "group:10", "group:12"] {
+            let db = Store::in_memory().unwrap();
+            message(&db, chat, "card", "20", &format!("[卡片] {URL}"), 99900., false);
+            assert!(candidates(&db).is_empty(), "{chat}");
+        }
+        for body in ["[卡片] opaque".to_owned(),
+            "[卡片] https://example.org/esp32?token=secret".to_owned(),
+            "[合并转发] http://localhost/esp32".to_owned()] {
+            let db = Store::in_memory().unwrap();
+            message(&db, "group:11", "card", "20", &body, 99900., false);
+            assert!(candidates(&db).is_empty());
+        }
+        let db = Store::in_memory().unwrap();
+        message(&db, "group:11", "card", "20", &format!("[卡片] 违法 {URL}"), 99900., false);
+        assert!(reviewed(&cfg(), candidates(&db), &json!({"keep":[0]}), &interests, &[]).is_empty());
     }
     #[test]
     fn review_dedup_and_switch_fail_closed_without_exporting_evidence() {

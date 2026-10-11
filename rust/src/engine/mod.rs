@@ -1929,6 +1929,13 @@ impl Engine {
         ] {
             payload[key] = t.payload[key].clone();
         }
+        let relay_sources = crate::topic::relay::selected_sources(
+            &t.payload["externalTopics"], &selected.candidate.text,
+        );
+        if !relay_sources.is_empty() {
+            // Reference data only: no external body, sender, or source-chat metadata.
+            payload["untrustedExternalSources"] = json!(relay_sources);
+        }
         if a.memory_recall && t.payload.get("recallEvidence").is_some() {
             payload["recallEvidence"] = t.payload["recallEvidence"].clone();
         }
@@ -1979,7 +1986,7 @@ impl Engine {
             }
         };
         // C2/C3：只校验真实可拆分路径，单条 decorate/装饰门控保持不变。
-        let bubbles = if multi_bubble_allowed {
+        let mut bubbles = if multi_bubble_allowed {
             match crate::persona::humanize::multi_bubbles(&response["bubbles"], a.max_output_chars as usize) {
                 Ok(bubbles) => bubbles,
                 Err(error) => {
@@ -1988,6 +1995,20 @@ impl Engine {
                 }
             }
         } else { None };
+        if let Some(items) = bubbles.as_mut() {
+            // Put attribution in the first bubble, even if a later send is cancelled.
+            let remaining = (a.max_output_chars as usize).min(90)
+                .saturating_sub(items.iter().skip(1).map(|s| s.chars().count()).sum());
+            if let Some(first) = items.first_mut() {
+                *first = match crate::topic::relay::with_sources(first, &relay_sources, remaining) {
+                    Ok(text) => text,
+                    Err(error) => {
+                        self.db()?.assessment_status(chat, &t.id, "generation_failed")?;
+                        return Err(error);
+                    }
+                };
+            }
+        }
         let (delivery_id, decorated, targeting) = {
             let mut core = self.core();
             let db = self.db()?;
@@ -1995,7 +2016,7 @@ impl Engine {
             let raw = text(&response, "text");
             let lower = raw.to_ascii_lowercase();
             let face_only = policy::js_trim(raw).is_empty();
-            let decorated = decorate(&response, &decorations, a.max_output_chars as usize);
+            let mut decorated = decorate(&response, &decorations, a.max_output_chars as usize);
             if bubbles.as_ref().is_some_and(|items| items.iter().any(|bubble| {
                 (a.affect.enabled && !crate::persona::affect::content_allowed(bubble))
                     || ["<think>", "</think>", "<analysis>", "</analysis>"]
@@ -2013,6 +2034,17 @@ impl Engine {
             {
                 db.assessment_status(chat, &t.id, "generation_failed")?;
                 anyhow::bail!("invalid_articulation");
+            }
+            if !relay_sources.is_empty() {
+                decorated["text"] = match crate::topic::relay::with_sources(
+                    text(&decorated, "text"), &relay_sources, a.max_output_chars as usize,
+                ) {
+                    Ok(text) => json!(text),
+                    Err(error) => {
+                        db.assessment_status(chat, &t.id, "generation_failed")?;
+                        return Err(error);
+                    }
+                };
             }
             if self.obsolete(&core, &db, &t)?
                 // 补看从本轮开始计时，仍保留慢回复超时保护。
