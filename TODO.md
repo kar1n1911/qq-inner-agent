@@ -8,27 +8,6 @@
 > - **设计 vs 实现审计的 39 条偏差及其修复进度**:见
 >   [`docs/working/audit-design-vs-implementation.md`](docs/working/audit-design-vs-implementation.md)(第五节含额度中断后的续做顺序)。
 
-## A. 人味 / 说话方式(同一条线,建议一批改)
-
-- **A1 提示词:候选类型 + 评分标准** ✅ 已完成(`4cdf504`)
-  - `src/prompts.mjs` 的 `formation` 首段:system1 扩成"快速回应 / 情绪反应 / 随口搭茬(可很短、可只附和)",
-    去掉 system2 的"观察",加"优先像群里人随口说的话:可以说废话、可以只跟着乐、不必每条都有信息量或判断"。
-  - `evaluation`:补"自然的随口搭话(哪怕没有信息量)同样值得发言;不要只奖励有信息量、有判断或显得聪明的候选"。
-  - 同步更新金标准 `rust/tests/golden/prompts.json`(逐字比对,必失配)。
-
-- **A2 提示词:学习项与死锁** ✅ 已完成(`4cdf504`)
-  - `traits` 层长期为空(实测 `long_term:1 / traits:0 / expressions:0`),而 `LEARNED_STYLE` 要求
-    "只能用 chatStyle 与 memories 中确有依据的说法" → **死锁**:没有依据就永远说不出群里的说话方式。
-  - 修:放宽口语语气词/常见网络表达的使用门槛;`formation` 里把"群内互动风格 / 语气 / 常用表达"列为优先学习项,收紧 skip。
-  - 观察期风格偏旁观(`orientation.analysis.style` 实测为"先以观察者姿态潜水…不凑热闹"),
-    在 ORIENTATION 提示词里加入"初始风格要偏参与而非旁观,避免一上来就点评"。
-
-- **A3 长度档位偏短** ✅ 已完成(`01b7877`)
-  - `policy.rs` 权重:被点名 `short 0.70 / medium 0.28 / long 0.02`;开放 `tiny 0.35 / short 0.45 / medium 0.18 / long 0.02`
-    → 开放场景 **80% 落 tiny/short**。
-  - `engine/mod.rs:1647` affect 的 `disposition.length()` 会**直接覆盖**权重表(`Angry|Supportive → short`)。
-  - 修:下调 tiny/short 权重、提高 medium;重新评估 affect 覆盖是否合理。
-
 ## B. 发送与叫醒
 
 - **B1 @ 提及要能"叫醒"** ✅ 已完成(`01b7877`)
@@ -120,29 +99,6 @@
 
 > 已完成。原审计方法:逐条比对 `docs/working/*.md` 的"连续/比例/强度/渐变"意图与 `rust/src/` 实现。
 
-### 已完成 ✅
-
-- **I0 affect 四象限硬分类 → 连续模型**(`0d64c4f`)
-  `motivation(v,r) = 1 + intensity·(Σwᵢmᵢ/Σwᵢ − 1)`,`intensity = min(1, √(v²+r²)/0.15)`,四角高斯加权;
-  `disposition()` 降级为 **argmax**(仅供规则/熔断/诊断)。长度权重同样连续倾斜。含 1000 步密集采样单调性断言。
-- **I0b 死区 + @ 豁免 + `Withdrawn 0.2→0.5`**(`5e0f4b5`),后被连续模型吸收。
-
-- **I1–I4 §10.4 素材选靶链连续化**(`85d53db`)
-  - I1 `quiet` 二值(`rate<0.5 || since>=silence*6`)→ **由连续活跃度逐级插值**出 drift(4 档)/anchor(3 档),不再一次跳两级;
-  - I2 **`reaction_style` 接上消费点**(原为死代码,`:459` 用 `_` 丢弃)且 `short_density → 风格`改为连续;
-  - I3 目标相关度去掉二次量化(原 `if quiet{0.3}else{0.8}` → 四档 → 三层地板,只落 6 个取值);
-  - I4 `confident` 的 **20× 跳变**(`if confident {1.} else {0.05}`)→ 由结构量算**连续置信度**。
-
-- **I5–I6 情绪接线**(`7a6fa59`)
-  - I5 **群级 mood 补接线**:`apply` 写入 group 级(affinity 仍只属人物级)、`behavior` 读取并在**主动发言准入**上生效(被点名仍豁免);
-  - I6 **§6.6 情绪调制学习分诊**:低 mood → 倾向 `skip` 且已存 `partial` 不升格;低 affinity → 提高证据门槛;高 affinity → 可更早 `learn`。
-    方向性守住:**只调阈值,不改事实性校验**;`agreement` 不参与。
-
-- **丙 无文档依据的硬阈值**(`2a4bedc`)
-  - `policy.rs` `similarity > 0.88` → 改为 **`smoothstep` 连续抑制**(`repetition_penalty`),附"0.88 两侧斜率连续"断言;
-  - `ranking.rs` / `expression.rs` 的 `confidence < min_confidence`、`policy.rs` 资格门 → **保留为可信门并注明理由**
-    (改连续会危及"证据不足不得入库"的保守性)。
-
 ### 未完成 ⛔
 
 - **I7 §15 跨群共享学习** —— 文档 L873 已给连续公式 `share = clamp((overlap−floor)/(ceil−floor))`(floor .35/ceil .75),
@@ -213,17 +169,6 @@ card_changeable, is_robot, shut_up_timestamp, role, title
 
 **涉及文件**:`transport/mod.rs`(`send`)、`engine/mod.rs`(默认行为 + 校验)、
 `engine/policy.rs`(开放场景的低概率)、`src/prompts.mjs`(ARTICULATE 契约)、`store`(记录发出的段)。
-
-## K. 被额度中断的任务(worktree 已存 WIP,续做勿重来)⛔
-
-| worktree | WIP 提交 | 内容 | 状态 |
-| --- | --- | --- | --- |
-| `selfref-prompt` | 见 `git log` | C4 自我指涉**判据化**(@了自己QQ / 含自己消息 / 命中群名片或昵称 / 指向自身属性四判据 + "群内可能有其他 bot"反例);EVALUATION 明确"不需要建议或信息增量" | 改了 `prompts.mjs`/`generated`/`golden`,**未提交完成** |
-| `selfref-engine` | 见 `git log` | C2 自我身份改带判据+反例;C1 核实 speaker 取群名片;C3 门槛去"增量"(`rating_weight` 去平方、`quality` 不再相乘硬卡、`relevance` full_at 3.0→2.5) | 改了 `policy.rs`/`self_identity.rs`/tests,**未提交完成** |
-
-> 另:`threshold` 已在线下调 **3.3 → 2.6** 并热加载生效(配置侧,不依赖 codex)。
->
-> **续做时必须并入 §J1**:用成员列表的 `is_robot` 区分"其他机器人"与"自己"(实证:65840633 有成员头衔就叫 `bot`)。
 
 ## L. tick 筛选优化(作息判据根治 + 洪泛)⏸ 待额度恢复 —— **M 与 L 已合并为本条**
 
@@ -628,17 +573,6 @@ Some("reply") => text.push_str(" [reply] "),
   - 建议顺序:先做**只读上下文插件**(风险最低)→ 再做输入侧(自定义消息源)→ 最后才是输出侧(能发消息)。
   - 备注:插件系统落地前,`relay`(E1)这类"半截模块"不要再增加 —— 先补齐接线范式,再考虑开放扩展点。
 
-## G. 本轮新增(2026-10-09)
-
-- **G1 提示词生成器曾完全不可用** ✅ 已修
-  - `rust/tools/gen-prompts.mjs` 依赖的 `src/orientation.mjs` 在清理 JS 源(`23bca38`)时被**误删** →
-    `node rust/tools/gen-prompts.mjs` 直接崩,**任何提示词改动都无法重新生成 `prompts.rs`、也无法跑 parity**。
-  - 已从 `23bca38^` 恢复(98 行);重生成后 `prompts.rs` 逐字一致,`prompts_parity` 通过。
-  - 教训:`src/prompts.mjs` 与 `src/orientation.mjs` 是**提示词源**,不属于"已归档的 JS agent 实现",不可删。
-
-- **G2 远端磁盘已并入 128G** ✅
-  - `sda2` 40G → **126G**(可用 94G);`growpart` + `resize2fs`,服务未中断。
-
 ## H. 流程备忘(重要)
 
 - **每个模块的验收标准(必须遵守):先测"输入/输出本身是否正常",再确认"两者是否真的接入了程序总线"。**
@@ -648,15 +582,8 @@ Some("reply") => text.push_str(" [reply] "),
   - 验收时要给出**可观测证据**(日志事件/表数据/仪表盘字段),不能只看"测试通过"。
 
 
-
 - **判断 codex 是否结束,要看"倒计时是否在动",不是"有没有倒计时"。**
   - pebrel 会把**中途的** codex 报成 `finished`(误报);面板上的计时器形如 `1m 06s • esc to interrupt`。
   - 正确判据:**隔一段时间读两次面板,比较计时器的值** —— 值在变大 = 还在工作;值不变或消失 = 已停。
   - 踩过的坑:以前只查"有没有倒计时",于是长时间误判 codex 仍在工作。
 - 因此**不使用** `pebrel agent delegate` 的自动回报:它同样会把中途状态报成完成,反而制造误判。
-
-## 已完成的(留档)
-
-- rapidocr 引擎接入(`d72a00e`)——实测中文明显优于 tesseract,且自带置信度;远端已切到 `engine: rapidocr`。
-- OCR 可信度信号(`e61fe46`)、转发内图片标记 + OCR(`4bf03aa`)、消息回填(默认开启)、感知与值班解耦。
-- 远端服务顺序:NapCat 改为在 agent 之后启动。
