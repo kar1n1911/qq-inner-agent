@@ -718,14 +718,18 @@ pub struct Expression {
     pub reuse_seconds: f64,
 }
 
+fn default_emoji_enabled() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Emoji {
-    /// P6c 门控新功能：缺省关闭，省略 false 保持配置序列化 parity。
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    /// 按群学习频率默认开启；始终序列化以保留显式关闭并与 JS 保持 parity。
+    #[serde(default = "default_emoji_enabled")]
     pub learn_frequency: bool,
-    /// 仅允许轻松附和的单 face 回复；不是长度 parity 开关。
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    /// 默认开启，仅允许轻松附和的单 face 回复；不是长度 parity 开关。
+    #[serde(default = "default_emoji_enabled")]
     pub face_only: bool,
     /// 配置键 `agent.emoji.enabled`。
     pub enabled: bool,

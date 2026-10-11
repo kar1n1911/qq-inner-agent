@@ -19,13 +19,32 @@ fn add(db: &Store, chat: &str, id: &str, ts: f64, own: bool, message: Value) {
     capture(db, chat, id, &json!({"message":message})).unwrap();
 }
 #[test]
-fn flags_default_off_and_reject_non_booleans() {
-    let config = Config::from_value(&runtime_defaults()).unwrap();
-    assert!(!config.agent.emoji.learn_frequency);
-    assert!(!config.agent.emoji.face_only);
-    let serialized = serde_json::to_value(&config.agent.emoji).unwrap();
-    assert!(serialized.get("learnFrequency").is_none());
-    assert!(serialized.get("faceOnly").is_none());
+fn flags_default_on_and_reject_non_booleans() {
+    // docs/working/prompt-and-learning-design.md §六 L75/L942：开箱即用默认开启。
+    let mut omitted = runtime_defaults();
+    for key in ["learnFrequency", "faceOnly"] {
+        omitted["agent"]["emoji"].as_object_mut().unwrap().remove(key);
+    }
+    let example: Value = serde_json::from_str(include_str!("../../config.example.json")).unwrap();
+    for input in [runtime_defaults(), omitted, merge(&runtime_defaults(), &example)] {
+        let config = Config::from_value(&input).unwrap();
+        assert!(config.agent.emoji.learn_frequency);
+        assert!(config.agent.emoji.face_only);
+    }
+    for learned in [false, true] {
+        for face in [false, true] {
+            let input = merge(&runtime_defaults(), &json!({"agent":{"emoji":{
+                "learnFrequency":learned,"faceOnly":face
+            }}}));
+            let config = Config::from_value(&input).unwrap();
+            let serialized = serde_json::to_value(&config).unwrap();
+            assert_eq!(serialized["agent"]["emoji"]["learnFrequency"], learned);
+            assert_eq!(serialized["agent"]["emoji"]["faceOnly"], face);
+            let restored: Config = serde_json::from_value(serialized).unwrap();
+            assert_eq!(restored.agent.emoji.learn_frequency, learned);
+            assert_eq!(restored.agent.emoji.face_only, face);
+        }
+    }
     for key in ["learnFrequency", "faceOnly"] {
         for value in [json!("true"), json!(1), Value::Null] {
             let config = merge(&runtime_defaults(), &json!({"agent":{"emoji":{key:value}}}));

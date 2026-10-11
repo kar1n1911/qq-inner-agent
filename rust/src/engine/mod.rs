@@ -1883,13 +1883,6 @@ impl Engine {
         } else {
             None
         };
-        // 36–37：P6c parity：与 JS 一样先装饰抽样，再复用已有长度抽样，绝不加开关。
-        let decorations = {
-            let _core = self.core();
-            decoration_choices(&*self.db()?, chat, self.now(), &a.emoji, || {
-                (self.options.expression_random)()
-            })?
-        };
         let length_bias = behavior.disposition.map(|_| {
             crate::persona::affect::LengthBias::from_affect(behavior.mood, behavior.rationality)
         });
@@ -1902,6 +1895,15 @@ impl Engine {
             length_bias.as_ref(),
             || (self.options.expression_random)(),
         );
+        // 先抽长度；long 的产出要求由空候选在引擎中强制执行。
+        let decorations = if length_target == "long" {
+            json!({"symbols":[],"faceIds":[]})
+        } else {
+            let _core = self.core();
+            decoration_choices(&*self.db()?, chat, self.now(), &a.emoji, || {
+                (self.options.expression_random)()
+            })?
+        };
         let face_only_allowed = a.emoji.face_only
             && length_target != "long"
             && crate::persona::humanize::face_only_allowed(

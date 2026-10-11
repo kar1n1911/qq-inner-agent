@@ -70,7 +70,9 @@
         "🤔",
         "👍"
       ],
-      "faceIds": []
+      "faceIds": [],
+      "learnFrequency": true,
+      "faceOnly": true
     },
     "learning": {
       "enabled": true,

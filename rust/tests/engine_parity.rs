@@ -630,7 +630,7 @@ fn scenarios() -> Vec<Value> {
         json!({"emoji":{"learnFrequency":false,"faceOnly":false}}),
         vec![direct(), run()],
     ));
-    // parity：每档边界及 self 禁 tiny；序列验证装饰先抽样、长度后抽样。
+    // 每档边界及 self 禁 tiny；长度先抽样、装饰后抽样。
     for hint in ["self", "open", "other"] {
         for draw in [0., 0.349, 0.35, 0.699, 0.7, 0.799, 0.8, 0.979, 0.98, 0.999] {
             let content = match hint {
@@ -643,7 +643,7 @@ fn scenarios() -> Vec<Value> {
                 json!({"personality":{"variants":[]},"emoji":{"enabled":true,"probability":1}}),
                 vec![ingest("m1", content), run()],
             );
-            case["expressionDraws"] = json!([0.1, draw]);
+            case["expressionDraws"] = json!([draw, 0.1]);
             cases.push(case);
         }
     }
@@ -1150,7 +1150,7 @@ async fn control_decision_event_reports_below_threshold_withhold() {
 fn face_case(enabled: bool) -> Value {
     base(
         "face_only",
-        json!({"threshold":1,"interruptThreshold":1,"sending":{"enabled":false},"emoji":{"enabled":true,"faceOnly":enabled,"probability":1,"faceIds":["14"],"symbols":["🙂"],"cooldownSeconds":0}}),
+        json!({"threshold":1,"interruptThreshold":1,"sending":{"enabled":false},"emoji":{"enabled":true,"faceOnly":enabled,"learnFrequency":false,"probability":1,"faceIds":["14"],"symbols":["🙂"],"cooldownSeconds":0}}),
         vec![],
     )
 }
@@ -1170,6 +1170,85 @@ async fn face_turn(
     e.tick().unwrap();
     e.wait_idle().await;
 }
+#[tokio::test]
+async fn default_humanize_flags_enable_learning_and_face_only_out_of_box() {
+    // docs/working/prompt-and-learning-design.md §六 L75/L942：不用配置两个开关。
+    for (draw, sent) in [(0.079, true), (0.08, false)] {
+        let mut case = face_case(true);
+        for key in ["learnFrequency", "faceOnly"] {
+            case["config"]["agent"]["emoji"].as_object_mut().unwrap().remove(key);
+        }
+        case["expressionDraws"] = json!([0.5, draw]);
+        let (e, h) = setup(&case);
+        face_turn(&e, &h, "m1", "哈哈", 10, 3., json!({"text":"","faceId":"14"})).await;
+        let payload = h.payloads.lock().unwrap().last().unwrap().clone();
+        assert_eq!(payload["faceOnlyAllowed"], true);
+        assert_eq!(*h.sends.lock().unwrap(), usize::from(sent), "群频率冷启动 8% 生效");
+        assert_eq!(h.rows("SELECT count(*) n FROM humanize_faces")[0]["n"], 1);
+        e.stop().await;
+    }
+}
+
+#[tokio::test]
+async fn long_rejects_model_decorations_and_other_lengths_keep_candidates() {
+    // src/prompts.mjs:63：lengthTarget 为 long 时不配表情，是产出要求。
+    for (draw, length) in [(0., "tiny"), (0.2, "short"), (0.6, "medium"), (0.95, "long")] {
+        for response in [
+            json!({"text":"收到","emoji":"🙂"}),
+            json!({"text":"收到","faceId":"14"}),
+            json!({"text":"收到","emoji":"🙂","faceId":"14"}),
+            json!({"text":"","faceId":"14"}),
+        ] {
+            let mut case = face_case(true);
+            case["expressionDraws"] = json!([draw, 0.]);
+            let (e, h) = setup(&case);
+            face_turn(&e, &h, "m1", "哈哈", 10, 3., response.clone()).await;
+            let payload = h.payloads.lock().unwrap().last().unwrap().clone();
+            assert_eq!(payload["lengthTarget"], length);
+            let choices = if length == "long" {
+                assert_eq!(payload["faceOnlyAllowed"], false);
+                json!({"symbols":[],"faceIds":[]})
+            } else {
+                json!({"symbols":["🙂"],"faceIds":["14"]})
+            };
+            assert_eq!(payload["decorations"], choices);
+            let decorated = qq_inner_core::persona::expression::decorate(&response, &choices, 800);
+            let rejected = length == "long" && response["text"] == "";
+            assert_eq!(*h.sends.lock().unwrap(), usize::from(!rejected));
+            if !rejected {
+                assert!(h.trace.lock().unwrap().contains(&json!([
+                    "send", "group:10", decorated["text"], decorated["faceId"]
+                ])));
+            }
+            if length == "long" {
+                assert_eq!(decorated["text"], response["text"]);
+                assert!(decorated["faceId"].is_null());
+                assert_eq!(decorated["decorated"], false);
+                assert!(h.rows("SELECT * FROM decoration_usage").is_empty());
+            } else {
+                assert_eq!(h.rows("SELECT * FROM decoration_usage").len(), 1);
+            }
+            e.stop().await;
+        }
+    }
+}
+
+#[test]
+fn length_bucket_distribution_is_unchanged() {
+    // 穷举等距中点，固定既有 self/open 分布；不改变 policy 权重或 affect 偏置。
+    for (hint, expected) in [("self", [0, 500, 420, 80]), ("open", [150, 400, 380, 70])] {
+        let mut counts = [0; 4];
+        for i in 0..1000 {
+            let length = qq_inner_core::engine::policy::pick_length_target(
+                hint, None, || (f64::from(i) + 0.5) / 1000.,
+            );
+            let index = ["tiny", "short", "medium", "long"].iter().position(|name| *name == length).unwrap();
+            counts[index] += 1;
+        }
+        assert_eq!(counts, expected, "{hint}");
+    }
+}
+
 #[tokio::test]
 async fn face_only_runtime_gate_and_hard_rejections() {
     for (enabled, content, score, response, permitted) in [
@@ -1326,7 +1405,7 @@ async fn face_only_streak_survives_reload_and_resets_only_with_text() {
     e.stop().await;
 }
 #[tokio::test]
-async fn face_learning_captures_human_segments_and_default_does_not_create_tables() {
+async fn face_learning_captures_human_segments_and_explicit_opt_out_does_not_create_tables() {
     for enabled in [false, true] {
         let mut case = face_case(false);
         case["config"]["agent"]["emoji"]["learnFrequency"] = json!(enabled);
@@ -2829,7 +2908,7 @@ async fn continuous_affect_length_flows_from_stored_coordinates() {
             }),
             vec![],
         );
-        case["expressionDraws"] = json!([0.1, 0.49]);
+        case["expressionDraws"] = json!([0.49, 0.1]);
         let (e, h) = setup(&case);
         {
             let db = h.store.lock().unwrap();
