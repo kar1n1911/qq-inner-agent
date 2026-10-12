@@ -384,7 +384,10 @@ fn setup(case: &Value) -> (Arc<Engine>, Arc<Harness>) {
         log: Arc::new(move |event, data| logger.push(json!(["log", event, data]))),
     };
     let c = Config::from_value(&merge(&defaults(), &case["config"])).unwrap();
-    let engine = if let Some(media) = case.get("mediaSelect") {
+    let engine = if let Some(collection) = case.get("collection") {
+        Engine::new_with_media(c, store, h.clone(), h.clone(), options,
+            Default::default(), serde_json::from_value(collection.clone()).unwrap()).unwrap()
+    } else if let Some(media) = case.get("mediaSelect") {
         Engine::new_with_media(c, store, h.clone(), h.clone(), options,
             serde_json::from_value(media.clone()).unwrap(), Default::default()).unwrap()
     } else {
@@ -401,6 +404,53 @@ fn ingest(id: &str, text: &str) -> Value {
 }
 fn run() -> Value {
     json!({"op":"run"})
+}
+
+#[tokio::test]
+async fn duplicate_and_learning_rejections_log_message_attribution() {
+    // Root cause C: a duplicate discard and a rejected learning update must be searchable.
+    let (e, h) = setup(&base("rejection_attribution",
+        json!({"learning":{"enabled":true,"minMessages":1,"intervalSeconds":30}}), vec![]));
+    *h.model.lock().unwrap() = json!({"learning":{"layers":"bad"}});
+    let event = h.event(&json!({"id":"m1","text":"[CQ:at,qq=99]你好"}));
+    e.ingest(&event).unwrap();
+    e.ingest(&event).unwrap();
+    let key = h.key("group:10", "m1");
+    e.tick().unwrap();
+    e.wait_idle().await;
+    {
+        let trace = h.trace.lock().unwrap();
+        let duplicate = trace.iter().find(|row| row[0] == "log" && row[1] == "message_dropped").unwrap();
+        assert_eq!(duplicate[2]["chat"], "group:10");
+        assert_eq!(duplicate[2]["message_key"], key);
+        assert_eq!(duplicate[2]["raw_id"], "m1");
+        assert_eq!(duplicate[2]["reason"], "duplicate_message");
+        let rejected = trace.iter().find(|row| row[0] == "log" && row[1] == "chat_learning_rejected").unwrap();
+        assert_eq!(rejected[2]["chat"], "group:10");
+        assert_eq!(rejected[2]["message_key"], key);
+        assert_eq!(rejected[2]["reason"], "learning_error");
+        assert!(rejected[2]["error"].is_string());
+    }
+    e.stop().await;
+}
+
+#[test]
+fn media_collection_failure_logs_message_and_segment() {
+    let mut case = base("media_failure", json!({}), vec![]);
+    case["collection"] = json!({"enabled":true});
+    let (e, h) = setup(&case);
+    e.ingest(&h.event(&json!({"id":"bad-face","text":[
+        {"type":"text","data":{"text":"你好"}},
+        {"type":"face","data":{"id":"invalid"}}
+    ]}))).unwrap();
+    let key = h.key("group:10", "bad-face");
+    let trace = h.trace.lock().unwrap();
+    let failure = trace.iter().find(|row| row[0] == "log" && row[1] == "media_collect_failed").unwrap();
+    assert_eq!(failure[2]["chat"], "group:10");
+    assert_eq!(failure[2]["message_key"], key);
+    assert_eq!(failure[2]["raw_id"], "bad-face");
+    assert_eq!(failure[2]["reason"], "segment_collection_failed");
+    assert_eq!(failure[2]["code"], "media_collect_failed:bad-face:1");
 }
 fn model(v: Value) -> Value {
     json!({"op":"model","value":v})

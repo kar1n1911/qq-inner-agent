@@ -505,6 +505,7 @@ impl Engine {
             let db = self.db()?;
             let (inserted, key) = db.record_message(&value)?;
             if !inserted {
+                (self.options.log)("message_dropped", json!({"chat":m.chat,"message_key":key,"raw_id":m.id,"reason":"duplicate_message","path":"identity_command"}));
                 return Ok(());
             }
             db.mark_handled(&m.chat, &key, true)?;
@@ -526,6 +527,7 @@ impl Engine {
             let db = self.db()?;
             let (inserted, key) = db.record_message(&value)?;
             if !inserted {
+                (self.options.log)("message_dropped", json!({"chat":m.chat,"message_key":key,"raw_id":m.id,"reason":"duplicate_message","path":"teaching_command"}));
                 return Ok(());
             }
             db.mark_handled(&m.chat, &key, true)?;
@@ -547,6 +549,7 @@ impl Engine {
         };
         let (inserted, key) = self.db()?.record_message(&value)?;
         if !inserted {
+            (self.options.log)("message_dropped", json!({"chat":m.chat,"message_key":key,"raw_id":m.id,"reason":"duplicate_message","path":"ordinary"}));
             return Ok(());
         }
         value["message_key"] = json!(key);
@@ -559,7 +562,7 @@ impl Engine {
         if let Some(collector) = &self.collector {
             let report = collector.ingest(&*self.db()?, event, &self_id, a, now)?;
             for code in report.failures {
-                (self.options.log)("media_collect_failed", json!({"code":code}));
+                (self.options.log)("media_collect_failed", json!({"chat":m.chat,"message_key":key,"raw_id":m.id,"reason":"segment_collection_failed","code":code}));
             }
         }
         if a.identity.enabled && m.chat.starts_with("group:") {
@@ -1729,8 +1732,8 @@ impl Engine {
                             json!({"chat":chat,"updates":count}),
                         );
                     }
-                    Err(_) => (self.options.log)("chat_learning_rejected", json!({"chat":chat})),
-                    _ => {}
+                    Err(error) => (self.options.log)("chat_learning_rejected", json!({"chat":chat,"message_key":t.last["message_key"],"raw_id":t.last["id"],"reason":"learning_error","error":error.to_string()})),
+                    Ok(None) => (self.options.log)("chat_learning_rejected", json!({"chat":chat,"message_key":t.last["message_key"],"raw_id":t.last["id"],"reason":"epoch_changed"})),
                 }
             }
             // 22–23：候选去重/保留；与 normalize 一样，非 BMP 截断按 Unicode 字符。

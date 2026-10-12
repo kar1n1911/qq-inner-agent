@@ -278,6 +278,26 @@ fn changed(root: &Path, applied: &str) -> Result<Option<String>> {
     let next = runtime_revision(root)?;
     Ok((next != applied).then_some(next))
 }
+fn event_rejected_context(event: &Value) -> Value {
+    let kind = event["message_type"].as_str().unwrap_or("");
+    let target = if kind == "group" { &event["group_id"] } else { &event["user_id"] };
+    let target_id = |value: &Value| value.as_str().map(str::to_owned).unwrap_or_else(|| value.to_string());
+    let chat = if matches!(kind, "group" | "private") && !target.is_null() {
+        format!("{kind}:{}", target_id(target))
+    } else if !event["group_id"].is_null() {
+        format!("group:{}", target_id(&event["group_id"]))
+    } else {
+        String::from("unknown")
+    };
+    json!({"chat":chat,"raw_message_id":event["message_id"],"raw_group_id":event["group_id"],
+        "raw_user_id":event["user_id"],"post_type":event["post_type"],
+        "message_type":event["message_type"],"notice_type":event["notice_type"]})
+}
+fn event_rejected_payload(mut context: Value, reason: &str, error: &str) -> Value {
+    context["reason"] = json!(reason);
+    context["error"] = json!(error);
+    context
+}
 struct Runtime {
     config: config::Config,
     raw: Value,
@@ -410,11 +430,12 @@ impl Runtime {
                 .await;
                 // 入站采集含同步文件/下载 I/O；单个顺序阻塞任务，不阻塞 Tokio worker。
                 let engine = self.engine.clone();
-                if !matches!(
-                    tokio::task::spawn_blocking(move || engine.ingest(&event)).await,
-                    Ok(Ok(()))
-                ) {
-                    (self.log)("event_rejected", json!({}));
+                let context = event_rejected_context(&event);
+                let outcome = tokio::task::spawn_blocking(move || engine.ingest(&event)).await;
+                match outcome {
+                    Ok(Ok(())) => {}
+                    Ok(Err(error)) => (self.log)("event_rejected", event_rejected_payload(context, "ingest_failed", &error.to_string())),
+                    Err(error) => (self.log)("event_rejected", event_rejected_payload(context, "ingest_task_failed", &error.to_string())),
                 }
             }
         }
@@ -728,6 +749,27 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[tokio::test]
+    async fn rejected_event_keeps_original_log_with_message_attribution() {
+        let dir = Temp::new();
+        dir.config(json!({"onebot":{"selfId":"99"},"agent":{"allowedUsers":["1"]}}));
+        let mut rt = dir.runtime();
+        let logs = Arc::new(Mutex::new(Vec::<(String, Value)>::new()));
+        let captured = logs.clone();
+        rt.log = Arc::new(move |event, data| captured.lock().unwrap().push((event.into(), data)));
+        rt.store.lock().unwrap().connection().execute_batch("DROP TABLE messages").unwrap();
+        rt.notice(Notification::Event(json!({"post_type":"message","message_type":"private",
+            "self_id":99,"user_id":1,"message_id":42,"time":1_700_000_000,
+            "message":"hello"}))).await;
+        let logs = logs.lock().unwrap();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].0, "event_rejected");
+        assert_eq!(logs[0].1["chat"], "private:1");
+        assert_eq!(logs[0].1["raw_message_id"], 42);
+        assert_eq!(logs[0].1["reason"], "ingest_failed");
+        assert!(logs[0].1["error"].as_str().unwrap().contains("no such table: messages"));
     }
 
     #[test]

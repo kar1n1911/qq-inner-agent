@@ -11,7 +11,7 @@ use std::{
     process::{Child, Command, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc::{self, SyncSender},
+        mpsc::{self, SyncSender, TrySendError},
         Arc, Mutex,
     },
     time::{Duration, Instant},
@@ -403,7 +403,9 @@ impl Worker {
                     }
                     Ok(())
                 };
-                if result().is_err() { logger("ocr_failed", json!({})); }
+                if let Err(error) = result() {
+                    logger("ocr_failed", json!({"chat":job.chat,"message_key":job.id,"reason":"processing_failed","engine":settings.engine,"error":error.to_string()}));
+                }
             }
         })?;
         Ok(Some(Self {
@@ -416,9 +418,6 @@ impl Worker {
         self.stopped.store(true, Ordering::Release);
     }
     pub(crate) fn enqueue(&self, chat: &str, id: &str, event: &Value, created: f64) {
-        if self.stopped.load(Ordering::Acquire) {
-            return;
-        }
         let images: Vec<_> = super::segments(event)
             .into_iter()
             .filter(|s| s["type"] == "image")
@@ -426,17 +425,19 @@ impl Worker {
         if images.is_empty() {
             return;
         }
-        if self
-            .sender
-            .try_send(Job {
+        if self.stopped.load(Ordering::Acquire) {
+            (self.log)("ocr_dropped", json!({"chat":chat,"message_key":id,"reason":"worker_stopped","image_count":images.len()}));
+            return;
+        }
+        match self.sender.try_send(Job {
                 chat: chat.into(),
                 id: id.into(),
                 images,
                 created,
-            })
-            .is_err()
-        {
-            (self.log)("ocr_failed", json!({}));
+            }) {
+            Ok(()) => {}
+            Err(TrySendError::Full(job)) => (self.log)("ocr_dropped", json!({"chat":job.chat,"message_key":job.id,"reason":"queue_full","image_count":job.images.len()})),
+            Err(TrySendError::Disconnected(job)) => (self.log)("ocr_dropped", json!({"chat":job.chat,"message_key":job.id,"reason":"worker_disconnected","image_count":job.images.len()})),
         }
     }
 }
@@ -976,12 +977,13 @@ TSV"
             .message(&json!({"chat":"a","id":"1","text":"[image]","ts":1}))
             .unwrap();
         let (tx, rx) = mpsc::channel();
+        let log: Logger = Arc::new(move |code, payload| {
+            tx.send((code.to_owned(), payload)).unwrap();
+        });
         let worker = Worker::start(
             &settings,
             db.clone(),
-            Arc::new(move |code, payload| {
-                tx.send((code.to_owned(), payload)).unwrap();
-            }),
+            log.clone(),
         )
         .unwrap()
         .unwrap();
@@ -994,7 +996,22 @@ TSV"
         );
         let (code, payload) = rx.recv_timeout(Duration::from_secs(5)).unwrap();
         assert_eq!(code, "ocr_failed");
-        assert_eq!(payload, json!({}));
+        assert_eq!(payload["chat"], "a");
+        assert_eq!(payload["message_key"], key);
+        assert_eq!(payload["reason"], "processing_failed");
+        assert_eq!(payload["engine"], settings.engine);
+        // Root cause C: a full queue discards a job; processing failure does not.
+        let (sender, _receiver) = mpsc::sync_channel(32);
+        let full = Worker { sender, stopped: Arc::new(AtomicBool::new(false)), log };
+        for _ in 0..33 {
+            full.enqueue("a", &key, &json!({"message":[{"type":"image","data":{"file":file}}]}), 1.);
+        }
+        let (code, payload) = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(code, "ocr_dropped");
+        assert_eq!(payload["chat"], "a");
+        assert_eq!(payload["message_key"], key);
+        assert_eq!(payload["reason"], "queue_full");
+        assert_eq!(payload["image_count"], 1);
         assert_eq!(
             db.lock().unwrap().history("a", None).unwrap()[0]["text"],
             "[image]"
