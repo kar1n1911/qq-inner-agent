@@ -338,9 +338,11 @@ ssh vm 'cd ~/github_repo/qq-inner-agent && codex exec resume --last \
 3. **不要用 `pgrep`/`pkill -f "codex exec"`** —— 它会把**你自己那条 ssh 命令**匹配进去，
    造成假阳性甚至把自己杀掉（踩过两次）。
    **判断完成只看 `-o` 结果文件是否生成**；杀进程**用显式 pid**。
-4. **杀掉 codex 后必须一起清掉 `app-server`/`proxy`** —— 它们持有**线程写入锁**，
+4. **每次派任务前先清掉 `app-server`/`proxy`** —— 它们持有**线程写入锁**，
    否则下一次 `resume` 会立刻失败并报
    `thread <id> already has an active writer`（结果文件不生成）。
+   ⚠️ **不只是"杀掉 codex"才出现**：会话**正常结束**后同样会留下这个锁（实测两次）。
+   **所以这一步应当是每次派发前的固定动作**，而不是出问题后的补救。
    处理：
 
    ```bash
