@@ -647,6 +647,37 @@ runningRevision:  58bfb56
 ### 临时对策
 源码更新后若 `apply` 报 `already_latest`，手工 `cargo build --release` 并重启。
 
+## X2. 插件化的首批实现：两个真实插件 ⏸ 未开工（用户 2026-10-12 指定）
+
+**位置**：**X（端口化）之后、新功能（C/P/O/Q）之前**。用两个真实插件验证端口抽象是否真的成立。
+
+### ① OneBot 插件（验证 `ChatPort`）
+把现有 `transport/` 搬到端口之后 —— 正是计划里的 **P2**。
+
+### ② A_memorix 插件（验证 `MemoryPort`）
+
+**库：[`A-Dawn/A_memorix`](https://github.com/A-Dawn/A_memorix)**（勿与同名项目混淆）
+
+已核实的关键事实：
+
+- 面向 AI Agent 的**长期记忆服务**；2.x 为**独立 Python 包**（`a-memorix`，导入名 `a_memorix`），
+  要求 Python 3.12+；
+- 入口：`AMemorixEngine`（多 Namespace）/ `SDKMemoryKernel`（单 Namespace）；
+- **Namespace 隔离**：每个 Namespace 有独立目录、写者锁、配额与 LRU 生命周期；
+- **`NamespaceHostPorts`**：宿主注入 `EmbeddingProvider` / `LLMProvider` / `IdentityResolver` /
+  `MessageSource` / `Clock` —— **与我们端口化的 "host ports" 是同一个概念**，
+  可作为外部参照检验我们的设计；
+- 传输：**Protobuf 是唯一 IDL**，原生 gRPC，HTTP/JSON 由 gRPC-Gateway 按同一份注解生成；另有 MCP；
+- 自带 **Adapter Manifest 与 [Adapter Protocol v1](https://github.com/A-Dawn/A_memorix/blob/main/docs/ADAPTER_PROTOCOL_V1.md)**：
+  「远程 Adapter 只能使用 gRPC / HTTP-JSON / 固定 Namespace MCP；进程内 Adapter 只能依赖顶层公开 Python API，
+  不能导入 `a_memorix.core`」—— **这套约束可反过来检验我们的端口边界**；
+- ⚠️ **许可证 AGPL-3.0-only** —— 接入前**必须显式确认**它对本项目的影响
+  （尤其网络服务条款）。我们的用法是**客户端连接未修改的服务**，但这条不能靠推测，要确认后再动。
+
+**为什么选它做 `MemoryPort` 的第一个实现**：它是**跨语言、跨进程**的（Python + gRPC），
+而我们的核心是 Rust —— 这恰好是端口抽象最该证明的能力：
+**换一个进程外的记忆后端，内核不应有感。**
+
 ## F. 未来计划
 
 - **F1 插件系统** ⏸(架构级,未开工)
