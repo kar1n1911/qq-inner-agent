@@ -230,6 +230,30 @@ fn full_update_decision_covers_revision_schema_axes_and_unknown_running_revision
     }
 }
 
+// VM observation: update full rebuilt after a completed deployment because the
+// running revision was unavailable. A live revision plus migrated schema skips work.
+#[test]
+fn full_update_skips_build_when_running_revision_is_current_and_schema_is_migrated() {
+    let fixture = Fixture::new();
+    let database = fixture.base.join("agent.sqlite");
+    migrated_database(&database);
+    let systemctl = fixture.base.join("systemctl");
+    executable(&systemctl, "#!/bin/sh\nexit 0\n");
+    let steps = Mutex::new(Vec::new());
+    let result = full_update_with(
+        &fixture.root,
+        &fixture.root.join("rust/target/release/qq-inner-core"),
+        Some(&fixture.old),
+        &database,
+        &systemctl,
+        &fixture.build,
+        &|step| steps.lock().unwrap().push(step.to_owned()),
+    ).unwrap();
+    assert_eq!(result["result"], "already_latest");
+    assert!(steps.lock().unwrap().is_empty());
+    assert!(!fixture.root.join(".runtime/build-count").exists());
+}
+
 #[test]
 fn full_update_migrates_when_running_code_is_current_but_schema_is_old() {
     let fixture = Fixture::new();

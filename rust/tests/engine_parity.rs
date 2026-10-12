@@ -1587,6 +1587,45 @@ async fn owner_teaching_commands_are_consumed_and_sources_are_special() {
     assert!(h.rows("SELECT * FROM memory_layers").is_empty());
 }
 
+// Design: docs/working/prompt-and-learning-design.md L1168-1171 (§20.3).
+#[tokio::test]
+async fn owner_teaching_uses_owner_uin_without_weakening_group_or_other_user_admission() {
+    for (owner_allowed, allowed_users) in [(true, json!(["20"])), (false, json!(["21"]))] {
+        let (engine, h) = setup(&base("owner-admission", json!({
+            "allowedUsers":allowed_users,
+            "ownerTeaching":{"enabled":true,"ownerUin":"20"}
+        }), vec![]));
+        for (id, sender, kind, group, command) in [
+            ("owner-ok", 20, "private", 0, "/记住 喜欢Rust"),
+            ("owner-fail", 20, "private", 0, "/记住"),
+            ("other", 21, "private", 0, "/记住 不该写入"),
+            ("group", 20, "group", 999, "/记住 不该写入"),
+        ] {
+            engine.ingest(&json!({"post_type":"message","message_type":kind,"self_id":99,
+                "user_id":sender,"group_id":group,"message_id":id,"time":h.now(),"message":command})).unwrap();
+            engine.tick().unwrap();
+            engine.wait_idle().await;
+        }
+        *h.model.lock().unwrap() = json!({"invalidStage":"LEARNING_REVIEW","invalid":{}});
+        engine.ingest(&json!({"post_type":"message","message_type":"private","self_id":99,
+            "user_id":20,"message_id":"review-fail","time":h.now(),"message":"/记住 审核失败样本"})).unwrap();
+        engine.tick().unwrap();
+        engine.wait_idle().await;
+        let memory = h.rows("SELECT text FROM memory_layers");
+        assert_eq!(memory, vec![json!({"text":"喜欢Rust"})]);
+        assert!(!engine.chats().iter().any(|(chat, _)| chat == "group:999"));
+        if !owner_allowed {
+            engine.ingest(&json!({"post_type":"message","message_type":"private","self_id":99,
+                "user_id":20,"message_id":"ordinary","time":h.now(),"message":"普通聊天"})).unwrap();
+            assert!(!engine.chats().iter().any(|(chat, _)| chat == "private:20"));
+        }
+        let replies: Vec<_> = h.trace.lock().unwrap().iter()
+            .filter(|row| row[0] == "send").cloned().collect();
+        assert!(replies.iter().any(|row| row[2] == "记住了"));
+        assert!(replies.iter().filter(|row| row[2].as_str().unwrap_or("").starts_with("没看懂：")).count() >= 2);
+    }
+}
+
 #[test]
 fn owner_teaching_disabled_or_unauthorized_remains_normal_chat() {
     for (settings, kind, sender) in [

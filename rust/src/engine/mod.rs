@@ -530,6 +530,10 @@ impl Engine {
             core.teaching_commands.push((m.chat, m.sender, raw));
             return Ok(());
         }
+        // The owner bypasses allowedUsers only for teaching commands, never ordinary chat.
+        if !policy::allowed(&m.chat, a) {
+            return Ok(());
+        }
         // History must not create active chats (including media/proactive cycles).
         let state = if backfill {
             None

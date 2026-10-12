@@ -20,7 +20,7 @@ async fn running_revision(data_dir: &std::path::Path) -> Option<String> {
             .await
             .ok()?;
         socket
-            .write_all(b"{\"id\":\"full-update\",\"method\":\"update.status\"}\n")
+            .write_all(b"{\"id\":\"full-update\",\"method\":\"state.get\"}\n")
             .await
             .ok()?;
         let mut line = String::new();
@@ -428,8 +428,9 @@ impl Runtime {
                 .snapshot(now)?;
         drop(db);
         let bot = self.bot.state();
-        // Exactly src/main.mjs status(): nulls are retained and cycle timestamps are seconds.
+        // JS status fields retain their types and seconds; runningRevision reports this live process.
         Ok(json!({"updatedAt":iso(now), "pid":pid, "mode":mode(c),
+            "runningRevision":qq_inner_core::update::REVISION,
             "prompts":self.engine.prompt_status(),
             "appliedRevision":self.applied.split(':').next(), "reloading":self.reloading, "reloadError":self.reload_error,
             "scheduleActive":active, "activityRhythm":activity, "missing":config::readiness(c),
@@ -875,7 +876,8 @@ mod tests {
             let mut reads = 0;
             while reader_running.load(std::sync::atomic::Ordering::Relaxed) {
                 let v: Value = serde_json::from_slice(&fs::read(&reader_file).unwrap()).unwrap();
-                assert_eq!(v.as_object().unwrap().len(), 20);
+                assert_eq!(v.as_object().unwrap().len(), 21);
+                assert_eq!(v["runningRevision"], qq_inner_core::update::REVISION);
                 assert_eq!(v["prompts"]["source"], "builtin");
                 assert!(v["prompts"]["revision"].is_null());
                 assert!(!v["prompts"]["errors"].as_array().unwrap().is_empty());
@@ -1182,6 +1184,12 @@ mod tests {
                 break;
             }
         }
+        // VM observation: data/status.json lacked runningRevision. The CLI must
+        // read the status file through the live service's control socket.
+        assert_eq!(tokio::runtime::Runtime::new().unwrap().block_on(running_revision(&dir.0.join("state"))),
+            Some(qq_inner_core::update::REVISION.into()));
+        let status: Value = serde_json::from_slice(&fs::read(dir.0.join("state/status.json")).unwrap()).unwrap();
+        assert_eq!(status["runningRevision"], qq_inner_core::update::REVISION);
     }
 
     #[test]

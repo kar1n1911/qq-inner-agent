@@ -54,3 +54,11 @@ test('backstory rule uses the named third layer without changing its text', () =
   assert.equal(prompts.articulationFor().split(original).length, 2);
   assert.ok(!prompts.articulationFor('auto', { disabledRules: ['backstoryRule'] }).includes(original));
 });
+
+// Design: docs/working/prompt-and-learning-design.md L1181-1183 (§20.5).
+test('expressions take priority over owner long-term memories in assembled prompts', () => {
+  for (const contract of [prompts.formation, prompts.articulation]) {
+    const system = prompts.composePrompt(contract);
+    assert.ok(system.includes('黑话/表达与 /记住 的长期记忆同时相关且冲突时，优先采用有来源、主体和场景依据的黑话/表达，长期记忆其次'));
+  }
+});

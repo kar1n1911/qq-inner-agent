@@ -739,7 +739,11 @@ fn normalize_core(
         return None;
     }
     let chat = format!("{kind}:{}", js_string(target));
-    if !allowed(&chat, agent) {
+    if !allowed(&chat, agent)
+        && !(kind == "private"
+            && agent.owner_teaching.enabled
+            && crate::persona::owner_teaching::authorized(agent, &chat, &sender))
+    {
         return None;
     }
     let ts = if truthy(&event["time"]) {
