@@ -609,6 +609,31 @@ Some("reply") => text.push_str(" [reply] "),
 - **真实 QQ/微信群**:有研究用过但**未公开**;公开的只有极窄领域小数据集 → **拿不到**;
 - 可用的只有:LCCC(中文风格)、irc_disentanglement(多人群结构)、LLMafia(时间戳标定)。
 
+## Z. `update apply` 的"是否已最新"判断未修复 ⏸ 待修（2026-10-12 实测）
+
+`update full` 的判断已在 F2/final4 修复（用**运行中 revision**，且把 schema 作为**独立的一条轴**），
+但 **`update apply` 走的是另一处判断，仍是旧逻辑** —— 它用**二进制自身的 `REVISION`** 比较。
+
+### 实测后果（VM）
+`./agent update apply` 返回 `{"accepted":true}`，但 `update status` 显示：
+
+```
+result: "already_latest"
+targetRevision: null
+installedRevision: 58bfb56    ← 二进制还是上一版
+runningRevision:  58bfb56
+```
+
+进程启动时间未变、未重启。也就是说：**源码已经 pull 到最新，但构建被跳过，服务继续跑旧二进制。**
+如果没人工核对 `runningRevision`，这次部署会被当成"成功"。
+
+### 修法
+让 `apply` **复用 `full_update_required` 的同一处判断**（代码新/旧 × schema 是否待迁移），
+**不要保留第二套逻辑** —— 同一个语义有两处实现，就一定会有一处先腐坏（本次就是）。
+
+### 临时对策
+源码更新后若 `apply` 报 `already_latest`，手工 `cargo build --release` 并重启。
+
 ## F. 未来计划
 
 - **F1 插件系统** ⏸(架构级,未开工)
