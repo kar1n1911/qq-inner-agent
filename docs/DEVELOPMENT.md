@@ -316,6 +316,29 @@ Advanced 页放全部功能开关与细粒度参数。已知排版问题见 `TOD
 
 **改哪个模块就跑哪个模块的测试；只在合并前跑一次全量。** 测试验证当前模块的行为、不变量与边界，不再保存迁移期 JS oracle 的逐值快照。
 
+### 远程派任务（`codex exec`，2026-10-12 起）
+
+```bash
+# 首次（新会话）
+ssh vm 'cd ~/github_repo/qq-inner-agent && codex exec -o /tmp/r.txt "$(cat task.md)"'
+# 续做（同一会话，上下文累积）
+ssh vm 'cd ~/github_repo/qq-inner-agent && codex exec resume --last \
+          -c '"'"'sandbox_mode="danger-full-access"'"'"' -o /tmp/r.txt "$(cat next.md)"'
+```
+
+**三个坑（都已踩过）：**
+
+1. **`sandbox_mode` 必须在 `resume` 时用 `-c` 显式覆盖。**
+   会话会**沿用创建时的沙箱设置**，改 `~/.codex/config.toml` 对已有会话**无效**。
+   而 `resume` **不接受 `-s`**（会报 `unexpected argument`），只能用 `-c key=value`。
+2. **默认 `workspace-write` 沙箱会造成大量假失败**：
+   - 禁止本地 socket/监听 → 测试出现约 20 个失败（`onebot_mock` 之类）；
+   - **连 `.git/index.lock` 都写不进去 → `git commit` 直接失败**（`Read-only file system`）。
+   所以远程派任务**一律用 full access**。
+3. **不要用 `pgrep`/`pkill -f "codex exec"`** —— 它会把**你自己那条 ssh 命令**匹配进去，
+   造成假阳性甚至把自己杀掉（踩过两次）。
+   **判断完成只看 `-o` 结果文件是否生成**；杀进程**用显式 pid**。
+
 ### 判断 agent 状态的四条准则（用户明确要求，2026-10-12）
 
 **背景**：迁移到远程后用户**看不到实际运行情况**，因此由我自行判断状态。
