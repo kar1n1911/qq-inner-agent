@@ -568,7 +568,10 @@ Some("reply") => text.push_str(" [reply] "),
 
 ### 研究依据(2026-10-10 调研,勿重复找)
 
-- **Google Research**:"Beyond one-on-one: Authoring, simulating, and testing dynamic human-AI group conversations"
+- **[DialogLab](https://research.google/pubs/dialoglab-authoring-simulating-and-testing-dynamic-group-conversations-in-hybrid-human-ai-conversations-2/)**(Google Research,**UIST 2025**):
+  "DialogLab: Authoring, Simulating, and Testing Dynamic Group Conversations in Hybrid Human-AI Conversations"
+  —— [项目页](https://ruofeidu.com/projects/dialoglab/) · [博客介绍](https://research.google/blog/beyond-one-on-one-authoring-simulating-and-testing-dynamic-human-ai-group-conversations/)
+  · [PDF](https://www.ruofeidu.com/papers/Hu_DialogLab-AuthoringSimulatingAndTestingDynamicGroupConversationsInHybridHuman-AIConversations_UIST2025.pdf)
   —— 创作 / 模拟 / 测试三段式;
 - **[Time to Talk](https://ar5iv.labs.arxiv.org/html/2506.05309)**(EMNLP 2025, arXiv 2506.05309):
   异步群聊的"何时发言"。核心洞察:「群聊里**没有天然的话轮**,"什么时候说"本身就是关键决策」。
