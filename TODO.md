@@ -647,7 +647,25 @@ runningRevision:  58bfb56
 ### 临时对策
 源码更新后若 `apply` 报 `already_latest`，手工 `cargo build --release` 并重启。
 
-## X2. 插件化的首批实现：两个真实插件 ⏸ 未开工（用户 2026-10-12 指定）
+## X1. 端口的**唯一定义位置**：`engine/io/`（用户 2026-10-12 指定）⏸ 未开工
+
+**要求**：统一后的 I/O **类型、trait、注册表、路由**全部集中在 `rust/src/engine/io/` 下 ——
+**插件的作者只需要知道这一个位置**，不必在内核各处找 API。
+
+这与计划 §4「目标结构」已有的 P1 布局一致（`engine/io/{mod,types,ports,registry,router,host}.rs`），
+但这里把它上升为**硬性约束**：
+
+1. **端口类型（`Incoming` / `Segment` / `Command` / `Capabilities` / `PortState` …）只在 `engine/io/types.rs` 定义**，
+   其它位置**不得**再定义同义结构；
+2. **六个端口 trait 只在 `engine/io/ports.rs` 定义**；
+3. **适配器只依赖 `engine/io/`**，不得 `use` 内核其它模块（计划 P-5 的 CI 断言正为此）；
+4. 内核侧调用端口时，也**只通过 `engine/io/`** ——
+   如果某处不得不绕过它，说明契约缺了一块，应当补契约而不是开后门；
+5. 插件作者文档只需指向 `engine/io/`，不需要逐个模块介绍 API。
+
+**验收**：CI 断言 `engine/io/**` 不依赖内核实现模块；且**端口类型在全仓只有一份定义**（可 grep 验证）。
+
+：两个真实插件 ⏸ 未开工（用户 2026-10-12 指定）
 
 **位置**：**X（端口化）之后、新功能（C/P/O/Q）之前**。用两个真实插件验证端口抽象是否真的成立。
 
