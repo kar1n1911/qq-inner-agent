@@ -28,7 +28,7 @@ fn schema_migration_and_constraints() -> Result<()> {
         .execute("INSERT INTO activity_rhythm(id) VALUES(1)", [])
         .is_err());
     let again = Store::initialize(s.db)?;
-    assert_eq!(again.schema()?["tables"].as_object().unwrap().len(), 18);
+    assert_eq!(again.schema()?["tables"].as_object().unwrap().len(), 19);
     Ok(())
 }
 
@@ -86,6 +86,25 @@ fn replay_preserves_server_time_and_updates_receive_time() -> Result<()> {
     let row = &s.history("g", None)?[0];
     assert_eq!(row["ts"], 1000.);
     assert_eq!(row["received_at"], 1010.);
+    Ok(())
+}
+
+// Basis: 2026-10-12 no self echo, ACK has no timestamp, and T requires a
+// queryable local estimate plus a future server-time correction path.
+#[test]
+fn outbound_time_source_can_be_confirmed_without_changing_inbound_time() -> Result<()> {
+    let s = Store::in_memory()?;
+    s.message(&json!({"chat":"g","id":"in","text":"in","ts":100.,"self":false,"received_at":110.}))?;
+    let delivery = s.delivery("g", false, 200.)?;
+    s.finish_delivery(&delivery, "sent_unconfirmed", Some(&json!(42)))?;
+    s.outbound_message(&json!({"chat":"g","id":"42","text":"out","ts":201.,"self":true}), &delivery)?;
+    assert_eq!(s.rows("SELECT m.ts,f.time_source FROM messages m JOIN outbound_message_facts f USING(chat,id) WHERE m.id='42'", [])?[0],
+        json!({"ts":201.,"time_source":"local_estimate"}));
+    assert!(s.confirm_outbound("g", "42", 199.)?);
+    assert_eq!(s.rows("SELECT m.ts,f.time_source,d.status FROM messages m JOIN outbound_message_facts f USING(chat,id) JOIN deliveries d ON d.id=f.delivery_id WHERE m.id='42'", [])?[0],
+        json!({"ts":199.,"time_source":"server","status":"confirmed"}));
+    assert!(!s.confirm_outbound("g", "in", 999.)?);
+    assert_eq!(s.rows("SELECT ts,received_at FROM messages WHERE id='in'", [])?[0], json!({"ts":100.,"received_at":110.}));
     Ok(())
 }
 #[test]

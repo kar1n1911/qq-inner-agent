@@ -160,6 +160,9 @@ impl EngineTransport for Harness {
             }
             if let Some(status) = m["deliverySequence"][n - 1].as_str().filter(|s| *s != "sent")
                 .or_else(|| m["delivery"].as_str()) {
+                if status == "ack_missing" {
+                    return Ok(json!({}));
+                }
 
                 return Err(OneBotError {
                     code: "mock_delivery".into(),
@@ -3882,7 +3885,7 @@ async fn goal_conversation_continues_after_a_recent_unaddressed_reply() {
                     && event[2] == replies[index]));
             assert_eq!(
                 h.rows("SELECT status, proactive FROM deliveries ORDER BY ts"),
-                vec![json!({"status":"sent","proactive":0}); index + 1]
+                vec![json!({"status":"sent_unconfirmed","proactive":0}); index + 1]
             );
             *h.now.lock().unwrap() += 20.;
         }
@@ -4158,13 +4161,42 @@ async fn bubbles_failure_stops_and_keeps_individual_receipts() {
             json!({"deliverySequence":["sent",status,"sent"]})).await;
         assert_eq!(*h.sends.lock().unwrap(), 2);
         assert_eq!(h.rows("SELECT status,message_id FROM deliveries ORDER BY rowid"),
-            vec![json!({"status":"sent","message_id":"sent1"}),json!({"status":status,"message_id":null})]);
+            vec![json!({"status":"sent_unconfirmed","message_id":"sent1"}),json!({"status":status,"message_id":null})]);
         assert_eq!(h.rows("SELECT text,id FROM messages WHERE self=1"), vec![json!({"text":"第一条","id":"sent1"})]);
         assert_eq!(h.rows("SELECT status FROM send_assessments")[0]["status"], status);
         e.tick().unwrap(); e.wait_idle().await;
         assert_eq!(*h.sends.lock().unwrap(), 2, "失败/不确定均不自动重放");
         e.stop().await;
     }
+}
+
+// Basis: 2026-10-12 measured missing self echo, ACK message_id without time,
+// and the T outbound fact integrity requirement.
+#[tokio::test]
+async fn outbound_facts_match_each_acknowledged_bubble_without_claiming_confirmation() {
+    let (e, h) = setup(&bubbles_case(0.6, json!({})));
+    bubbles_turn(&e, &h, "哈哈", json!({"text":"合并文本并非发出内容","bubbles":["第一条","第二条","第三条"]}), json!({})).await;
+    let sends: Vec<_> = h.trace.lock().unwrap().iter()
+        .filter(|event| event[0] == "send")
+        .map(|event| event[2].clone()).collect();
+    let rows = h.rows("SELECT m.text,d.status,f.time_source FROM messages m JOIN outbound_message_facts f ON f.chat=m.chat AND f.id=m.id JOIN deliveries d ON d.id=f.delivery_id WHERE m.self=1 ORDER BY m.rowid");
+    assert_eq!(sends, vec![json!("第一条"),json!("第二条"),json!("第三条")]);
+    assert_eq!(rows.iter().map(|row| row["text"].clone()).collect::<Vec<_>>(), sends);
+    assert!(rows.iter().all(|row| row["status"] == "sent_unconfirmed" && row["time_source"] == "local_estimate"));
+    e.stop().await;
+}
+
+// Basis: 2026-10-12 ACK evidence and T's per-bubble failure accounting.
+#[tokio::test]
+async fn missing_ack_stops_bubbles_and_preserves_each_delivery_result() {
+    let (e, h) = setup(&bubbles_case(0.6, json!({})));
+    bubbles_turn(&e, &h, "哈哈", json!({"text":"合并文本","bubbles":["第一条","第二条","第三条"]}),
+        json!({"deliverySequence":["sent","ack_missing","sent"]})).await;
+    assert_eq!(*h.sends.lock().unwrap(), 2);
+    assert_eq!(h.rows("SELECT status FROM deliveries ORDER BY rowid"),
+        vec![json!({"status":"sent_unconfirmed"}),json!({"status":"ack_missing"})]);
+    assert_eq!(h.rows("SELECT text FROM messages WHERE self=1"), vec![json!({"text":"第一条"})]);
+    e.stop().await;
 }
 
 #[tokio::test]
@@ -4244,7 +4276,7 @@ async fn bubbles_recheck_quiet_window_quota_and_online_between_sends() {
         let (e, h) = setup(&bubbles_case(0.6, agent));
         bubbles_turn(&e, &h, "哈哈", json!({"text":"完整正文","bubbles":["第一条","第二条","第三条"]}), hooks).await;
         assert_eq!(*h.sends.lock().unwrap(), 1);
-        assert_eq!(h.rows("SELECT status FROM deliveries"), vec![json!({"status":"sent"})]);
+        assert_eq!(h.rows("SELECT status FROM deliveries"), vec![json!({"status":"sent_unconfirmed"})]);
         assert_eq!(h.rows("SELECT text FROM messages WHERE self=1"), vec![json!({"text":"第一条"})]);
         assert_eq!(h.rows("SELECT status FROM send_assessments")[0]["status"], "cancelled");
         e.stop().await;

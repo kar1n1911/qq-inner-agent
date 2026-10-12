@@ -5,6 +5,7 @@ PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS notes(id TEXT PRIMARY KEY, chat TEXT, text TEXT, created REAL);
       CREATE TABLE IF NOT EXISTS decisions(id TEXT PRIMARY KEY, chat TEXT, ts REAL, action TEXT, score REAL, tags TEXT);
       CREATE TABLE IF NOT EXISTS deliveries(id TEXT PRIMARY KEY, chat TEXT, ts REAL, proactive INTEGER, status TEXT, message_id TEXT);
+      CREATE TABLE IF NOT EXISTS outbound_message_facts(chat TEXT NOT NULL, id TEXT NOT NULL, delivery_id TEXT NOT NULL, time_source TEXT NOT NULL CHECK(time_source IN ('local_estimate','server')), PRIMARY KEY(chat,id));
       CREATE TABLE IF NOT EXISTS calls(ts REAL);
       CREATE TABLE IF NOT EXISTS send_assessments(id TEXT PRIMARY KEY, chat TEXT, human_id TEXT, ts REAL, status TEXT, details TEXT, UNIQUE(chat,human_id));
       CREATE TABLE IF NOT EXISTS expectations(chat TEXT PRIMARY KEY, ts REAL, expires REAL, forecast TEXT, observation TEXT);

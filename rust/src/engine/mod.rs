@@ -2211,7 +2211,14 @@ impl Engine {
             let result = self
                 .transport
                 .send(chat, bubble, bubble_face, reply_to, mention)
-                .await;
+                .await
+                .and_then(|receipt| {
+                    if receipt.get("message_id").is_some_and(|id| !id.is_null() && id != "") {
+                        Ok(receipt)
+                    } else {
+                        Err(OneBotError { code: "ack_missing".into(), uncertain: true })
+                    }
+                });
             if result.is_ok() {
                 sent_segments.push(crate::transport::message_segments(
                     chat,
@@ -2225,16 +2232,15 @@ impl Engine {
                 let db = self.db()?;
                 match &result {
                     Ok(receipt) => {
-                        db.finish_delivery(&bubble_delivery, "sent", receipt.get("message_id"))?;
-                        let id = if receipt["message_id"].is_null() { bubble_delivery.clone() }
-                            else { js_string(&receipt["message_id"]) };
-                        db.message(&json!({"chat":chat,"id":id,"sender":self.transport.self_id(),"name":a.name.text,"text":bubble,"ts":self.now(),"self":true}))?;
+                        db.finish_delivery(&bubble_delivery, "sent_unconfirmed", receipt.get("message_id"))?;
+                        let id = js_string(&receipt["message_id"]);
+                        db.outbound_message(&json!({"chat":chat,"id":id,"sender":self.transport.self_id(),"name":a.name.text,"text":bubble,"ts":self.now(),"self":true}), &bubble_delivery)?;
                         if a.emoji.face_only {
                             db.execute("INSERT OR REPLACE INTO humanize_reply_state VALUES(?,0)", [chat])?;
                         }
                     }
                     Err(error) => db.finish_delivery(&bubble_delivery,
-                        if error.uncertain { "uncertain" } else { "failed" }, None)?,
+                        if error.code == "ack_missing" { "ack_missing" } else if error.uncertain { "uncertain" } else { "failed" }, None)?,
                 }
             }
             let failed = result.is_err();
@@ -2255,7 +2261,7 @@ impl Engine {
                     )?;
                 }
                 if !multi {
-                    db.finish_delivery(&delivery_id, "sent", sent.get("message_id"))?;
+                    db.finish_delivery(&delivery_id, "sent_unconfirmed", sent.get("message_id"))?;
                 }
                 ExpressionMemory::new(&db).used(
                     chat,
@@ -2279,12 +2285,8 @@ impl Engine {
                     )?;
                 }
                 if !multi {
-                    let id = if sent["message_id"].is_null() {
-                        delivery_id
-                    } else {
-                        js_string(&sent["message_id"])
-                    };
-                    db.message(&json!({"chat":chat,"id":id,"sender":self.transport.self_id(),"name":a.name.text,"text":content,"ts":self.now(),"self":true}))?;
+                    let id = js_string(&sent["message_id"]);
+                    db.outbound_message(&json!({"chat":chat,"id":id,"sender":self.transport.self_id(),"name":a.name.text,"text":content,"ts":self.now(),"self":true}), &delivery_id)?;
                 }
                 self.record_decision(
                     &db,
@@ -2305,7 +2307,9 @@ impl Engine {
                 if a.emoji.face_only && content.is_empty() && !error.uncertain {
                     db.execute("DELETE FROM humanize_reply_state WHERE chat=?", [chat])?;
                 }
-                let status = if error.uncertain {
+                let status = if error.code == "ack_missing" {
+                    "ack_missing"
+                } else if error.uncertain {
                     "uncertain"
                 } else {
                     "failed"

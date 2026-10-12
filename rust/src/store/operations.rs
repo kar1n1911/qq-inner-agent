@@ -72,6 +72,36 @@ impl Store {
         }
         Ok(inserted)
     }
+    pub fn outbound_message(&self, m: &Value, delivery_id: &str) -> Result<()> {
+        let tx = self.immediate()?;
+        self.message(m)?;
+        self.execute(
+            "INSERT INTO outbound_message_facts(chat,id,delivery_id,time_source) VALUES(?,?,?,'local_estimate')",
+            params![m["chat"].as_str(), m["id"].as_str(), delivery_id],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+    /// Reserved for a verified self echo carrying QQ server time.
+    pub fn confirm_outbound(&self, chat: &str, id: &str, server_ts: f64) -> Result<bool> {
+        let tx = self.immediate()?;
+        let changed = self.execute(
+            "UPDATE messages SET ts=? WHERE chat=? AND id=? AND self=1 AND EXISTS (SELECT 1 FROM outbound_message_facts WHERE chat=? AND id=? AND time_source='local_estimate')",
+            params![server_ts, chat, id, chat, id],
+        )? > 0;
+        if changed {
+            self.execute(
+                "UPDATE deliveries SET status='confirmed' WHERE id=(SELECT delivery_id FROM outbound_message_facts WHERE chat=? AND id=?) AND status='sent_unconfirmed'",
+                params![chat,id],
+            )?;
+            self.execute(
+                "UPDATE outbound_message_facts SET time_source='server' WHERE chat=? AND id=?",
+                params![chat,id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(changed)
+    }
     /// 同一批入站消息一个事务；返回值逐条对应是否新增，出错整批回滚。
     pub fn messages(&self, messages: &[Value]) -> Result<Vec<bool>> {
         let tx = self.immediate()?;
@@ -196,7 +226,7 @@ impl Store {
         Ok(())
     }
     pub fn counts(&self, chat: &str, now: f64) -> Result<Value> {
-        Ok(self.first("SELECT count(*) AS total, coalesce(sum(proactive),0) AS proactive, coalesce(max(ts),0) AS last FROM deliveries WHERE chat=? AND ts>? AND status IN ('sent','pending','uncertain')",params![chat,now-3600.])?.unwrap())
+        Ok(self.first("SELECT count(*) AS total, coalesce(sum(proactive),0) AS proactive, coalesce(max(ts),0) AS last FROM deliveries WHERE chat=? AND ts>? AND status IN ('sent','sent_unconfirmed','confirmed','pending','uncertain','ack_missing')",params![chat,now-3600.])?.unwrap())
     }
     pub fn mark_handled(&self, chat: &str, id: &str, pause: bool) -> Result<()> {
         self.execute("INSERT INTO handled VALUES(?,?,?) ON CONFLICT(chat) DO UPDATE SET human_id=excluded.human_id,pause_done=excluded.pause_done",params![chat,id,pause as i32])?;
@@ -216,7 +246,7 @@ impl Store {
         Ok(row)
     }
     pub fn sending_timing(&self, chat: &str, now: f64, fallback_gap: f64) -> Result<Value> {
-        let last:Option<f64>=self.db.prepare_cached("SELECT max(ts) FROM deliveries WHERE chat=? AND status IN ('sent','pending','uncertain')")?.query_row([chat],|r|r.get(0))?;
+        let last:Option<f64>=self.db.prepare_cached("SELECT max(ts) FROM deliveries WHERE chat=? AND status IN ('sent','sent_unconfirmed','confirmed','pending','uncertain','ack_missing')")?.query_row([chat],|r|r.get(0))?;
         let humans: i64 = self
             .db
             .prepare_cached("SELECT count(*) FROM messages WHERE chat=? AND self=0 AND ts>=?")?
