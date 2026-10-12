@@ -545,6 +545,10 @@ Node 热重载测试需要已构建的内核；`QQ_CORE_BIN` 可指向其他构�
 
 - `git status --porcelain --untracked-files=all` 必须为空（包括未跟踪文件）；然后 `git pull --ff-only`。脏工作树、无 upstream、认证失败或分叉都报告 `failed` 和错误，保留原二进制，不重启。
 - 热更新检查目标 revision 的完整 Git 变更集：`store`、`media`、`persona` 的 schema 所有路径一律视为可能动 schema；其它 Rust/SQL 变更再扫描建表、改表、索引、触发器和 `table_info` 痕迹；重命名、多路径状态、未知文件类型或 Git 输出无法解析时均保守拒绝，并明确提示使用 `./agent update full`。
+
+运行时可用 `./agent pause` 暂停发言但继续观察学习，`./agent stop-participation` 停止 ingest 与决策并保持进程，`./agent resume` 恢复人工控制的状态，`./agent exit` 请求走现有排空路径退出。由 `Restart=always` 管理时，退出后 systemd 会重新启动服务；需要持续停机时用 `./agent stop`。OneBot 长时间失联会自动停止参与并低频静默探测，连接恢复后自动恢复；人工停止参与不会被自动恢复覆盖。`./agent agent-status` 查看控制状态。
+
+控制套接字不可用或 agent 卡死时，使用 `./agent stop`：它直接通过 systemd 向服务发送 SIGTERM，**不依赖 agent 自身的控制通道**，仍走现有停机排空路径。
 - 本次一次性迁移只为 `messages` 增加 `received_at REAL NOT NULL DEFAULT -1`，保留 `ts` 原值。历史行统一为 sentinel `-1`，含义是“历史接收时刻未知”；本系统实际接收时刻使用非负 Unix 秒，因此不会与真实接收时间混淆。新入站消息由 ingest 写入当次引擎 `now`。幂等标记是数据库内专用表 `migration_received_at_v1` 的唯一行；它只服务本次变更，不是 `user_version` 或通用迁移台账。
 - 新二进制打开已有 `messages` 表却看不到 `received_at` 时直接拒绝启动并提示执行全量更新。全量备份保存在 `.runtime/update/database-before-<revision>-<随机数>.sqlite`；迁移在单个 SQLite immediate transaction 内完成，任何失败都会回滚事务并由编排层恢复备份。
 - pull 前后 HEAD 相同，返回 `already_latest`（已是最新），**不构建**。这里表示源码没有新提交；回滚后源码与运行版本可能不同，须对照 `runningRevision`。构建失败后已经拉下来的 HEAD 不自动回退；再次 apply 若没有新提交仍不重建，需要推送新的修复提交，或由管理员处理临时工具链故障后手工构建部署。

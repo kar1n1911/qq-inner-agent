@@ -352,6 +352,8 @@ pub struct Backend {
     capture: Mutex<Capture>,
     diagnostic: tokio::sync::Mutex<()>,
     secrets: Mutex<Vec<String>>,
+    engine: Mutex<Option<Arc<crate::engine::Engine>>>,
+    shutdown: Mutex<Option<tokio::sync::watch::Sender<bool>>>,
 }
 impl Backend {
     pub fn new(
@@ -367,7 +369,16 @@ impl Backend {
             capture: Mutex::new(Capture::default()),
             diagnostic: tokio::sync::Mutex::new(()),
             secrets: Mutex::new(secrets),
+            engine: Mutex::new(None),
+            shutdown: Mutex::new(None),
         }
+    }
+    pub fn attach_runtime(&self, engine: Arc<crate::engine::Engine>, shutdown: tokio::sync::watch::Sender<bool>) {
+        *self.engine.lock().unwrap() = Some(engine);
+        *self.shutdown.lock().unwrap() = Some(shutdown);
+    }
+    pub fn replace_engine(&self, engine: Arc<crate::engine::Engine>) {
+        *self.engine.lock().unwrap() = Some(engine);
     }
     pub fn replace(&self, remote: Arc<dyn Remote>, secrets: Vec<String>) {
         *self.remote.lock().unwrap() = remote;
@@ -455,6 +466,29 @@ impl Handler for Backend {
     fn request<'a>(&'a self, method: &'a str, params: Value) -> BoxFuture<'a, Result<Value>> {
         Box::pin(async move {
             match method {
+                "agent.status" => {
+                    let engine = self.engine.lock().unwrap().clone().ok_or_else(|| anyhow::anyhow!("agent_unavailable"))?;
+                    Ok(engine.participation_state())
+                }
+                "agent.pause" | "agent.stop_participation" | "agent.resume" => {
+                    let engine = self.engine.lock().unwrap().clone().ok_or_else(|| anyhow::anyhow!("agent_unavailable"))?;
+                    engine.set_manual_mode(match method {
+                        "agent.pause" => crate::engine::ManualMode::Paused,
+                        "agent.stop_participation" => crate::engine::ManualMode::Stopped,
+                        _ => crate::engine::ManualMode::Normal,
+                    });
+                    Ok(engine.participation_state())
+                }
+                "agent.exit" => {
+                    let signal = self.shutdown.lock().unwrap().clone().ok_or_else(|| anyhow::anyhow!("agent_unavailable"))?;
+                    let engine = self.engine.lock().unwrap().clone().ok_or_else(|| anyhow::anyhow!("agent_unavailable"))?;
+                    engine.set_manual_mode(crate::engine::ManualMode::Stopped);
+                    tokio::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                        signal.send_replace(true);
+                    });
+                    Ok(json!({"accepted":true,"draining":true}))
+                }
                 "models.list" | "test.model" | "contacts.list" | "debug.send" => {
                     let _guard = self
                         .diagnostic
@@ -905,6 +939,7 @@ mod tests {
                 online: true,
                 self_id: "42".into(),
                 reconnects: 0,
+                degraded: false,
             }
         }
         fn request<'a>(&'a self, method: &'a str) -> BoxFuture<'a, Result<Value>> {

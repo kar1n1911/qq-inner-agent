@@ -111,6 +111,7 @@ impl EngineTransport for Mock {
             online: true,
             self_id: "99".into(),
             reconnects: 0,
+            degraded: false,
         }
     }
     fn send<'a>(

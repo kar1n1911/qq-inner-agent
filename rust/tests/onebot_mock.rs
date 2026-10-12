@@ -374,6 +374,24 @@ async fn heartbeat_no_overlap_offline_failure_and_reconnect() {
     assert!(!b.state().connected);
 }
 #[tokio::test]
+async fn heartbeat_timeout_starts_onebot_loss_clock() {
+    let mut m = mock(json!({"user_id":123}), json!(true), 0).await;
+    let mut c: config::Onebot = serde_json::from_value(config::defaults()["onebot"].clone()).unwrap();
+    c.url = m.url.clone();
+    c.request_timeout_seconds = 0.1;
+    c.heartbeat_seconds = 0.02;
+    c.max_lost_seconds = 0.01;
+    let (b, mut rx) = OneBot::new(c, "a+b &?".into());
+    let (s, t) = running(&b, &mut rx).await;
+    assert_eq!(next(&mut m.requests).await["action"], "get_status");
+    timeout(Duration::from_secs(2), async {
+        while !b.state().degraded { tokio::time::sleep(Duration::from_millis(10)).await; }
+    }).await.unwrap();
+    assert!(!b.state().online);
+    assert!(rx.try_recv().is_err(), "degraded heartbeat failures must be silent");
+    stop(s, t).await;
+}
+#[tokio::test]
 async fn connect_timeout_and_cancel() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let mut c: config::Onebot =

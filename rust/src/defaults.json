@@ -20,7 +20,9 @@
     "selfId": "",
     "heartbeatSeconds": 30,
     "requestTimeoutSeconds": 12,
-    "reconnectMaxSeconds": 60
+    "reconnectMaxSeconds": 60,
+    "maxLostSeconds": 600,
+    "degradedProbeSeconds": 300
   },
   "agent": {
     "ocr": {

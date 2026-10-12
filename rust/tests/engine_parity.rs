@@ -342,6 +342,7 @@ fn setup(case: &Value) -> (Arc<Engine>, Arc<Harness>) {
             online: true,
             self_id: "99".into(),
             reconnects: 0,
+            degraded: false,
         }),
         sends: Mutex::new(0),
         targets: Mutex::new(vec![]),
@@ -404,6 +405,34 @@ fn ingest(id: &str, text: &str) -> Value {
 }
 fn run() -> Value {
     json!({"op":"run"})
+}
+
+#[tokio::test]
+async fn prolonged_onebot_loss_stops_participation_once_and_recovery_resumes() {
+    let (engine, harness) = setup(&base("onebot loss", json!({}), vec![]));
+    harness.transport.lock().unwrap().degraded = true;
+    engine.sync_connection();
+    engine.sync_connection();
+    assert_eq!(engine.participation_state()["effective"], "stopped");
+    engine.ingest(&harness.event(&json!({"id":"lost"}))).unwrap();
+    engine.tick().unwrap();
+    assert!(harness.rows("SELECT id FROM messages").is_empty());
+    let trace = harness.trace.lock().unwrap();
+    let stopped: Vec<_> = trace.iter().filter(|row| row[1] == "onebot_participation_stopped").collect();
+    assert_eq!(stopped.len(), 1);
+    assert_eq!(stopped[0][2]["message"], "因长时间失去 OneBot 已自动停止参与");
+    drop(trace);
+    harness.transport.lock().unwrap().degraded = false;
+    engine.sync_connection();
+    assert_eq!(engine.participation_state()["effective"], "normal");
+    engine.ingest(&harness.event(&json!({"id":"restored"}))).unwrap();
+    assert_eq!(harness.rows("SELECT id FROM messages").len(), 1);
+    engine.set_manual_mode(qq_inner_core::engine::ManualMode::Stopped);
+    harness.transport.lock().unwrap().degraded = true;
+    engine.sync_connection();
+    harness.transport.lock().unwrap().degraded = false;
+    engine.sync_connection();
+    assert_eq!(engine.participation_state()["effective"], "stopped", "automatic recovery must preserve manual stop");
 }
 
 #[tokio::test]

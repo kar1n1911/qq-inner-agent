@@ -19,6 +19,17 @@ if (action === 'core-status') {
     console.log(JSON.stringify({ available: true, status: await client.request('state.get') }, null, 2));
   } catch (e) { console.log(JSON.stringify({ available: client.available, error: e.code || e.message })); process.exitCode = 1; }
   finally { client.close(); }
+} else if (['pause', 'stop-participation', 'resume', 'exit', 'agent-status'].includes(action)) {
+  const client = new ControlClient(c.dataDir);
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(Error('control_unavailable')), 2000);
+      client.on('available', available => { if (available) { clearTimeout(timer); resolve(); } });
+    });
+    const method = { pause: 'agent.pause', 'stop-participation': 'agent.stop_participation', resume: 'agent.resume', exit: 'agent.exit', 'agent-status': 'agent.status' }[action];
+    console.log(JSON.stringify(await client.request(method), null, 2));
+  } catch (e) { console.error('Agent control failed: ' + (e.code || e.message)); process.exitCode = 1; }
+  finally { client.close(); }
 } else if (action === 'add-memory') {
   console.error('Use ./agent add-memory CHAT TEXT; owner notes are managed by the Rust core.');
   process.exitCode = 1;

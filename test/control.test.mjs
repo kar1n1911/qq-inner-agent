@@ -124,15 +124,19 @@ test('dashboard HTTP state survives absent socket, uses live reads, then falls b
   assert.equal(fallback.memories[0].text, 'offline memory');
   assert.equal(fallback.expressions[0].term, 'offline expression');
   let fail = false, listening = false, saturated = false;
+  const agentActions = [];
   await mock(t, dir, (req, socket) => {
     if (fail) return;
+    if (req.method.startsWith('agent.')) agentActions.push(req.method);
     const results = {
       'state.get': { mode: 'active', selfId: '42', learningCounts: { memories: 1 } },
       'learning.list': { entries: [{ chat: 'group:1', layer: 'traits', expires: 9999999999, text: 'secret' }, { chat: 'group:1', term: 'hello', updated: Date.now()/1000 }] },
       'logs.tail': { lines: ['invalid', '{"event":"secret"}'] },
       'models.list': { models: ['model'] }, 'contacts.list': { groups: [], friends: [] },
       'debug.send': { ok: true, messageId: 123 },
-      'debug.receive.start': { listening: true, until: 12345 }, 'debug.receive.stop': { stopped: true }
+      'debug.receive.start': { listening: true, until: 12345 }, 'debug.receive.stop': { stopped: true },
+      'agent.pause': { effective: 'paused' }, 'agent.stop_participation': { effective: 'stopped' },
+      'agent.resume': { effective: 'normal' }, 'agent.exit': { accepted: true, draining: true }
     };
     if (req.method === 'debug.receive.start') listening = true;
     if (req.method === 'debug.receive.stop') listening = false;
@@ -152,6 +156,13 @@ test('dashboard HTTP state survives absent socket, uses live reads, then falls b
   assert.equal((await get('/api/debug/receive')).state, 'listening');
   assert.equal((await post('/api/debug/stop')).state, 'stopped');
   assert.deepEqual(Object.keys(await post('/api/debug/send')).sort(), ['account', 'message', 'messageId', 'text']);
+  for (const [action, field, expected] of [['pause', 'effective', 'paused'], ['disengage', 'effective', 'stopped'], ['resume', 'effective', 'normal'], ['exit', 'draining', true]]) {
+    const response = await fetch(origin + '/api/agent', { method: 'POST', headers, body: JSON.stringify({ action }) });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json())[field], expected);
+  }
+  assert.deepEqual(agentActions, ['agent.pause', 'agent.stop_participation', 'agent.resume', 'agent.exit']);
+  assert.equal((await fetch(origin + '/api/agent', { method: 'POST', headers, body: '{"action":"unknown"}' })).status, 400);
   saturated = true;
   const truncated = await get('/api/state');
   assert.equal(truncated.memories.length, 200); assert.deepEqual(truncated.expressions, fallback.expressions);

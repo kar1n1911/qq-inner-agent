@@ -41,6 +41,7 @@ pub struct State {
     pub online: bool,
     pub self_id: String,
     pub reconnects: u64,
+    pub degraded: bool,
 }
 #[derive(Debug, Clone)]
 pub enum Notification {
@@ -52,6 +53,7 @@ struct Shared {
     outgoing: Option<mpsc::UnboundedSender<Message>>,
     pending: HashMap<String, oneshot::Sender<Reply>>,
     early: Vec<Value>,
+    lost_since: Option<Instant>,
 }
 #[derive(Clone)]
 pub struct OneBot {
@@ -97,6 +99,7 @@ impl OneBot {
                     outgoing: None,
                     pending: HashMap::new(),
                     early: Vec::new(),
+                    lost_since: None,
                 })),
                 notices,
                 lifecycle: Arc::new(tokio::sync::Mutex::new(())),
@@ -105,13 +108,29 @@ impl OneBot {
         )
     }
     pub fn state(&self) -> State {
+        self.refresh_loss();
         self.shared.lock().unwrap().state.clone()
     }
     fn status(&self, code: &str) {
+        if !matches!(code, "connected" | "qq_offline") && self.refresh_loss() {
+            return;
+        }
         let _ = self.notices.send(Notification::Status(code.into()));
+    }
+    fn refresh_loss(&self) -> bool {
+        let mut shared = self.shared.lock().unwrap();
+        if self.config.max_lost_seconds > 0.0
+            && shared.lost_since.is_some_and(|since| since.elapsed().as_secs_f64() >= self.config.max_lost_seconds)
+        {
+            shared.state.degraded = true;
+        }
+        shared.state.degraded
     }
     fn disconnect(&self) {
         let mut s = self.shared.lock().unwrap();
+        if s.state.connected && s.lost_since.is_none() {
+            s.lost_since = Some(Instant::now());
+        }
         s.state.connected = false;
         s.state.online = false;
         s.outgoing = None;
@@ -380,11 +399,11 @@ impl OneBot {
         let mut s = self.shared.lock().unwrap();
         s.state.online = status["online"] == true;
         s.state.connected = true;
-        self.status(if s.state.online {
-            "connected"
-        } else {
-            "qq_offline"
-        });
+        s.lost_since = None;
+        s.state.degraded = false;
+        let _ = self.notices.send(Notification::Status(
+            if s.state.online { "connected" } else { "qq_offline" }.into(),
+        ));
         // 置位、状态通知和 early 补发在同一锁内完成，后来的事件不能插队。
         for event in s.early.drain(..) {
             let _ = self.notices.send(Notification::Event(event));
@@ -476,8 +495,14 @@ impl OneBot {
                     result = &mut heartbeat, if checking => {
                         checking = false;
                         match result {
-                            Ok(s) => self.shared.lock().unwrap().state.online = s["online"] == true,
-                            Err(_) => { self.shared.lock().unwrap().state.online = false; return Ok(self.state()); }
+                            Ok(s) => {
+                                let mut shared = self.shared.lock().unwrap();
+                                shared.state.online = s["online"] == true;
+                            },
+                            Err(_) => {
+                                self.shared.lock().unwrap().state.online = false;
+                                return Ok(self.state());
+                            }
                         }
                     }
                 }
@@ -498,7 +523,9 @@ impl OneBot {
     pub async fn run(&self, mut shutdown: watch::Receiver<bool>) {
         let _lock = self.lifecycle.lock().await;
         let mut delay = 1.0;
+        self.shared.lock().unwrap().lost_since = Some(Instant::now());
         while !*shutdown.borrow() {
+            let degraded = self.refresh_loss();
             let started = Instant::now();
             tokio::select! {
                 _ = shutdown.changed() => break,
@@ -510,12 +537,14 @@ impl OneBot {
             }
             self.shared.lock().unwrap().state.reconnects += 1;
             // JS 从会话尝试开始计时；严格超过 30 秒才重置，恰好 30 秒不重置。
-            let wait = backoff(
+            let wait = if degraded || self.refresh_loss() {
+                Duration::from_secs_f64(self.config.degraded_probe_seconds)
+            } else { backoff(
                 &mut delay,
                 started.elapsed(),
                 self.config.reconnect_max_seconds,
                 rand::random(),
-            );
+            ) };
             tokio::select! { _ = shutdown.changed() => break, _ = sleep(wait) => {} }
         }
         self.disconnect();
@@ -651,6 +680,45 @@ mod tests {
             Duration::from_secs(1)
         );
         assert_eq!(delay, 2.);
+    }
+    #[test]
+    fn prolonged_loss_silences_failed_probes_and_zero_disables_degradation() {
+        let mut config: Onebot = serde_json::from_value(crate::config::defaults()["onebot"].clone()).unwrap();
+        config.max_lost_seconds = 1.0;
+        let (bot, mut notices) = OneBot::new(config.clone(), String::new());
+        bot.shared.lock().unwrap().lost_since = Some(Instant::now() - Duration::from_secs(2));
+        assert!(bot.state().degraded);
+        bot.status("websocket_error");
+        bot.status("connect_closed");
+        assert!(notices.try_recv().is_err(), "degraded probes must not enqueue failure logs");
+        config.max_lost_seconds = 0.0;
+        let (disabled, _) = OneBot::new(config, String::new());
+        disabled.shared.lock().unwrap().lost_since = Some(Instant::now() - Duration::from_secs(2));
+        assert!(!disabled.state().degraded);
+    }
+    #[tokio::test]
+    async fn successful_handshake_restores_normal_connection_after_degradation() {
+        let mut config: Onebot = serde_json::from_value(crate::config::defaults()["onebot"].clone()).unwrap();
+        config.max_lost_seconds = 1.0;
+        let (bot, mut notices) = OneBot::new(config, String::new());
+        bot.shared.lock().unwrap().lost_since = Some(Instant::now() - Duration::from_secs(2));
+        assert!(bot.state().degraded);
+        let (tx, mut outgoing) = mpsc::unbounded_channel();
+        bot.shared.lock().unwrap().outgoing = Some(tx);
+        let responder = bot.clone();
+        let task = tokio::spawn(async move {
+            for _ in 0..2 {
+                let Message::Text(frame) = outgoing.recv().await.unwrap() else { panic!("expected request") };
+                let request: Value = serde_json::from_str(&frame).unwrap();
+                let data = if request["action"] == "get_login_info" { json!({"user_id":99}) } else { json!({"online":true}) };
+                responder.receive(Message::Text(json!({"echo":request["echo"],"status":"ok","retcode":0,"data":data}).to_string()));
+            }
+        });
+        bot.handshake().await.unwrap();
+        task.await.unwrap();
+        assert!(bot.state().online);
+        assert!(!bot.state().degraded);
+        assert!(matches!(notices.try_recv(), Ok(Notification::Status(code)) if code == "connected"));
     }
     #[tokio::test]
     async fn send_failure_and_cancellation_clean_pending() {

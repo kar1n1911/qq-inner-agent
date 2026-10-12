@@ -572,6 +572,8 @@ const RANGES: &[(&str, f64, f64)] = &[
     ("onebot.heartbeatSeconds", 1.0, 300.0),
     ("onebot.requestTimeoutSeconds", 1.0, 120.0),
     ("onebot.reconnectMaxSeconds", 1.0, 300.0),
+    ("onebot.maxLostSeconds", 0.0, 86400.0),
+    ("onebot.degradedProbeSeconds", 1.0, 86400.0),
     ("agent.threshold", 1.0, 5.0),
     ("agent.interruptThreshold", 1.0, 5.0),
     ("agent.system1Probability", 0.0, 1.0),
@@ -682,6 +684,8 @@ pub struct Onebot {
     pub request_timeout_seconds: f64,
     /// 配置键 `onebot.reconnectMaxSeconds`。
     pub reconnect_max_seconds: f64,
+    pub max_lost_seconds: f64,
+    pub degraded_probe_seconds: f64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -2,6 +2,15 @@
 // configuration editors and other user-provided values remain untouched.
 const pairs = `
 Advanced|高级
+Pause speaking|暂停发言
+Stop participation|停止参与
+Resume|恢复参与
+Drain and exit|排空后退出
+Stop service (SIGTERM)|停止服务（SIGTERM）
+OneBot loss and recovery|OneBot 失联与恢复
+Max lost time before stopping participation (seconds; 0 disables)|停止参与前最长失联时间（秒；0 为关闭）
+Reconnect backoff maximum (seconds)|重连退避上限（秒）
+Probe interval after degradation (seconds)|降级后探测间隔（秒）
 Owner private teaching commands /记住 /黑话 /还原|主人私聊教学指令 /记住 /黑话 /还原
 Owner QQ ID|主人 QQ 号
 Feature switches|功能开关

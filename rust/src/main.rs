@@ -411,16 +411,19 @@ impl Runtime {
     async fn notice(&mut self, notice: Notification) {
         match notice {
             Notification::Status(state) => {
+                self.engine.sync_connection();
                 (self.log)("onebot", json!({"state":state}));
                 // Both statuses are emitted by a successful handshake, including reconnects.
-                if matches!(state.as_str(), "connected" | "qq_offline") {
+                if self.engine.participates() && matches!(state.as_str(), "connected" | "qq_offline") {
                     self.schedule_backfill(true);
                 }
             }
             Notification::Event(event) => {
+                self.engine.sync_connection();
                 if let Some(control) = &self.control {
                     control.observe(&event);
                 }
+                if !self.engine.participates() { return; }
                 let event = qq_inner_core::engine::policy::resolve_forwards(
                     &event,
                     &self.bot,
@@ -456,6 +459,7 @@ impl Runtime {
             "appliedRevision":self.applied.split(':').next(), "reloading":self.reloading, "reloadError":self.reload_error,
             "scheduleActive":active, "activityRhythm":activity, "missing":config::readiness(c),
             "onebotConnected":bot.connected, "qqOnline":bot.online, "selfId":bot.self_id,
+            "participation":self.engine.participation_state(),
             "reconnects":bot.reconnects, "activeChats":self.engine.chats().len(),
             "model":self.raw["provider"]["model"], "provider":c.provider.kind, "apiCallsThisRun":self.provider.calls(),
             "lastCycleAt":self.engine.last_cycle(), "lastError":self.engine.last_error()}))
@@ -543,6 +547,10 @@ impl Runtime {
             self.log.clone(),
             (!reconnect).then(|| self.bot.clone()),
         )?;
+        if self.engine.manual_mode() != qq_inner_core::engine::ManualMode::Normal {
+            replacement.engine.set_manual_mode(self.engine.manual_mode());
+        }
+        replacement.engine.sync_connection();
         replacement.engine.inherit_chats(self.engine.chats());
         replacement.maintain(false)?;
         if reconnect {
@@ -554,6 +562,7 @@ impl Runtime {
         }
         replacement.control = self.control.take();
         if let Some(control) = &replacement.control {
+            control.replace_engine(replacement.engine.clone());
             control.replace(
                 Arc::new(LiveRemote {
                     bot: replacement.bot.clone(),
@@ -657,6 +666,7 @@ async fn run(root: PathBuf) -> Result<()> {
             rt.config.onebot_token.text.clone(),
         ],
     ));
+    backend.attach_runtime(rt.engine.clone(), stop.clone());
     let updater = qq_inner_core::update::Updater::new(
         fs::canonicalize(&root)?, std::env::current_exe()?,
         qq_inner_core::update::REVISION.into(), stop,
@@ -676,7 +686,8 @@ async fn run(root: PathBuf) -> Result<()> {
                 biased;
                 _ = shutdown.changed() => break,
                 _ = tick.tick() => {
-                    rt.schedule_backfill(false);
+                    rt.engine.sync_connection();
+                    if rt.engine.participates() { rt.schedule_backfill(false); }
                     rt.engine.tick()?;
                 },
                 _ = report.tick() => rt.report()?,
@@ -770,6 +781,30 @@ mod tests {
         assert_eq!(logs[0].1["raw_message_id"], 42);
         assert_eq!(logs[0].1["reason"], "ingest_failed");
         assert!(logs[0].1["error"].as_str().unwrap().contains("no such table: messages"));
+    }
+
+    #[tokio::test]
+    async fn pause_keeps_ingesting_but_stopped_participation_does_not() {
+        let dir = Temp::new();
+        dir.config(json!({"onebot":{"selfId":"99"},"agent":{"allowedUsers":["1"]}}));
+        let mut rt = dir.runtime();
+        let (stop, _) = watch::channel(false);
+        let backend = Backend::new(rt.config.data_dir.clone(), rt.store.clone(), Arc::new(LiveRemote {
+            bot: rt.bot.clone(), provider: rt.provider.clone(), config: rt.config.clone(),
+        }), vec![]);
+        backend.attach_runtime(rt.engine.clone(), stop);
+        let event = |id| json!({"post_type":"message","message_type":"private",
+            "self_id":99,"user_id":1,"message_id":id,"time":1_700_000_000,"message":"hello"});
+        qq_inner_core::control::Handler::request(&backend, "agent.pause", json!({})).await.unwrap();
+        assert_eq!(rt.engine.participation_state()["effective"], "paused");
+        rt.notice(Notification::Event(event(1))).await;
+        assert_eq!(rt.store.lock().unwrap().rows("SELECT id FROM messages", []).unwrap().len(), 1);
+        qq_inner_core::control::Handler::request(&backend, "agent.stop_participation", json!({})).await.unwrap();
+        rt.notice(Notification::Event(event(2))).await;
+        assert_eq!(rt.store.lock().unwrap().rows("SELECT id FROM messages", []).unwrap().len(), 1);
+        qq_inner_core::control::Handler::request(&backend, "agent.resume", json!({})).await.unwrap();
+        rt.notice(Notification::Event(event(3))).await;
+        assert_eq!(rt.store.lock().unwrap().rows("SELECT id FROM messages", []).unwrap().len(), 2);
     }
 
     #[test]
@@ -918,7 +953,8 @@ mod tests {
             let mut reads = 0;
             while reader_running.load(std::sync::atomic::Ordering::Relaxed) {
                 let v: Value = serde_json::from_slice(&fs::read(&reader_file).unwrap()).unwrap();
-                assert_eq!(v.as_object().unwrap().len(), 21);
+                assert_eq!(v.as_object().unwrap().len(), 22);
+                assert_eq!(v["participation"]["effective"], "normal");
                 assert_eq!(v["runningRevision"], qq_inner_core::update::REVISION);
                 assert_eq!(v["prompts"]["source"], "builtin");
                 assert!(v["prompts"]["revision"].is_null());
@@ -978,7 +1014,7 @@ mod tests {
     // Goal design: docs/DEVELOPMENT.md:351 (UPDATE-2). A real engine send is
     // held inside a mock OneBot; shutdown must await its ACK before disconnecting.
     #[tokio::test]
-    async fn update_shutdown_drains_onebot_send_before_disconnect_without_replay() {
+    async fn agent_exit_reuses_update_shutdown_drain_before_disconnect_without_replay() {
         use futures_util::{SinkExt, StreamExt};
         use tokio_tungstenite::{accept_async, tungstenite::Message};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1028,9 +1064,24 @@ mod tests {
             store.lock().unwrap().rows("SELECT received_at FROM messages WHERE id='1'", []).unwrap()[0]["received_at"],
             1_700_000_000.125
         );
+        rt.engine.set_manual_mode(qq_inner_core::engine::ManualMode::Paused);
+        rt.engine.tick().unwrap();
+        assert!(tokio::time::timeout(Duration::from_millis(50), received.recv()).await.is_err(),
+            "paused agent must not send");
+        rt.engine.set_manual_mode(qq_inner_core::engine::ManualMode::Normal);
         rt.engine.tick().unwrap();
         tokio::time::timeout(Duration::from_secs(3), received.recv()).await.unwrap().unwrap();
         assert_eq!(store.lock().unwrap().rows("SELECT status FROM deliveries", []).unwrap()[0]["status"], "pending");
+        let (stop, mut requested) = watch::channel(false);
+        let backend = Backend::new(rt.config.data_dir.clone(), store.clone(), Arc::new(LiveRemote {
+            bot: rt.bot.clone(), provider: rt.provider.clone(), config: rt.config.clone(),
+        }), vec![]);
+        backend.attach_runtime(rt.engine.clone(), stop);
+        let result = qq_inner_core::control::Handler::request(&backend, "agent.exit", json!({})).await.unwrap();
+        assert_eq!(result["draining"], true);
+        tokio::time::timeout(Duration::from_secs(3), requested.changed()).await.unwrap().unwrap();
+        assert!(*requested.borrow());
+        drop(backend);
         let shutdown = tokio::spawn(rt.shutdown());
         tokio::time::sleep(Duration::from_millis(30)).await;
         assert!(!*abort.borrow(), "OneBot disconnected while send was in flight");

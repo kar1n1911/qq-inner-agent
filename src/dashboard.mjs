@@ -214,6 +214,13 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
         if (!['start', 'stop', 'restart'].includes(input.action)) throw fail(400, 'Unknown service action');
         await serviceControl(input.action); json(res, 200, { serviceState: await serviceStatus() }); return;
       }
+      if (url.pathname === '/api/agent' && req.method === 'POST') {
+        const input = await body(req);
+        const methods = { pause: 'agent.pause', disengage: 'agent.stop_participation', resume: 'agent.resume', exit: 'agent.exit' };
+        if (!Object.hasOwn(methods, input.action)) throw fail(400, 'Unknown agent action');
+        if (!control.available) throw fail(503, 'Core control socket unavailable');
+        json(res, 200, await control.request(methods[input.action])); return;
+      }
       if (url.pathname === '/api/test-model' && req.method === 'POST') {
         if (testing) throw fail(409, 'A connection test is in progress');
         testing = true;

@@ -1244,6 +1244,7 @@ mod engine_bus {
                 online: true,
                 self_id: "99".into(),
                 reconnects: 0,
+                degraded: false,
             }
         }
         fn send_media<'a>(

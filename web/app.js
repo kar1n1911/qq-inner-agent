@@ -68,6 +68,7 @@ function formConfig() {
   if ($('use-advanced').checked) return JSON.parse($('advanced-json').value);
   const c = structuredClone(saved.config);
   for (const input of document.querySelectorAll('[data-config]')) {
+    if (get(saved.config, input.dataset.config) === undefined) continue;
     let value = input.type === 'checkbox' ? input.checked : input.dataset.type === 'lines' ? input.value.split('\n').map(x=>x.trim()).filter(Boolean) : input.dataset.type === 'ids' ? ids(input.value) : ['number', 'range'].includes(input.type) ? Number(input.value) : input.value;
     set(c, input.dataset.config, value);
   }
@@ -95,6 +96,7 @@ async function refresh() {
     const fresh = s && Date.now() - Date.parse(s.updatedAt) < 20000;
     $('service-value').textContent = state.serviceState === 'active' ? 'Running' : state.serviceState === 'inactive' ? 'Stopped' : state.serviceState;
     $('service-detail').textContent = fresh ? `${s.activeChats} active conversations` : 'No recent agent heartbeat';
+    $('participation-status').textContent = fresh ? `Agent state: ${s.participation?.effective || 'normal'}${s.participation?.lostOnebot ? ' · OneBot lost' : ''}` : 'Agent state: unavailable';
     $('qq-value').textContent = fresh && s.qqOnline ? 'Online' : 'Disconnected';
     $('qq-detail').textContent = fresh && s.onebotConnected ? `Account ${s.selfId}` : 'Waiting for NapCat / SnowLuma';
     $('model-value').textContent = s?.model || saved?.config.provider.model || 'Not set';
@@ -240,6 +242,15 @@ $('deepseek-preset').addEventListener('click', () => {
 });
 document.querySelectorAll('[data-service]').forEach(b => b.addEventListener('click', async () => {
   b.disabled = true; try { await api('/api/service', { method: 'POST', body: JSON.stringify({ action: b.dataset.service }) }); notice(`Service command completed: ${b.dataset.service}.`); await refresh(); } catch(e) { notice(e.message, true); } finally { b.disabled = false; }
+}));
+document.querySelectorAll('[data-agent]').forEach(b => b.addEventListener('click', async () => {
+  b.disabled = true;
+  try {
+    await api('/api/agent', { method: 'POST', body: JSON.stringify({ action: b.dataset.agent }) });
+    notice(`Agent command accepted: ${b.dataset.agent}.`);
+    await refresh();
+  } catch (e) { notice(e.message, true); }
+  finally { b.disabled = false; }
 }));
 $('test-model').addEventListener('click', async () => {
   $('test-model').disabled = true; $('model-test-result').textContent = 'Testing the saved model configuration…';

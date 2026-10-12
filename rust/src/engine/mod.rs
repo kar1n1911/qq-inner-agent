@@ -252,8 +252,17 @@ pub struct Engine {
     core: Mutex<Core>,
     self_identity: Arc<self_identity::Cache>,
     aborted: watch::Sender<bool>,
+    participation: Mutex<Participation>,
     // 多个 stop/wait_idle 调用者不能各自拿走任务后提前报告空闲。
     joining: tokio::sync::Mutex<()>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ManualMode { Normal, Paused, Stopped }
+#[derive(Clone, Copy)]
+struct Participation { manual: ManualMode, lost_onebot: bool }
+impl Default for Participation {
+    fn default() -> Self { Self { manual: ManualMode::Normal, lost_onebot: false } }
 }
 struct CycleStart {
     version: u64,
@@ -373,6 +382,7 @@ impl Engine {
             core: Mutex::new(Core::default()),
             self_identity,
             aborted,
+            participation: Mutex::new(Participation::default()),
             joining: tokio::sync::Mutex::new(()),
         }))
     }
@@ -386,6 +396,52 @@ impl Engine {
     }
     fn now(&self) -> f64 {
         (self.options.now)()
+    }
+    pub fn manual_mode(&self) -> ManualMode {
+        self.participation.lock().unwrap().manual
+    }
+    pub fn set_manual_mode(&self, mode: ManualMode) {
+        {
+            let _core = self.core();
+            self.participation.lock().unwrap().manual = mode;
+            if mode != ManualMode::Normal && !*self.aborted.borrow() {
+                // Wake existing select! listeners to discard in-flight decisions.
+                self.aborted.send_replace(false);
+            }
+        }
+        (self.options.log)("participation_mode", json!({"mode":mode}));
+    }
+    pub fn participation_state(&self) -> Value {
+        let state = *self.participation.lock().unwrap();
+        json!({"manual":state.manual,"lostOnebot":state.lost_onebot,
+            "effective":if state.manual == ManualMode::Stopped || state.lost_onebot { "stopped" }
+                else if state.manual == ManualMode::Paused { "paused" } else { "normal" }})
+    }
+    pub fn participates(&self) -> bool {
+        let state = self.participation.lock().unwrap();
+        state.manual != ManualMode::Stopped && !state.lost_onebot
+    }
+    fn speaking_allowed(&self) -> bool {
+        let state = self.participation.lock().unwrap();
+        state.manual == ManualMode::Normal && !state.lost_onebot
+    }
+    pub fn sync_connection(&self) {
+        let degraded = self.transport.state().degraded;
+        let changed = {
+            let _core = self.core();
+            let mut state = self.participation.lock().unwrap();
+            let changed = state.lost_onebot != degraded;
+            state.lost_onebot = degraded;
+            if changed && degraded && !*self.aborted.borrow() {
+                self.aborted.send_replace(false);
+            }
+            changed
+        };
+        if changed {
+            (self.options.log)(if degraded { "onebot_participation_stopped" } else { "onebot_participation_resumed" },
+                json!({"reason":if degraded { "long_onebot_loss" } else { "onebot_restored" },
+                    "message":if degraded { "因长时间失去 OneBot 已自动停止参与" } else { "OneBot 已恢复，自动恢复参与" }}));
+        }
     }
     fn snapshot(&self, db: &Store, now: f64) -> Result<ActivitySnapshot> {
         let a = &self.config.agent;
@@ -437,6 +493,7 @@ impl Engine {
         self.ingest_with_source(event, true)
     }
     fn ingest_with_source(&self, event: &Value, backfill: bool) -> Result<()> {
+        if !self.participates() { return Ok(()); }
         let mut core = self.core();
         let a = &self.config.agent;
         let now = self.now();
@@ -632,6 +689,7 @@ impl Engine {
         }
     }
     async fn media_cycle(&self, chat: &str, start: CycleStart) -> Result<()> {
+        if !self.speaking_allowed() { return Ok(()); }
         // 沿用观察准入、单群单飞、版本、媒体节奏和总配额；群作息不套用 global quiet。
         let a = &self.config.agent;
         {
@@ -694,6 +752,10 @@ impl Engine {
             let delivery = db.delivery(chat, false, now)?;
             (selection, segment, delivery)
         };
+        if !self.speaking_allowed() {
+            self.db()?.finish_delivery(&delivery, "failed", None)?;
+            return Ok(());
+        }
         let sent = self.transport.send_media(chat, segment).await;
         let _core = self.core();
         let db = self.db()?;
@@ -736,6 +798,8 @@ impl Engine {
         Ok(())
     }
     pub fn tick(self: &Arc<Self>) -> Result<()> {
+        self.sync_connection();
+        if !self.participates() { return Ok(()); }
         let mut core = self.core();
         let now = self.now();
         let a = &self.config.agent;
@@ -792,6 +856,7 @@ impl Engine {
                 }));
             }
         }
+        if !self.speaking_allowed() { return Ok(()); }
         // Expire even while offline, busy, outside due, or out of concurrency
         // slots. Expiration is explicit and does not depend on chat eviction.
         for (_, s) in &mut core.chats {
@@ -931,7 +996,7 @@ impl Engine {
                 // 任务首次 poll 可能已经离岗；确认消息也需守卫，离岗则留待回岗发送。
                 let admission = (|| -> Result<Option<String>> {
                     let mut core = engine.core();
-                    if !engine.available(engine.now())? {
+                    if !engine.speaking_allowed() || !engine.available(engine.now())? {
                         core.teaching_replies.push((chat.clone(), reply.clone()));
                         return Ok(None);
                     }
@@ -945,6 +1010,11 @@ impl Engine {
                         return;
                     }
                 };
+                if !engine.speaking_allowed() {
+                    if let Ok(db) = engine.db() { let _ = db.finish_delivery(&delivery, "failed", None); }
+                    engine.core().teaching_replies.push((chat, reply));
+                    return;
+                }
                 let result = engine.transport.send(&chat, &reply, None, None, None).await;
                 let finish = engine.db().and_then(|db| match result {
                     Ok(sent) => db.finish_delivery(&delivery, "sent", sent.get("message_id")),
@@ -1169,7 +1239,7 @@ impl Engine {
     fn obsolete(&self, core: &Core, db: &Store, t: &Turn) -> Result<bool> {
         // 五个触发源：① stop/热重载；② 新消息、重新入群、休息 tick；
         // ③ 活动块到期/时钟回拨/签名变化；④ reset_learning；⑤ orientation 重新入群。
-        Ok(*self.aborted.borrow()
+        Ok(*self.aborted.borrow() || !self.speaking_allowed()
             || core.get(&t.chat).is_none_or(|s| s.version != t.version)
             || self.snapshot(db, self.now())?.started != t.activity_started
             || db.learning_state(&t.chat)?["epoch"] != t.profile["epoch"]
@@ -1260,6 +1330,7 @@ impl Engine {
         )
     }
     async fn cycle(&self, chat: &str, trigger: &str, start: CycleStart) -> Result<()> {
+        if !self.speaking_allowed() { return Ok(()); }
         // 发言意图由触发路径决定；未被点名的消息仍是回复。
         let initiating = matches!(trigger, "topic" | "pause");
         let a = &self.config.agent;
@@ -2187,6 +2258,7 @@ impl Engine {
                     || core.get(chat).is_none_or(|s| now - s.last_human.max(t.now) > a.active_window_seconds)
                     || (t.hint != Hint::SelfChat && (!self.snapshot(&db, now)?.active
                         || policy::quiet(now, a.quiet_hours.as_ref())))
+                    || !self.speaking_allowed()
                     || !transport.connected || !transport.online
                     || (multi && !behavior.burst && (num(&counts, "total") - reserved >= a.max_messages_per_hour
                         || (initiating && num(&counts, "proactive") - reserved >= a.max_proactive_per_hour)))
