@@ -535,7 +535,7 @@ impl Engine {
             return Ok(());
         }
         // History must not create active chats (including media/proactive cycles).
-        let state = if backfill {
+        let state = if backfill || now - m.ts > a.active_window_seconds {
             None
         } else {
             let Some(s) = core.state(&m.chat, a.max_active_chats) else {

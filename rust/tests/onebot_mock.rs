@@ -800,9 +800,15 @@ async fn backfill_forward_skips_age_but_keeps_admission_checks() {
     c.agent.ignored_users = vec!["888".into()];
     let mut old = forward_event();
     old["time"] = json!(1);
-    assert_eq!(resolve_forwards(&old, &b, &c.agent, 1000.).await, old);
+    let initial = old.clone();
+    let a = b.clone();
+    let initial_agent = c.agent.clone();
+    let task = tokio::spawn(async move { resolve_forwards(&initial, &a, &initial_agent, 1000.).await });
+    let req = next(&mut m.requests).await;
+    assert_eq!(req["action"], "get_forward_msg");
+    m.frames.send(response(&req, json!({"messages":[]}), json!(0), "ok")).unwrap();
+    assert_eq!(task.await.unwrap(), old);
     for (key, value) in [
-        ("time", json!(1061)),
         ("time", json!("invalid")),
         ("message_id", json!(null)),
         ("message_id", json!("")),
@@ -821,9 +827,12 @@ async fn backfill_forward_skips_age_but_keeps_admission_checks() {
             invalid,
             "{key}"
         );
+        assert!(m.requests.try_recv().is_err(), "{key}");
     }
-    assert!(m.requests.try_recv().is_err());
     let a = b.clone();
+    let future_agent = c.agent.clone();
+    let mut future = old.clone();
+    future["time"] = json!(1061);
     let call = tokio::spawn(async move {
         let resolved = resolve_forwards_backfill(&old, &a, &c.agent, 1000., true).await;
         let full = normalize_backfill(&resolved, "123", &c.agent, 1000.).unwrap();
@@ -842,6 +851,14 @@ async fn backfill_forward_skips_age_but_keeps_admission_checks() {
     assert!(message.text.contains("很久以前的外部对话"));
     assert!(!message.text.contains("历史作者"));
     assert!(message.text.contains("[/合并转发]"));
+    let a = b.clone();
+    let task = tokio::spawn(async move {
+        resolve_forwards_backfill(&future, &a, &future_agent, 1000., true).await
+    });
+    let req = next(&mut m.requests).await;
+    assert_eq!(req["action"], "get_forward_msg");
+    m.frames.send(response(&req, json!({"messages":[]}), json!(0), "ok")).unwrap();
+    assert_eq!(task.await.unwrap()["time"], 1061);
     stop(s, t).await;
 }
 

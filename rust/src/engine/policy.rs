@@ -683,37 +683,56 @@ pub fn normalize(
     agent: &Agent,
     now: f64,
 ) -> Option<Message> {
-    let mut message = normalize_core(event, self_id, agent, now)?;
-    let ts = message.ts;
-    if !ts.is_finite() || now - ts > agent.active_window_seconds || ts > now + 60.0 {
-        return None;
-    }
-    message.ts = ts.min(now);
+    let message = normalize_core(event, self_id, agent)?;
+    log_timestamp_offset(&message, now, agent.active_window_seconds);
     Some(message)
 }
 
-/// History may predate the active window, but invalid/future timestamps remain rejected.
+/// History and live messages retain the server timestamp, regardless of arrival delay.
 pub fn normalize_backfill(
     event: &serde_json::Value,
     self_id: &str,
     agent: &Agent,
     now: f64,
 ) -> Option<Message> {
-    let mut message = normalize_core(event, self_id, agent, now)?;
-    if message.id.is_empty() || !message.ts.is_finite() || message.ts > now + 60.0 {
+    let message = normalize_core(event, self_id, agent)?;
+    if message.id.is_empty() {
         return None;
     }
-    message.ts = message.ts.min(now);
+    log_timestamp_offset(&message, now, agent.active_window_seconds);
     Some(message)
 }
 
-// Keep the original timestamp until the caller has checked it; clamping first
-// would hide future timestamps (and can turn NaN into a valid timestamp).
+fn log_timestamp_offset(message: &Message, received_at: f64, active_window: f64) {
+    let delay = received_at - message.ts;
+    let reason = timestamp_offset_reason(message.ts, delay, active_window);
+    if let Some(reason) = reason {
+        eprintln!(
+            "message_time_anomaly {}",
+            serde_json::json!({"chat":message.chat,"id":message.id,"reason":reason,
+                "ts":message.ts,"received_at":received_at,"delay_seconds":delay})
+        );
+    }
+}
+
+fn timestamp_offset_reason(ts: f64, delay: f64, active_window: f64) -> Option<&'static str> {
+    if ts >= 1e11 {
+        Some("possible_napcat_local_fallback_milliseconds")
+    } else if delay < 0.0 {
+        Some("server_time_ahead")
+    } else if delay > active_window {
+        Some("late_arrival")
+    } else if delay.abs() <= 1.0 {
+        Some("server_or_local_time_indistinguishable")
+    } else {
+        None
+    }
+}
+
 fn normalize_core(
     event: &serde_json::Value,
     self_id: &str,
     agent: &Agent,
-    now: f64,
 ) -> Option<Message> {
     use crate::config::{js_string, truthy};
     use serde_json::Value;
@@ -746,10 +765,19 @@ fn normalize_core(
     {
         return None;
     }
-    let ts = if truthy(&event["time"]) {
-        crate::transport::js_number(&event["time"])
-    } else {
-        now
+    let ts = event["time"]
+        .as_f64()
+        .or_else(|| event["time"].as_str().and_then(|value| value.parse().ok()));
+    let ts = match ts {
+        Some(ts) if ts.is_finite() && ts > 0.0 => ts,
+        _ => {
+            eprintln!(
+                "message_time_anomaly {}",
+                serde_json::json!({"chat":chat,"id":js_string(&event["message_id"]),
+                    "reason":"missing_or_invalid_server_time","raw_time":event["time"]})
+            );
+            return None;
+        }
     };
     let mut at_self = false;
     let mut at_other = false;
@@ -878,6 +906,20 @@ pub(crate) fn named<'a>(text: &str, aliases: impl Iterator<Item = &'a str>) -> b
 #[cfg(test)]
 mod length_tests {
     use super::*;
+
+    #[test]
+    fn timestamp_anomaly_reasons_cover_clock_skew_and_possible_local_fallback() {
+        assert_eq!(timestamp_offset_reason(1000., -3600., 300.), Some("server_time_ahead"));
+        assert_eq!(timestamp_offset_reason(1000., 3600., 300.), Some("late_arrival"));
+        assert_eq!(
+            timestamp_offset_reason(1_760_000_000_000., -1_758_240_000_000., 300.),
+            Some("possible_napcat_local_fallback_milliseconds")
+        );
+        assert_eq!(
+            timestamp_offset_reason(1000., 0.5, 300.),
+            Some("server_or_local_time_indistinguishable")
+        );
+    }
 
     #[test]
     fn tilted_expected_length_is_strictly_monotone() {

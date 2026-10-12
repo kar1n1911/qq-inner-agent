@@ -73,6 +73,21 @@ fn received_at_migration_is_idempotent_and_marks_unknown_history() -> Result<()>
 fn message(id: &str, ts: f64) -> Value {
     json!({"chat":"g","id":id,"sender":"1","name":"名字","text":"中文🙂","ts":ts})
 }
+// Basis: 2026-10-12 NapCat protocol msgTime finding and the S-section time contract.
+#[test]
+fn replay_preserves_server_time_and_updates_receive_time() -> Result<()> {
+    let s = Store::in_memory()?;
+    let mut first = message("replay", 1000.);
+    first["received_at"] = json!(1002.);
+    assert!(s.message(&first)?);
+    let mut replay = message("replay", 9999.);
+    replay["received_at"] = json!(1010.);
+    assert!(!s.message(&replay)?);
+    let row = &s.history("g", None)?[0];
+    assert_eq!(row["ts"], 1000.);
+    assert_eq!(row["received_at"], 1010.);
+    Ok(())
+}
 #[test]
 fn messages_history_batch_and_active_chats() -> Result<()> {
     let s = Store::in_memory()?;

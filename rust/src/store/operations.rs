@@ -47,7 +47,7 @@ impl Store {
     }
     pub fn message(&self, m: &Value) -> Result<bool> {
         // IGNORE 保留原行；REPLACE 会删除旧行再插入，不能用于消息去重。
-        Ok(self.execute(
+        let inserted = self.execute(
             "INSERT OR IGNORE INTO messages(chat,id,sender,name,text,ts,self,received_at) VALUES(?,?,?,?,?,?,?,?)",
             params![
                 m["chat"].as_str(),
@@ -61,7 +61,16 @@ impl Store {
                     .as_f64()
                     .unwrap_or(Store::UNKNOWN_RECEIVED_AT)
             ],
-        )? > 0)
+        )? > 0;
+        if !inserted {
+            if let Some(received_at) = m["received_at"].as_f64() {
+                self.execute(
+                    "UPDATE messages SET received_at=? WHERE chat=? AND id=?",
+                    params![received_at, m["chat"].as_str(), m["id"].as_str()],
+                )?;
+            }
+        }
+        Ok(inserted)
     }
     /// 同一批入站消息一个事务；返回值逐条对应是否新增，出错整批回滚。
     pub fn messages(&self, messages: &[Value]) -> Result<Vec<bool>> {

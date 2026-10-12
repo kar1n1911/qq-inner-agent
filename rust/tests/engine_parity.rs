@@ -2658,12 +2658,15 @@ async fn backfill_ingests_expired_history_without_replying() {
     let ts = h.now() - e.config.agent.active_window_seconds - 3600.;
     old["time"] = json!(ts);
     e.ingest(&old).unwrap();
-    assert!(h.rows("SELECT * FROM messages").is_empty());
+    assert_eq!(h.rows("SELECT * FROM messages").len(), 1);
+    assert_eq!(h.rows("SELECT received_at FROM messages")[0]["received_at"], h.now());
+    *h.now.lock().unwrap() += 5.;
     e.ingest_backfill(&old).unwrap();
     e.ingest_backfill(&old).unwrap();
     let messages = h.rows("SELECT * FROM messages");
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0]["ts"], ts);
+    assert_eq!(messages[0]["received_at"], h.now());
     assert_eq!(e.orientation.get("group:10").unwrap().unwrap().message_count, 1);
     assert!(!h.rows("SELECT * FROM memory_layers WHERE layer='short_term'").is_empty());
     assert!(e.chats().is_empty());

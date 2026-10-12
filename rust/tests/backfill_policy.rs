@@ -23,7 +23,7 @@ fn backfill_accepts_old_messages_and_preserves_normalized_bytes() {
     let a = agent();
     let e = event();
     let now = 1000. + a.active_window_seconds + 1.;
-    assert!(normalize(&e, "99", &a, now).is_none());
+    assert_eq!(normalize(&e, "99", &a, now).unwrap().ts, 1000.);
     let recovered = normalize_backfill(&e, "99", &a, now).unwrap();
     let live = normalize(&e, "99", &a, 1000.).unwrap();
     assert_eq!(
@@ -41,12 +41,12 @@ fn backfill_accepts_old_messages_and_preserves_normalized_bytes() {
             serde_json::to_vec(&live).unwrap(),
             serde_json::to_vec(&backfill).unwrap()
         );
-        assert_eq!(backfill.ts, ts.min(now));
+        assert_eq!(backfill.ts, ts);
     }
 }
 
 #[test]
-fn backfill_retains_admission_and_timestamp_guards() {
+fn backfill_retains_admission_and_rejects_missing_server_time() {
     let a = agent();
     for patch in [
         json!({"post_type":"notice"}),
@@ -63,7 +63,8 @@ fn backfill_retains_admission_and_timestamp_guards() {
         json!({"time":"NaN"}),
         json!({"time":"Infinity"}),
         json!({"time":"-Infinity"}),
-        json!({"time":10061}),
+        json!({"time":null}),
+        json!({"time":0}),
     ] {
         let e = merge(&event(), &patch);
         assert!(
@@ -79,9 +80,22 @@ fn backfill_retains_admission_and_timestamp_guards() {
         json!("NaN"),
         json!("Infinity"),
         json!("-Infinity"),
-        json!(10061),
+        json!(null),
+        json!(0),
     ] {
         let e = merge(&event(), &json!({"time":ts}));
         assert!(normalize(&e, "99", &a, 10000.).is_none());
+    }
+}
+
+// Basis: 2026-10-12 NapCat protocol msgTime finding and the S-section time contract.
+#[test]
+fn server_clock_skew_and_late_delivery_keep_the_original_timestamp() {
+    let a = agent();
+    let now = 10000.;
+    for ts in [now + 3600., now - a.active_window_seconds - 3600., now * 1000.] {
+        let e = merge(&event(), &json!({"time":ts}));
+        assert_eq!(normalize(&e, "99", &a, now).unwrap().ts, ts);
+        assert_eq!(normalize_backfill(&e, "99", &a, now).unwrap().ts, ts);
     }
 }
