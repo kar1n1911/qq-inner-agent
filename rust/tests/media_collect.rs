@@ -123,7 +123,7 @@ fn bytes_survive_expired_url_and_fifty_uses_have_one_asset() {
             .unwrap(),
         50
     );
-    // 上下文表只允许四个引用字段，不复制正文。
+    // E-D8 可用性：仍不复制正文，只增加设计 L809 要求的两个 affect 维度。
     let cols: Vec<String> = s
         .connection()
         .prepare("PRAGMA table_info(media_contexts)")
@@ -132,7 +132,17 @@ fn bytes_survive_expired_url_and_fifty_uses_have_one_asset() {
         .unwrap()
         .map(Result::unwrap)
         .collect();
-    assert_eq!(cols, vec!["chat", "hash", "message_id", "role"]);
+    assert_eq!(
+        cols,
+        vec![
+            "chat",
+            "hash",
+            "message_id",
+            "role",
+            "valence",
+            "rationality"
+        ]
+    );
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -374,6 +384,29 @@ fn migration_reopen_and_context_lookup_use_original_messages() {
 }
 
 #[test]
+fn affect_snapshot_is_stored_with_usage_context() {
+    // E-D8 可用性：设计 L809 的“当时语气”随真实采集进入情景档案。
+    let t = Temp::new();
+    let s = Store::in_memory().unwrap();
+    qq_inner_core::persona::affect::enable(&s).unwrap();
+    for (dimension, value) in [("mood", -0.6), ("rationality", 0.4)] {
+        s.execute("INSERT INTO affect_state VALUES('group:10','group',?,?,0,1,1000,'[]')",rusqlite::params![dimension,value]).unwrap();
+    }
+    let e = event(1,json!([{"type":"text","data":{"text":"猫猫"}},{"type":"face","data":{"id":"14"}}]));
+    assert_eq!(ingest(&collector(&t), &s, &e).collected, 1);
+    let usage = s.rows("SELECT valence,rationality FROM media_contexts WHERE role='usage'",[]).unwrap();
+    assert_eq!(usage, vec![json!({"valence":-0.6,"rationality":0.4})]);
+}
+
+#[test]
+fn closing_markers_have_one_explicit_configuration_default() {
+    // E-D9 目标：设计 L752 将标记放配置；rust/MEDIA.md L55 明定默认空。
+    assert!(Config::default().classification.closing_markers.is_empty());
+    assert!(qq_inner_core::media::media_select::Config::default()
+        .classification.closing_markers.is_empty());
+}
+
+#[test]
 fn source_classifier_defaults_overrides_and_cross_chat_gate_are_exact() {
     use qq_inner_core::media::media_source::{can_use, classify, Evidence, Override, SourceTier};
     // 不变量：默认未知；无论使用者有多少都不能证明群友照片在网上公开。
@@ -582,6 +615,9 @@ fn old_media_schema_migrates_conservatively_and_backfills_only_known_humans() {
     s.enable_media().unwrap();
     let row = &s.media_assets("group:10").unwrap()[0];
     assert_eq!(row["distinct_senders"], 2);
+    let context_columns = s.rows("PRAGMA table_info(media_contexts)",[]).unwrap();
+    assert!(context_columns.iter().any(|column| column["name"] == "valence"));
+    assert!(context_columns.iter().any(|column| column["name"] == "rationality"));
     assert_eq!(row["occurrences"], 50);
     assert_eq!(row["source_tier"], "unknown");
     assert_eq!(row["public_corpus_match"], 0);

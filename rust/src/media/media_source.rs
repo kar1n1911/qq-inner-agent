@@ -3,6 +3,9 @@ use crate::settings::sha256;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fs, io::Read, path::Path};
 
+/// 三个不同的人类发送者是“群内传播”而非单人私藏的最小可辨识证据。
+pub const WIDESPREAD_THRESHOLD: u64 = 3;
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SourceTier {

@@ -86,16 +86,7 @@ impl Default for Config {
             minimum_match: 0.12,
             attention: Attention::default(),
             groups: BTreeMap::new(),
-            classification: conversation::Config {
-                closing_markers: vec![
-                    "好的".into(),
-                    "收到".into(),
-                    "那先这样".into(),
-                    "睡了".into(),
-                    "明天见".into(),
-                ],
-                ..Default::default()
-            },
+            classification: Default::default(),
             positive_markers: vec!["可爱".into(), "喜欢".into(), "哈哈".into()],
             negative_markers: vec!["别发".into(), "烦".into(), "恶心".into(), "滚".into()],
         }
@@ -266,7 +257,7 @@ pub fn signal(c: &Classification, outcome: Outcome, awake: bool) -> Option<f64> 
         Outcome::Negative => Some(0.),
         Outcome::Silence
             if awake
-                && c.stage == Stage::NaturalEnd
+                && matches!(c.stage, Stage::Closing | Stage::NaturalEnd)
                 && matches!(c.relation, Relation::Continuation | Relation::Shift) =>
         {
             Some(0.)
@@ -452,6 +443,22 @@ fn sharing(db: &Store, a: &str, b: &str, now: f64) -> Result<(f64, String)> {
     db.execute("INSERT INTO media_sharing VALUES(?,?,?,?,?) ON CONFLICT(a,b) DO UPDATE SET hour=excluded.hour,strength=excluded.strength,summary=excluded.summary",params![a,b,hour,strength,summary])?;
     Ok((strength, summary))
 }
+fn current_affect(db: &Store, chat: &str, now: f64) -> Result<Option<(f64, f64)>> {
+    let (valence, rationality) = crate::media::media_affect(db, chat, now)?;
+    Ok(valence.zip(rationality))
+}
+fn context_score(text_score: f64, current: Option<(f64, f64)>, row: &Value) -> f64 {
+    let Some((valence, rationality)) = current else {
+        return text_score;
+    };
+    let (Some(saved_valence), Some(saved_rationality)) =
+        (row["valence"].as_f64(), row["rationality"].as_f64())
+    else {
+        return text_score;
+    };
+    let affect = 1. - ((valence - saved_valence).abs() + (rationality - saved_rationality).abs()) / 4.;
+    text_score * (0.75 + 0.25 * affect.clamp(0., 1.))
+}
 /// 跨群来源闸门在构造候选前执行；不得先加入再靠抽签过滤。
 pub fn candidates(
     db: &Store,
@@ -464,9 +471,10 @@ pub fn candidates(
     if !c.enabled {
         return Ok(vec![]);
     }
+    let affect = current_affect(db, chat, now)?;
     let mut result = vec![];
     for r in db.rows(
-        "SELECT chat,hash,kind,file,source_tier FROM media_assets ORDER BY chat,hash",
+        "SELECT chat,hash,kind,file,source_tier,distinct_senders FROM media_assets ORDER BY chat,hash",
         [],
     )? {
         let source = r["chat"].as_str().unwrap();
@@ -476,9 +484,22 @@ pub fn candidates(
         if !media_source::can_use(tier, source, chat) {
             continue;
         }
+        if !media_source::classify(
+            media_source::Evidence {
+                distinct_senders: r["distinct_senders"].as_u64().unwrap_or(0),
+                ..Default::default()
+            },
+            media_source::WIDESPREAD_THRESHOLD,
+        )
+        .widespread
+        {
+            continue;
+        }
         let score = if source == chat {
             let mut best = 0f64;
-            for context in db.rows("SELECT m.text FROM media_contexts c JOIN messages m ON m.chat=c.chat AND m.id=c.message_id WHERE c.chat=? AND c.hash=? AND m.self=0",params![chat,hash])? {best=best.max(similarity(query,context["text"].as_str().unwrap_or("")));}
+            for context in db.rows("SELECT m.text,c.valence,c.rationality FROM media_contexts c JOIN messages m ON m.chat=c.chat AND m.id=c.message_id WHERE c.chat=? AND c.hash=? AND m.self=0",params![chat,hash])? {
+                best=best.max(context_score(similarity(query,context["text"].as_str().unwrap_or("")),affect,&context));
+            }
             best
         } else {
             if !c.sharing {
@@ -520,7 +541,12 @@ pub fn probability(a: &GroupActivity, stage: &Classification, c: &Config, waitin
     }
     let rescue = (c.p_quiet * a.since_human / c.silence_seconds).min(c.quiet_cap);
     let p = a.activity * c.p_active + (1. - a.activity) * rescue;
-    p * a.media_rate * (0.05 + 0.95 * stage.confidence.clamp(0., 1.))
+    let confidence = if stage.confident {
+        stage.confidence.clamp(0., 1.)
+    } else {
+        0.
+    };
+    p * a.media_rate * (0.05 + 0.95 * confidence)
 }
 pub struct Selection {
     pub candidate: Candidate,

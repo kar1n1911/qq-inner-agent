@@ -5,9 +5,9 @@ pub mod ocr;
 
 use crate::{
     config::{js_string, Agent},
-    persona::conversation,
     engine::policy,
     media::media_source::{Evidence, Override},
+    persona::{affect, conversation},
     settings::sha256,
     store::Store,
 };
@@ -45,6 +45,7 @@ impl Default for Config {
         }
     }
 }
+
 #[derive(Debug, Default)]
 pub struct Report {
     pub collected: usize,
@@ -114,7 +115,7 @@ impl Collector {
             }
         }
         // 后续消息也仅存 id；已有使用场景可随新证据重新分类，不产生学习更新。
-        store.execute("INSERT OR IGNORE INTO media_contexts SELECT c.chat,c.hash,?,'after' FROM media_contexts c JOIN messages m ON m.chat=c.chat AND m.id=c.message_id WHERE c.chat=? AND c.role='usage' AND m.id<>? AND m.ts<=? AND m.ts>=?", params![m.id,m.chat,m.id,m.ts,m.ts-self.config.classification.gap_seconds])?;
+        store.execute("INSERT OR IGNORE INTO media_contexts(chat,hash,message_id,role,valence,rationality) SELECT c.chat,c.hash,?,'after',c.valence,c.rationality FROM media_contexts c JOIN messages m ON m.chat=c.chat AND m.id=c.message_id WHERE c.chat=? AND c.role='usage' AND m.id<>? AND m.ts<=? AND m.ts>=?", params![m.id,m.chat,m.id,m.ts,m.ts-self.config.classification.gap_seconds])?;
         for row in store.rows("SELECT message_id FROM media_stages WHERE chat=? AND message_id IN (SELECT id FROM messages WHERE chat=? ORDER BY ts DESC,rowid DESC LIMIT 24)",params![m.chat,m.chat])? {
             store.record_media_stage(&m.chat,row["message_id"].as_str().unwrap(),now,&self.config.classification)?;
         }
@@ -262,21 +263,53 @@ impl Collector {
         file: &str,
         bytes: u64,
     ) -> Result<()> {
+        let (valence, rationality) = media_affect(store, &m.chat, m.ts)?;
         // 哈希去重使 N 次使用只有一份字节、一条素材，occurrences 仍准确计 N 次。
         store.execute("INSERT INTO media_assets(chat,hash,kind,file,occurrences,first_seen,last_seen,bytes,fitness) VALUES(?,?,?,?,1,?,?,?,'{}') ON CONFLICT(chat,hash) DO UPDATE SET occurrences=occurrences+1,first_seen=min(first_seen,excluded.first_seen),last_seen=max(last_seen,excluded.last_seen)",params![m.chat,hash,kind,file,m.ts,m.ts,bytes])?;
         store.execute(
             "INSERT INTO media_receipts VALUES(?,?,?)",
             params![m.chat, m.id, index as i64],
         )?;
-        store.execute(
-            "INSERT OR IGNORE INTO media_contexts VALUES(?,?,?,'usage')",
-            params![m.chat, hash, m.id],
-        )?;
+        store.execute("INSERT OR IGNORE INTO media_contexts(chat,hash,message_id,role,valence,rationality) VALUES(?,?,?,'usage',?,?)", params![m.chat,hash,m.id,valence,rationality])?;
         for row in store.rows("SELECT id FROM messages WHERE chat=? AND id<>? AND ts<=? ORDER BY ts DESC,rowid DESC LIMIT 2",params![m.chat,m.id,m.ts])? {
-            store.execute("INSERT OR IGNORE INTO media_contexts VALUES(?,?,?,'before')",params![m.chat,hash,row["id"].as_str()])?;
+            store.execute("INSERT OR IGNORE INTO media_contexts(chat,hash,message_id,role,valence,rationality) VALUES(?,?,?,'before',?,?)",params![m.chat,hash,row["id"].as_str(),valence,rationality])?;
         }
         Ok(())
     }
+}
+fn media_affect(store: &Store, chat: &str, now: f64) -> Result<(Option<f64>, Option<f64>)> {
+    if store
+        .first(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='affect_state'",
+            [],
+        )?
+        .is_none()
+    {
+        return Ok((None, None));
+    }
+    let mut values = (0., 0.);
+    for row in store.rows(
+        "SELECT dimension,value,baseline,updated FROM affect_state WHERE chat=? AND subject='group' AND dimension IN ('mood','rationality')",
+        [chat],
+    )? {
+        let updated = row["updated"].as_f64().unwrap_or(now);
+        // 历史回填不能从后来写入的状态反推当时语气。
+        if updated > now {
+            return Ok((None, None));
+        }
+        let value = affect::decay(
+            row["value"].as_f64().unwrap_or(0.),
+            row["baseline"].as_f64().unwrap_or(0.),
+            now - updated,
+            4. * 3600.,
+        );
+        match row["dimension"].as_str() {
+            Some("mood") => values.0 = value,
+            Some("rationality") => values.1 = value,
+            _ => {}
+        }
+    }
+    Ok((Some(values.0), Some(values.1)))
 }
 fn private_dir(path: &Path) -> Result<()> {
     #[cfg(unix)]
@@ -339,6 +372,14 @@ impl Store {
             self.execute("INSERT OR IGNORE INTO media_senders SELECT c.chat,c.hash,m.sender FROM media_contexts c JOIN messages m ON m.chat=c.chat AND m.id=c.message_id JOIN media_assets a ON a.chat=c.chat AND a.hash=c.hash WHERE c.role='usage' AND m.self=0 AND m.sender IS NOT NULL AND m.sender<>''", [])?;
             self.execute("UPDATE media_assets SET distinct_senders=(SELECT count(*) FROM media_senders s WHERE s.chat=media_assets.chat AND s.hash=media_assets.hash)", [])?;
         }
+        let context_columns = self.rows("PRAGMA table_info(media_contexts)", [])?;
+        for column in ["valence", "rationality"] {
+            if !context_columns.iter().any(|r| r["name"] == column) {
+                self.connection().execute_batch(&format!(
+                    "ALTER TABLE media_contexts ADD COLUMN {column} REAL CHECK({column} BETWEEN -1 AND 1)"
+                ))?;
+            }
+        }
         tx.commit()?;
         Ok(())
     }
@@ -400,6 +441,18 @@ impl Store {
         )?;
         for r in &mut rows {
             crate::store::decode(r, &["fitness"])?;
+        }
+        Ok(rows)
+    }
+    pub fn media_stages(&self, chat: &str, limit: i64) -> Result<Vec<Value>> {
+        let mut rows = self.rows(
+            "SELECT message_id,observed,classification FROM media_stages WHERE chat=? ORDER BY observed DESC,message_id DESC LIMIT ?",
+            params![chat, limit],
+        )?;
+        for row in &mut rows {
+            if let Some(raw) = row["classification"].as_str() {
+                row["classification"] = serde_json::from_str(raw)?;
+            }
         }
         Ok(rows)
     }

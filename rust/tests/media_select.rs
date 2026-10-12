@@ -15,10 +15,12 @@ fn db() -> Store {
     db
 }
 fn config() -> Config {
-    Config {
+    let mut config = Config {
         enabled: true,
         ..Default::default()
-    }
+    };
+    config.classification.closing_markers = vec!["好的".into(), "收到".into()];
+    config
 }
 fn classified(stage: Stage, relation: Relation, confident: bool) -> Classification {
     Classification {
@@ -33,10 +35,10 @@ fn message(db: &Store, chat: &str, id: &str, ts: f64, text: &str, own: bool) {
     db.message(&json!({"chat":chat,"id":id,"sender":if own {"99"} else {"20"},"name":"不得输出的昵称","text":text,"ts":ts,"self":own})).unwrap();
 }
 fn asset(db: &Store, chat: &str, hash: &str, tier: &str, context: &str) {
-    db.execute("INSERT INTO media_assets(chat,hash,kind,file,occurrences,first_seen,last_seen,bytes,source_tier) VALUES(?,?,'face','14',1,0,0,0,?)",params![chat,hash,tier]).unwrap();
+    db.execute("INSERT INTO media_assets(chat,hash,kind,file,occurrences,first_seen,last_seen,bytes,source_tier,distinct_senders) VALUES(?,?,'face','14',1,0,0,0,?,3)",params![chat,hash,tier]).unwrap();
     message(db, chat, &format!("context-{hash}"), 100., context, false);
     db.execute(
-        "INSERT INTO media_contexts VALUES(?,?,?,'before')",
+        "INSERT INTO media_contexts(chat,hash,message_id,role) VALUES(?,?,?,'before')",
         params![chat, hash, format!("context-{hash}")],
     )
     .unwrap();
@@ -97,7 +99,7 @@ fn history(db: &Store, chat: &str) {
 
 #[test]
 fn silence_truth_table_and_uncertainty_are_exact_invariants() {
-    // 手算资格表：仅自然终止×接续/转向可把沉默当负面；收束与单发始终剔除。
+    // E-D4 目标：设计 L736 明定收束或自然终止的接续/转向沉默都是有效信号。
     for stage in [
         Stage::Developing,
         Stage::Closing,
@@ -105,7 +107,9 @@ fn silence_truth_table_and_uncertainty_are_exact_invariants() {
         Stage::Standalone,
     ] {
         for relation in [Relation::Continuation, Relation::Shift, Relation::Unrelated] {
-            let expected = if stage == Stage::NaturalEnd && relation != Relation::Unrelated {
+            let expected = if matches!(stage, Stage::Closing | Stage::NaturalEnd)
+                && relation != Relation::Unrelated
+            {
                 Some(0.)
             } else {
                 None
@@ -135,9 +139,9 @@ fn silence_truth_table_and_uncertainty_are_exact_invariants() {
     }
 }
 #[test]
-fn excluded_silence_is_audited_without_any_fitness_write() {
+fn excluded_or_uncertain_silence_is_audited_without_any_fitness_write() {
     let db = db();
-    for (i, stage) in [Stage::Closing, Stage::Standalone, Stage::Developing]
+    for (i, stage) in [Stage::Standalone, Stage::Developing]
         .into_iter()
         .enumerate()
     {
@@ -178,7 +182,7 @@ fn excluded_silence_is_audited_without_any_fitness_write() {
         )
         .unwrap();
     }
-    assert_eq!(n(&db, "media_feedback"), 6);
+    assert_eq!(n(&db, "media_feedback"), 5);
     assert_eq!(n(&db, "media_fitness"), 0);
     assert_eq!(
         db.rows(
@@ -372,6 +376,31 @@ fn public_is_required_before_entering_cross_group_candidates() {
     .unwrap()
     .is_empty());
 }
+
+#[test]
+fn widespread_and_affect_change_real_candidate_scores() {
+    // E-D6 目标：设计 L787–796 的群内通用性先于候选决策；L1127–1129 规定不同发送者。
+    // E-D8 目标：设计 L809–812 要求当前语气匹配累积情景，不能只存两列。
+    let db = db();
+    qq_inner_core::persona::affect::enable(&db).unwrap();
+    let c = config();
+    for hash in ["warm", "cold"] {
+        asset(&db, "group:10", hash, "unknown", "猫猫");
+        db.execute("UPDATE media_contexts SET valence=?,rationality=0 WHERE hash=?",params![if hash=="warm" {0.6} else {-0.6},hash]).unwrap();
+    }
+    db.execute("UPDATE media_assets SET distinct_senders=2 WHERE hash='warm'",[]).unwrap();
+    db.execute("INSERT INTO affect_state VALUES('group:10','group','mood',0.6,0,1,?,'[]')",[NOW]).unwrap();
+    let list = || ms::candidates(&db,"group:10","猫猫",NOW,&c,ms::Occasion::new(Stage::Developing,0.,&c)).unwrap();
+    assert_eq!(list().iter().map(|r| r.hash.as_str()).collect::<Vec<_>>(),vec!["cold"]);
+    db.execute("UPDATE media_assets SET distinct_senders=3 WHERE hash='warm'",[]).unwrap();
+    let candidates = list();
+    let score = |hash: &str| candidates.iter().find(|r| r.hash==hash).unwrap().score;
+    assert!(score("warm") > score("cold"));
+    db.execute("UPDATE affect_state SET value=-0.6 WHERE chat='group:10' AND dimension='mood'",[]).unwrap();
+    let candidates = list();
+    let score = |hash: &str| candidates.iter().find(|r| r.hash==hash).unwrap().score;
+    assert!(score("cold") > score("warm"));
+}
 #[test]
 fn sharing_is_symmetric_monotone_and_has_a_hard_floor() {
     let set = |s: &str| {
@@ -529,12 +558,12 @@ fn attention_bounds_and_group_override_are_explicit() {
     assert_eq!(config.groups["group:11"].drift_level, Some(Drift::Wild));
 }
 #[test]
-fn real_classifier_closing_and_standalone_silence_do_not_write_negative_signals() {
+fn real_classifier_closing_silence_is_valid_but_standalone_stays_excluded() {
     let db = db();
     history(&db, "group:10");
     asset(&db, "group:10", "cat", "unknown", "猫猫");
     db.execute(
-        "INSERT INTO media_contexts VALUES('group:10','cat','closing','usage')",
+        "INSERT INTO media_contexts(chat,hash,message_id,role) VALUES('group:10','cat','closing','usage')",
         [],
     )
     .unwrap();
@@ -546,20 +575,20 @@ fn real_classifier_closing_and_standalone_silence_do_not_write_negative_signals(
     assert_eq!(r.len(), 1);
     let stage: Classification =
         serde_json::from_str(r[0]["classification"].as_str().unwrap()).unwrap();
-    assert!(matches!(stage.stage, Stage::Closing | Stage::NaturalEnd));
-    assert!(r[0]["signal"].is_null());
-    assert_eq!(n(&db, "media_fitness"), 0);
+    assert_eq!(stage.stage, Stage::Closing);
+    assert_eq!(r[0]["signal"], 0.);
+    assert_eq!(n(&db, "media_fitness"), 1);
     message(&db, "group:11", "before", 100., "苹果", false);
     message(&db, "group:11", "single", 200., "天气", false);
     message(&db, "group:11", "after", 400., "火箭", false);
     asset(&db, "group:11", "single", "unknown", "天气");
     db.execute(
-        "INSERT INTO media_contexts VALUES('group:11','single','single','usage')",
+        "INSERT INTO media_contexts(chat,hash,message_id,role) VALUES('group:11','single','single','usage')",
         [],
     )
     .unwrap();
     ms::observe(&db, "group:11", 1000., &c).unwrap();
-    assert_eq!(n(&db, "media_fitness"), 0);
+    assert_eq!(n(&db, "media_fitness"), 1);
     ms::observe(&db, "group:10", NOW + 60., &c).unwrap();
     assert_eq!(n(&db, "media_feedback"), 2);
 }
@@ -745,13 +774,23 @@ fn structural_confidence_is_monotone_continuous_and_drives_probability() {
         let confidence = e.confidence(&c.classification);
         assert!((0. ..=1.).contains(&confidence));
         assert!(confidence >= previous && confidence - previous < 0.001);
-        let mut stage = classified(Stage::Closing, Relation::Continuation, i >= 2500);
+        let mut stage = classified(Stage::Closing, Relation::Continuation, true);
         stage.confidence = confidence;
         let p = ms::probability(&activity(true, 600.), &stage, &c, false);
         assert!(p >= p_previous && p - p_previous < 0.001);
         previous = confidence;
         p_previous = p;
     }
+    // E-D5 可用性/目标：设计 L753 要求“不确定”使用最低概率；即使连续
+    // confidence 相同且为满值，confident=false 也只能保留 5% 探索底值。
+    let mut certain = classified(Stage::NaturalEnd, Relation::Continuation, true);
+    certain.confidence = 1.;
+    let mut uncertain = classified(Stage::NaturalEnd, Relation::Continuation, false);
+    uncertain.confidence = 1.;
+    let certain_p = ms::probability(&activity(true, 600.), &certain, &c, false);
+    let uncertain_p = ms::probability(&activity(true, 600.), &uncertain, &c, false);
+    assert!(uncertain_p > 0. && uncertain_p < certain_p);
+    assert!((uncertain_p - certain_p * 0.05).abs() < 1e-12);
     let baseline = e.confidence(&c.classification);
     e.weighted_turns += 1.;
     assert!(e.confidence(&c.classification) > baseline);
@@ -765,6 +804,33 @@ fn structural_confidence_is_monotone_continuous_and_drives_probability() {
     }))
     .unwrap();
     assert_eq!(old.confidence, 0.);
+}
+
+#[test]
+fn uncertain_closing_reduces_the_actual_selection_draw() {
+    // E-D5 目标：设计 L753 要求不确定时主动开话题概率降到最低。
+    let c = config();
+    let mut probabilities = Vec::new();
+    let mut stores = Vec::new();
+    for uncertain in [false, true] {
+        let db = db();
+        history(&db, "group:10");
+        if uncertain {
+            db.execute("UPDATE messages SET text='火箭' WHERE chat='group:10' AND id='previous'",[]).unwrap();
+        }
+        asset(&db, "group:10", "cat", "unknown", "猫猫 好的");
+        train(&db, "group:10", "group:10", "cat", "stage_closing", Outcome::Positive);
+        let selected = ms::select(&db, "group:10", NOW, &c, 0.).unwrap().unwrap();
+        assert_eq!(selected.classification.stage, Stage::Closing);
+        assert_eq!(selected.classification.confident, !uncertain);
+        let activity = ms::group_activity(&db, "group:10", NOW, c.silence_seconds).unwrap();
+        probabilities.push(ms::probability(&activity,&selected.classification,&c,false));
+        stores.push(db);
+    }
+    assert!(probabilities[1] < probabilities[0]);
+    let draw = (probabilities[0] + probabilities[1]) / 2.;
+    assert!(ms::select(&stores[0], "group:10", NOW, &c, draw).unwrap().is_some());
+    assert!(ms::select(&stores[1], "group:10", NOW, &c, draw).unwrap().is_none());
 }
 
 #[test]
@@ -1043,7 +1109,7 @@ fn human_rescue_and_legacy_pending_learn_in_the_selected_stage_bucket() {
     message(&db, "group:10", "rescue", NOW, "新话题", false);
     message(&db, "group:10", "response", NOW + 1., "喜欢", false);
     db.execute(
-        "INSERT INTO media_contexts VALUES('group:10','cat','rescue','usage')",
+        "INSERT INTO media_contexts(chat,hash,message_id,role) VALUES('group:10','cat','rescue','usage')",
         [],
     )
     .unwrap();
@@ -1212,6 +1278,7 @@ mod engine_bus {
     async fn run_case(
         closing: Outcome,
         developing: Outcome,
+        diverse_senders: bool,
     ) -> (Arc<Engine>, Arc<Bus>, Arc<Mutex<Store>>) {
         let store = Arc::new(Mutex::new(Store::in_memory().unwrap()));
         let bus = Arc::new(Bus::default());
@@ -1247,14 +1314,14 @@ mod engine_bus {
         for i in 0..201 {
             let now = NOW - 800. + i as f64;
             *bus.now.lock().unwrap() = now;
-            engine
-                .ingest(&event(
+            let mut incoming = event(
                     &format!("input-{i}"),
                     now,
                     if i == 200 { "猫猫 好的" } else { "猫猫" },
                     true,
-                ))
-                .unwrap();
+                );
+            incoming["user_id"] = json!(if diverse_senders { 20 + i % 3 } else { 20 });
+            engine.ingest(&incoming).unwrap();
         }
         engine.tick().unwrap();
         engine.wait_idle().await;
@@ -1264,6 +1331,7 @@ mod engine_bus {
             let db = store.lock().unwrap();
             let assets = db.media_assets("group:10").unwrap();
             assert_eq!(assets.len(), 1);
+            assert_eq!(assets[0]["distinct_senders"], if diverse_senders {3} else {1});
             let hash = assets[0]["hash"].as_str().unwrap();
             train(&db, "group:10", "group:10", hash, "stage_closing", closing);
             train(
@@ -1288,7 +1356,7 @@ mod engine_bus {
     /// 设计依据：docs/working/prompt-and-learning-design.md:808-812（上下文与群反应学习）。
     #[tokio::test]
     async fn media_bus_sends_and_learns_the_saved_occasion() {
-        let (engine, bus, store) = run_case(Outcome::Positive, Outcome::Negative).await;
+        let (engine, bus, store) = run_case(Outcome::Positive, Outcome::Negative, true).await;
         assert_eq!(
             *bus.sent.lock().unwrap(),
             vec![json!({"chat":"group:10","segment":{"type":"face","data":{"id":"14"}}})]
@@ -1338,7 +1406,7 @@ mod engine_bus {
     async fn developing_fitness_cannot_reward_or_poison_actual_closing_sends() {
         for (closing, expected) in [(Outcome::Positive, 1), (Outcome::Negative, 0)] {
             for developing in [Outcome::Positive, Outcome::Negative] {
-                let (engine, bus, store) = run_case(closing, developing).await;
+                let (engine, bus, store) = run_case(closing, developing, true).await;
                 assert_eq!(
                     bus.sent.lock().unwrap().len(),
                     expected,
@@ -1348,6 +1416,15 @@ mod engine_bus {
                 engine.stop().await;
             }
         }
+    }
+
+    /// E-D6 目标：设计 L787–796 的群内通用性在真实采集、训练、选靶及发送链路上生效。
+    #[tokio::test]
+    async fn one_sender_asset_cannot_send_even_after_positive_fitness() {
+        let (engine, bus, store) = run_case(Outcome::Positive, Outcome::Positive, false).await;
+        assert!(bus.sent.lock().unwrap().is_empty());
+        assert_eq!(n(&store.lock().unwrap(), "media_pending"), 0);
+        engine.stop().await;
     }
 }
 

@@ -486,7 +486,12 @@ impl Handler for Backend {
                     self.capture.lock().unwrap().until = 0;
                     Ok(json!({"stopped":true}))
                 }
-                "state.get" | "learning.list" | "learning.reset" | "logs.tail" => {
+                "state.get"
+                | "learning.list"
+                | "learning.reset"
+                | "media.list"
+                | "media.source.set"
+                | "logs.tail" => {
                     let method = method.to_string();
                     let dir = self.dir.clone();
                     let store = self.store.clone();
@@ -550,6 +555,51 @@ fn local(dir: &Path, store: &Mutex<Store>, method: &str, params: &Value) -> Resu
             }
             store.lock().unwrap().reset_learning(chat, now, subject)?;
             Ok(json!({"ok":true}))
+        }
+        "media.list" => {
+            let chat = params["chat"].as_str().unwrap_or("");
+            let (kind, id) = chat.split_once(':').unwrap_or(("", ""));
+            ensure!(
+                matches!(kind, "group" | "private") && valid_id(id),
+                "invalid_params"
+            );
+            let n = limit(params, "limit", 200, 1000)?;
+            let db = store.lock().unwrap();
+            db.enable_media()?;
+            let mut assets = db.media_assets(chat)?;
+            assets.truncate(n as usize);
+            Ok(json!({"assets":assets,"stages":db.media_stages(chat,n)?}))
+        }
+        "media.source.set" => {
+            let chat = params["chat"].as_str().unwrap_or("");
+            let (kind, id) = chat.split_once(':').unwrap_or(("", ""));
+            let hash = params["hash"].as_str().unwrap_or("");
+            ensure!(
+                matches!(kind, "group" | "private")
+                    && valid_id(id)
+                    && hash.len() == 64
+                    && hash.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()),
+                "invalid_params"
+            );
+            let value = match params.get("override") {
+                Some(Value::Null) => None,
+                Some(Value::String(value)) if value == "public" => {
+                    Some(crate::media::media_source::Override::Public)
+                }
+                Some(Value::String(value)) if value == "private" => {
+                    Some(crate::media::media_source::Override::Private)
+                }
+                _ => anyhow::bail!("invalid_params"),
+            };
+            let db = store.lock().unwrap();
+            db.enable_media()?;
+            db.set_media_source_override(chat, hash, value)?;
+            let asset = db
+                .media_assets(chat)?
+                .into_iter()
+                .find(|asset| asset["hash"] == hash)
+                .ok_or_else(|| anyhow::anyhow!("missing_media_asset"))?;
+            Ok(json!({"asset":asset}))
         }
         "logs.tail" => {
             let n = limit(params, "lines", 100, 1000)? as usize;
@@ -870,6 +920,47 @@ mod tests {
                 })
             })
         }
+    }
+    #[tokio::test]
+    async fn media_control_override_and_stage_review_reach_selector() {
+        // E-D7 目标：设计 L1130、L1117–1121 的后台覆盖必须改变真实候选准入。
+        // E-D9 目标：设计 L748 的结构判定及证据必须可由控制协议复核。
+        use crate::{media::media_select as ms, persona::conversation::Stage};
+        let dir = Temp::new();
+        let store = Arc::new(Mutex::new(Store::in_memory().unwrap()));
+        let hash = "a".repeat(64);
+        {
+            let db = store.lock().unwrap();
+            ms::enable(&db).unwrap();
+            db.message(&json!({"chat":"group:10","id":"m1","sender":"20","name":"Human","text":"猫猫 好的","ts":100.,"self":false})).unwrap();
+            db.record_media_stage("group:10", "m1", 300., &crate::media::Config::default().classification).unwrap();
+            db.execute("INSERT INTO media_assets(chat,hash,kind,file,occurrences,first_seen,last_seen,bytes,distinct_senders) VALUES(? ,?,'face','14',3,100,100,0,3)",rusqlite::params!["group:10",hash]).unwrap();
+            for chat in ["group:10", "group:11"] {
+                db.execute("INSERT INTO expressions(chat,subject,kind,term) VALUES(?,'group','jargon','猫猫')",[chat]).unwrap();
+            }
+        }
+        let backend = Arc::new(Backend::new(dir.0.clone(), store.clone(), Arc::new(OfflineRemote), vec![]));
+        let server = Server::bind(&dir.0, backend, Events::default()).unwrap();
+        let mut client = Client::connect(&dir.0).await;
+        let listed = client.call("list", "media.list", json!({"chat":"group:10"})).await;
+        assert_eq!(listed["result"]["assets"][0]["source_tier"], "unknown");
+        assert_eq!(listed["result"]["stages"][0]["message_id"], "m1");
+        assert_eq!(listed["result"]["stages"][0]["classification"]["evidence"]["silent_seconds"], 200.);
+        let mut c = ms::Config { enabled:true, sharing:true, ..Default::default() };
+        c.minimum_match = 0.1;
+        let hashes = || {
+            let db = store.lock().unwrap();
+            ms::candidates(&db,"group:11","猫猫",300.,&c,ms::Occasion::new(Stage::Developing,0.,&c))
+                .unwrap().into_iter().map(|candidate| candidate.hash).collect::<Vec<_>>()
+        };
+        assert!(hashes().is_empty());
+        assert_eq!(client.call("set", "media.source.set", json!({"chat":"group:10","hash":hash,"override":"public"})).await["result"]["asset"]["source_tier"], "public");
+        assert_eq!(hashes(), vec![hash.clone()]);
+        assert_eq!(client.call("set", "media.source.set", json!({"chat":"group:10","hash":hash,"override":"private"})).await["result"]["asset"]["source_tier"], "private");
+        assert!(hashes().is_empty());
+        assert_eq!(client.call("clear", "media.source.set", json!({"chat":"group:10","hash":hash,"override":null})).await["result"]["asset"]["source_tier"], "unknown");
+        assert_eq!(client.call("bad", "media.source.set", json!({"chat":"group:0","hash":hash,"override":"public"})).await["error"]["code"], "invalid_params");
+        server.stop().await;
     }
     #[tokio::test]
     async fn backend_status_learning_logs_and_diagnostics_contracts() {
