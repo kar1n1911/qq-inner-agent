@@ -219,13 +219,18 @@ impl Updater {
     }
     fn apply(&self) -> Result<bool> {
         self.clean()?;
-        let before = self.git(&["rev-parse", "HEAD"])?;
         self.git(&["pull", "--ff-only"])?;
         let revision = self.git(&["rev-parse", "HEAD"])?;
-        if revision == before {
+        let database = crate::config::load_config(&self.root)?.config.data_dir.join("agent.sqlite");
+        ensure!(database.is_file(), "database_unavailable; use ./agent update full");
+        let migration_required = StoreMigration::required(&database)?;
+        let running = (!self.running.is_empty() && self.running != "unknown").then_some(self.running.as_str());
+        if !full_update_required(running, &revision, migration_required) {
             return Ok(false);
         }
-        if let Some(reason) = schema_change_reason(&self.root, &before, &revision)? {
+        ensure!(!migration_required, "schema_change_requires_full_update: database migration required; use ./agent update full");
+        let running = running.context("running_revision_unavailable; use ./agent update full")?;
+        if let Some(reason) = schema_change_reason(&self.root, running, &revision)? {
             anyhow::bail!("schema_change_requires_full_update: {reason}; use ./agent update full");
         }
         self.clean()?;

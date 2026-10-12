@@ -44,7 +44,7 @@ impl Fixture {
         git(&remote, &["config", "user.name", "Update Test"]);
         fs::create_dir(remote.join("rust")).unwrap();
         fs::write(remote.join("rust/placeholder"), "fixture").unwrap();
-        fs::write(remote.join(".gitignore"), ".runtime/\nrust/target/\n").unwrap();
+        fs::write(remote.join(".gitignore"), ".runtime/\nrust/target/\ndata/\n").unwrap();
         fs::write(remote.join("artifact.sh"), Self::artifact("old")).unwrap();
         git(&remote, &["add", "."]);
         git(&remote, &["commit", "-m", "old"]);
@@ -53,6 +53,8 @@ impl Fixture {
             &base,
             &["clone", remote.to_str().unwrap(), root.to_str().unwrap()],
         );
+        fs::create_dir_all(root.join("data")).unwrap();
+        migrated_database(&root.join("data/agent.sqlite"));
         fs::create_dir_all(root.join("rust/target/release")).unwrap();
         executable(
             &root.join("rust/target/release/qq-inner-core"),
@@ -100,6 +102,9 @@ impl Fixture {
     }
     fn binary(&self) -> Vec<u8> {
         fs::read(self.root.join("rust/target/release/qq-inner-core")).unwrap()
+    }
+    fn database(&self) -> PathBuf {
+        self.root.join("data/agent.sqlite")
     }
     fn spawn(&self) -> ChildGuard {
         ChildGuard(
@@ -229,6 +234,64 @@ fn full_update_decision_covers_revision_schema_axes_and_unknown_running_revision
             "running={running:?}, migration_required={migration_required}"
         );
     }
+}
+
+#[tokio::test]
+async fn apply_and_full_share_revision_and_schema_decision() {
+    // VM 2026-10-12: source HEAD can already be pulled while the disk binary is old.
+    // UPDATE-1/UPDATE-2: migration remains an independent axis; apply must fail closed.
+    for (code_new, schema_old) in [(false, false), (false, true), (true, false), (true, true)] {
+        let apply = Fixture::new();
+        if code_new {
+            let target = apply.publish();
+            git(&apply.root, &["pull", "--ff-only"]);
+            assert_eq!(git(&apply.root, &["rev-parse", "HEAD"]), target);
+            assert_eq!(String::from_utf8(Command::new(apply.root.join("rust/target/release/qq-inner-core"))
+                .arg("build-revision").output().unwrap().stdout).unwrap().trim(), apply.old);
+        }
+        if schema_old {
+            fs::remove_file(apply.database()).unwrap();
+            old_database(&apply.database());
+        }
+        let (updater, _) = apply.updater();
+        updater.start("update.apply").unwrap();
+        let status = done(&updater).await;
+        let expected_apply = if schema_old { "failed" } else if code_new { "restart_pending" } else { "already_latest" };
+        assert_eq!(status["result"], expected_apply, "apply code_new={code_new} schema_old={schema_old}: {status}");
+        if schema_old {
+            assert!(status["error"].as_str().unwrap().contains("schema_change_requires_full_update"));
+        }
+        assert_eq!(apply.root.join(".runtime/build-count").exists(), code_new && !schema_old);
+
+        let full = Fixture::new();
+        if code_new { full.publish(); }
+        if schema_old {
+            fs::remove_file(full.database()).unwrap();
+            old_database(&full.database());
+        }
+        let systemctl = full.base.join("systemctl");
+        executable(&systemctl, "#!/bin/sh\nexit 0\n");
+        let result = full_update_with(&full.root,
+            &full.root.join("rust/target/release/qq-inner-core"), Some(&full.old),
+            &full.database(), &systemctl, &full.build, &|_| {}).unwrap();
+        let expected_full = if code_new || schema_old { "completed" } else { "already_latest" };
+        assert_eq!(result["result"], expected_full, "full code_new={code_new} schema_old={schema_old}");
+        assert_eq!(full.root.join(".runtime/build-count").exists(), code_new || schema_old);
+    }
+}
+
+#[tokio::test]
+async fn apply_without_running_revision_never_reports_already_latest() {
+    // UPDATE-1/UPDATE-2: unknown live code cannot be replaced by this binary's own revision.
+    let fixture = Fixture::new();
+    let (tx, _) = watch::channel(false);
+    let updater = Updater::new(fixture.root.clone(),
+        fixture.root.join("rust/target/release/qq-inner-core"), "unknown".into(), tx).unwrap();
+    updater.start("update.apply").unwrap();
+    let status = done(&updater).await;
+    assert_eq!(status["result"], "failed");
+    assert!(status["error"].as_str().unwrap().contains("running_revision_unavailable"));
+    assert!(!fixture.root.join(".runtime/build-count").exists());
 }
 
 // VM observation: update full rebuilt after a completed deployment because the
