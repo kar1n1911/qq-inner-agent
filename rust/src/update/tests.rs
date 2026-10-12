@@ -207,6 +207,78 @@ fn old_database(path: &Path) {
     .unwrap();
 }
 
+fn migrated_database(path: &Path) {
+    old_database(path);
+    crate::store::Store::migrate_received_at(path).unwrap();
+}
+
+#[test]
+fn full_update_decision_covers_revision_schema_axes_and_unknown_running_revision() {
+    for (running, migration_required, expected) in [
+        (Some("target"), false, false),
+        (Some("target"), true, true),
+        (Some("old"), false, true),
+        (Some("old"), true, true),
+        (None, false, true),
+        (None, true, true),
+    ] {
+        assert_eq!(
+            full_update_required(running, "target", migration_required),
+            expected,
+            "running={running:?}, migration_required={migration_required}"
+        );
+    }
+}
+
+#[test]
+fn full_update_migrates_when_running_code_is_current_but_schema_is_old() {
+    let fixture = Fixture::new();
+    let database = fixture.base.join("agent.sqlite");
+    old_database(&database);
+    let systemctl = fixture.base.join("systemctl");
+    executable(&systemctl, "#!/bin/sh\nexit 0\n");
+    let steps = Mutex::new(Vec::new());
+    let result = full_update_with(
+        &fixture.root,
+        &fixture.root.join("rust/target/release/qq-inner-core"),
+        Some(&fixture.old),
+        &database,
+        &systemctl,
+        &fixture.build,
+        &|step| steps.lock().unwrap().push(step.to_owned()),
+    )
+    .unwrap();
+    assert_eq!(result["result"], "completed");
+    assert_eq!(steps.lock().unwrap()[2], "migrate");
+    assert!(!crate::store::Store::requires_received_at_migration(database).unwrap());
+    // Regression: the 2026-10-11 VM incident exposed that UPDATE-1/UPDATE-2
+    // cannot treat code equality as proof that the database migration ran.
+}
+
+#[test]
+fn full_update_does_not_skip_when_running_revision_is_unavailable() {
+    let fixture = Fixture::new();
+    let database = fixture.base.join("agent.sqlite");
+    migrated_database(&database);
+    let systemctl = fixture.base.join("systemctl");
+    executable(&systemctl, "#!/bin/sh\nexit 0\n");
+    let steps = Mutex::new(Vec::new());
+    let result = full_update_with(
+        &fixture.root,
+        &fixture.root.join("rust/target/release/qq-inner-core"),
+        None,
+        &database,
+        &systemctl,
+        &fixture.build,
+        &|step| steps.lock().unwrap().push(step.to_owned()),
+    )
+    .unwrap();
+    assert_eq!(result["result"], "completed");
+    assert_eq!(steps.lock().unwrap()[0], "backup");
+    // Regression: the VM failure and UPDATE-1/UPDATE-2 require uncertainty to
+    // take the safe full path, never substitute this CLI binary's revision.
+}
+
 #[test]
 fn full_update_orders_steps_and_never_starts_new_binary_on_old_schema() {
     let fixture = Fixture::new();
@@ -219,7 +291,7 @@ fn full_update_orders_steps_and_never_starts_new_binary_on_old_schema() {
     let result = full_update_with(
         &fixture.root,
         &fixture.root.join("rust/target/release/qq-inner-core"),
-        &fixture.old,
+        Some(&fixture.old),
         &database,
         &systemctl,
         &fixture.build,
@@ -260,7 +332,7 @@ fn failed_migration_restores_consistent_backup() {
     let error = full_update_with(
         &fixture.root,
         &fixture.root.join("rust/target/release/qq-inner-core"),
-        &fixture.old,
+        Some(&fixture.old),
         &database,
         &systemctl,
         &fixture.build,

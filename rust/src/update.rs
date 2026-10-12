@@ -365,23 +365,31 @@ fn restore_binary(updater: &Updater) -> Result<()> {
     Ok(())
 }
 
+fn full_update_required(running: Option<&str>, target: &str, migration_required: bool) -> bool {
+    running != Some(target) || migration_required
+}
+
 fn full_update_with(
     root: &Path,
     binary: &Path,
-    running: &str,
+    running: Option<&str>,
     database: &Path,
     systemctl: &Path,
     build: &Path,
     step: &dyn Fn(&str),
 ) -> Result<Value> {
+    let installed = Command::new(binary).arg("build-revision").output()?;
+    ensure!(installed.status.success(), "cannot inspect installed binary revision");
+    let installed = String::from_utf8(installed.stdout)?.trim().to_owned();
     let (restart, _) = watch::channel(false);
-    let mut updater = Updater::new(root.to_owned(), binary.to_owned(), running.to_owned(), restart)?;
+    let mut updater = Updater::new(root.to_owned(), binary.to_owned(), installed, restart)?;
     Arc::get_mut(&mut updater).context("full updater ownership")?.build = build.to_owned();
     updater.clean()?;
     updater.git(&["pull", "--ff-only"])?;
     updater.clean()?;
     let revision = updater.git(&["rev-parse", "HEAD"])?;
-    if revision == running {
+    let migration_required = StoreMigration::required(database)?;
+    if !full_update_required(running, &revision, migration_required) {
         return Ok(json!({"result":"already_latest","revision":revision}));
     }
     let backup = updater
@@ -444,6 +452,9 @@ fn full_update_with(
 
 struct StoreMigration;
 impl StoreMigration {
+    fn required(database: &Path) -> Result<bool> {
+        crate::store::Store::requires_received_at_migration(database)
+    }
     fn backup(database: &Path, backup: &Path) -> Result<()> {
         crate::store::Store::backup_database(database, backup)
     }
@@ -452,11 +463,16 @@ impl StoreMigration {
     }
 }
 
-pub fn full_update(root: &Path, binary: &Path, database: &Path) -> Result<Value> {
+pub fn full_update(
+    root: &Path,
+    binary: &Path,
+    running: Option<&str>,
+    database: &Path,
+) -> Result<Value> {
     full_update_with(
         root,
         binary,
-        REVISION,
+        running,
         database,
         Path::new("systemctl"),
         Path::new("cargo"),

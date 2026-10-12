@@ -13,6 +13,31 @@ use rusqlite::Connection;
 use serde_json::Value;
 use std::path::PathBuf;
 
+async fn running_revision(data_dir: &std::path::Path) -> Option<String> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        let mut socket = tokio::net::UnixStream::connect(data_dir.join("control.sock"))
+            .await
+            .ok()?;
+        socket
+            .write_all(b"{\"id\":\"full-update\",\"method\":\"update.status\"}\n")
+            .await
+            .ok()?;
+        let mut line = String::new();
+        BufReader::new(socket).read_line(&mut line).await.ok()?;
+        let reply: Value = serde_json::from_str(&line).ok()?;
+        if reply["ok"] != true {
+            return None;
+        }
+        reply["result"]["runningRevision"]
+            .as_str()
+            .map(str::to_owned)
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
 #[derive(Parser, Debug)]
 #[command(
     name = "qq-inner-core",
@@ -78,9 +103,11 @@ async fn main() -> Result<()> {
         Command::Update { action } => {
             if action == "full" {
                 let loaded = config::load_config(&root)?;
+                let running = running_revision(&loaded.config.data_dir).await;
                 let result = qq_inner_core::update::full_update(
                     &fs::canonicalize(&root)?,
                     &std::env::current_exe()?,
+                    running.as_deref(),
                     &loaded.config.data_dir.join("agent.sqlite"),
                 )?;
                 println!("{}", serde_json::to_string_pretty(&result)?);

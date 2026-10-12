@@ -24,21 +24,10 @@ impl Store {
     }
     fn initialize(db: Connection) -> Result<Self> {
         db.set_prepared_statement_cache_capacity(64);
-        let old_messages = db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='messages')",
-            [],
-            |row| row.get::<_, bool>(0),
-        )?;
-        if old_messages {
-            let mut statement = db.prepare("PRAGMA table_info(messages)")?;
-            let columns = statement
-                .query_map([], |row| row.get::<_, String>(1))?
-                .collect::<std::result::Result<Vec<_>, _>>()?;
-            ensure!(
-                columns.iter().any(|column| column == "received_at"),
-                "database migration required; run ./agent update full"
-            );
-        }
+        ensure!(
+            !Self::received_at_migration_required(&db)?,
+            "database migration required; run ./agent update full"
+        );
         db.execute_batch(include_str!("store/schema.sql"))?;
         let store = Self {
             db,
@@ -65,6 +54,27 @@ impl Store {
         }
         store.initialize_group_hours()?;
         Ok(store)
+    }
+
+    fn received_at_migration_required(db: &Connection) -> Result<bool> {
+        let messages = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='messages')",
+            [],
+            |row| row.get::<_, bool>(0),
+        )?;
+        if messages {
+            let mut statement = db.prepare("PRAGMA table_info(messages)")?;
+            let columns = statement
+                .query_map([], |row| row.get::<_, String>(1))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            return Ok(!columns.iter().any(|column| column == "received_at"));
+        }
+        Ok(false)
+    }
+
+    pub(crate) fn requires_received_at_migration(path: impl AsRef<Path>) -> Result<bool> {
+        let db = Connection::open(path).context("open store for migration check")?;
+        Self::received_at_migration_required(&db)
     }
 
     /// One-shot migration for the pre-release received-at schema change.
