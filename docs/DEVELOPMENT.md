@@ -338,6 +338,14 @@ ssh vm 'cd ~/github_repo/qq-inner-agent && codex exec resume --last \
 3. **不要用 `pgrep`/`pkill -f "codex exec"`** —— 它会把**你自己那条 ssh 命令**匹配进去，
    造成假阳性甚至把自己杀掉（踩过两次）。
    **判断完成只看 `-o` 结果文件是否生成**；杀进程**用显式 pid**。
+4. **杀掉 codex 后必须一起清掉 `app-server`/`proxy`** —— 它们持有**线程写入锁**，
+   否则下一次 `resume` 会立刻失败并报
+   `thread <id> already has an active writer`（结果文件不生成）。
+   处理：
+
+   ```bash
+   for p in $(ps -eo pid,args | grep -E "codex.*(app-server|proxy)" | grep -v grep | awk '{print $1}'); do kill "$p"; done
+   ```
 
 ### 判断 agent 状态的四条准则（用户明确要求，2026-10-12）
 
