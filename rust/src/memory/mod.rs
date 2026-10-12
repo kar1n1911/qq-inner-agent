@@ -71,11 +71,14 @@ pub fn parse_memory_updates(
     settings: &Memory,
 ) -> Result<Vec<Value>> {
     let allowed = memory_subjects(chat, sender)?;
-    let humans: HashMap<_, _> = history
-        .iter()
-        .filter(|m| !truthy(&m["self"]) && m["chat"] == chat)
-        .map(|m| (text(m, "id"), m))
-        .collect();
+    let mut humans = HashMap::new();
+    let mut ambiguous = HashSet::new();
+    for message in history.iter().filter(|m| !truthy(&m["self"]) && m["chat"] == chat) {
+        let id = text(message, "id");
+        if humans.insert(id, message).is_some() { ambiguous.insert(id); }
+        if let Some(key) = message["message_key"].as_str() { humans.insert(key, message); }
+    }
+    for id in ambiguous { humans.remove(id); }
     ensure!(
         value.is_array() && array(value).len() <= 4,
         "invalid_memory_updates"
@@ -95,7 +98,7 @@ pub fn parse_memory_updates(
         ensure!(allowed.iter().any(|s|v["subject"]==*s)&&matches!(text(v,"layer"),"long_term"|"traits")&&matches!(text(v,"operation"),"upsert"|"forget")&&valid_text(&v["key"],64)&&v["sourceIds"].is_array()&&(1..=6).contains(&array(&v["sourceIds"]).len())&&array(&v["sourceIds"]).iter().all(|id|id.as_str().is_some_and(|id|humans.contains_key(id))),"invalid_memory_updates");
         ensure!(v["subject"] == "group" || array(&v["sourceIds"]).iter().all(|id| !contains_forward(humans[id.as_str().unwrap()])), "memory_forward_person_evidence");
         let mut ids=HashSet::new();
-        let sources:Vec<_>=array(&v["sourceIds"]).iter().filter(|id|ids.insert(id.as_str().unwrap())).map(|id|{let m=humans[id.as_str().unwrap()];json!({"id":id,"sender":m["sender"],"ts":m["ts"]})}).collect();
+        let sources:Vec<_>=array(&v["sourceIds"]).iter().filter(|id|ids.insert(id.as_str().unwrap())).map(|id|{let m=humans[id.as_str().unwrap()];json!({"id":m.get("message_key").unwrap_or(&m["id"]),"sender":m["sender"],"ts":m["ts"]})}).collect();
         // 来源必须是本 chat 的人类消息；QQ-ID 归属不依赖昵称，群结论需要多人。
         ensure!(if v["subject"]=="group" {sources.iter().map(|s|s["sender"].to_string()).collect::<HashSet<_>>().len()>=2} else {sources.iter().all(|s|format!("person:{}",js_string(&s["sender"]))==text(v,"subject"))},"memory_author_mismatch");
         let key=trim(text(v,"key"));
@@ -137,7 +140,7 @@ pub fn learning_review_input(updates: &[Value], history: &[Value], existing: &[V
                     .iter()
                     .any(|v| array(&v["sources"]).iter().any(|s| same_source(s, m)))
         })
-        .map(|m| json!({"id":m["id"],"sender":m["sender"],"text":m["text"],"ts":m["ts"]}))
+        .map(|m| json!({"id":m.get("message_key").unwrap_or(&m["id"]),"sender":m["sender"],"text":m["text"],"ts":m["ts"]}))
         .collect();
     json!({"candidates":candidates,"sources":sources,"existing":existing})
 }
@@ -217,7 +220,7 @@ pub(crate) fn source_identity(s: &Value) -> String {
     format!("{}:{}", js_string(&s["sender"]), js_string(&s["id"]))
 }
 pub(crate) fn same_source(a: &Value, b: &Value) -> bool {
-    a["sender"] == b["sender"] && a["id"] == b["id"]
+    a["sender"] == b["sender"] && a["id"] == *b.get("message_key").unwrap_or(&b["id"])
 }
 pub(crate) fn newest(sources: &[Value], floor: f64) -> f64 {
     sources.iter().map(|s| num(s, "ts")).fold(floor, f64::max)
@@ -382,9 +385,9 @@ impl<'a> LayeredMemory<'a> {
                 chat,
                 &subject,
                 "short_term",
-                text(message, "id"),
+                text(message, "message_key"),
                 &content,
-                &[json!({"id":message["id"],"sender":message["sender"],"ts":message["ts"]})],
+                &[json!({"id":message["message_key"],"sender":message["sender"],"ts":message["ts"]})],
                 0.5,
                 now,
                 now + settings.short_hours * 3600.,

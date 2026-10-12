@@ -503,10 +503,11 @@ impl Engine {
             && raw.trim() == "/还原"
         {
             let db = self.db()?;
-            if !db.message(&value)? {
+            let (inserted, key) = db.record_message(&value)?;
+            if !inserted {
                 return Ok(());
             }
-            db.mark_handled(&m.chat, &m.id, true)?;
+            db.mark_handled(&m.chat, &key, true)?;
             if core.identity_busy || !core.identity_commands.is_empty() {
                 core.teaching_replies
                     .push((m.chat, "身份更新正在处理，请稍后再试".into()));
@@ -523,10 +524,11 @@ impl Engine {
                 .any(|c| raw.trim().starts_with(c))
         {
             let db = self.db()?;
-            if !db.message(&value)? {
+            let (inserted, key) = db.record_message(&value)?;
+            if !inserted {
                 return Ok(());
             }
-            db.mark_handled(&m.chat, &m.id, true)?;
+            db.mark_handled(&m.chat, &key, true)?;
             core.teaching_commands.push((m.chat, m.sender, raw));
             return Ok(());
         }
@@ -543,14 +545,16 @@ impl Engine {
             };
             Some(s)
         };
-        if !self.db()?.message(&value)? {
+        let (inserted, key) = self.db()?.record_message(&value)?;
+        if !inserted {
             return Ok(());
         }
+        value["message_key"] = json!(key);
         if let Some(worker) = &self.ocr {
-            worker.enqueue(&m.chat, &m.id, event, now);
+            worker.enqueue(&m.chat, &key, event, now);
         }
         if a.emoji.learn_frequency {
-            crate::persona::humanize::capture(&*self.db()?, &m.chat, &m.id, event)?;
+            crate::persona::humanize::capture(&*self.db()?, &m.chat, &key, event)?;
         }
         if let Some(collector) = &self.collector {
             let report = collector.ingest(&*self.db()?, event, &self_id, a, now)?;
@@ -580,7 +584,7 @@ impl Engine {
         } else if !s.pending {
             s.addressed_id = None;
         }
-        s.last_id = m.id;
+        s.last_id = key;
         if !(s.pending && s.hint == Hint::SelfChat) {
             s.hint = m.hint;
         }
@@ -606,7 +610,7 @@ impl Engine {
                 .find(|m| !truthy(&m["self"]))
             {
                 s.last_human = num(last, "ts");
-                s.last_id = text(last, "id").into();
+                s.last_id = text(last, "message_key").into();
                 s.pause_done = true;
             }
         }
@@ -699,12 +703,12 @@ impl Engine {
                     .map(js_string)
                     .unwrap_or(delivery);
                 let now = self.now();
-                db.message(&json!({"chat":chat,"id":id,"sender":self.transport.self_id(),"name":a.name.text,"text":"","ts":now,"self":true}))?;
+                let message_key = db.record_distinct_message(&json!({"chat":chat,"id":id,"sender":self.transport.self_id(),"name":a.name.text,"text":"","ts":now,"self":true}))?;
                 db.execute(
                     "INSERT OR IGNORE INTO media_pending VALUES(?,?,?,?,?,?,?,?)",
                     rusqlite::params![
                         chat,
-                        id,
+                        message_key,
                         selection.candidate.source_chat,
                         selection.candidate.hash,
                         selection.bucket,
@@ -1212,7 +1216,7 @@ impl Engine {
             &a.memory,
             &ScopedOptions {
                 enabled: Some(a.learning.enabled),
-                exclude_ids: t.history.iter().map(|m| text(m, "id").into()).collect(),
+                exclude_ids: t.history.iter().map(|m| text(m, "message_key").into()).collect(),
                 limit: Some(a.learning.retrieval_limit as usize)
             }
         )?);
@@ -1381,10 +1385,10 @@ impl Engine {
             }
             let new_start = humans
                 .iter()
-                .rposition(|m| m["id"] == t.profile["last_id"])
+                .rposition(|m| m["message_key"] == t.profile["last_id"])
                 .map_or(0, |i| i + 1);
             t.learn_now = a.learning.enabled
-                && t.last["id"] != t.profile["last_id"]
+                && t.last["message_key"] != t.profile["last_id"]
                 && (humans.len() - new_start) as f64 >= a.learning.min_messages
                 && now - num(&t.profile, "updated") >= a.learning.interval_seconds;
             t.query = humans[humans.len().saturating_sub(3)..]
@@ -1702,7 +1706,7 @@ impl Engine {
                             chat,
                             &json!({"style":null,"memories":[],"forgetIds":[]}),
                             now,
-                            text(&t.last, "id"),
+                            text(&t.last, "message_key"),
                             &a.learning,
                             t.profile["epoch"].as_i64().unwrap_or(0),
                             Some(LayeredUpdate {
@@ -2121,7 +2125,7 @@ impl Engine {
             }
             // 44–45：先落库再发送；崩溃/超时留下 pending/uncertain，绝不重放。
             if behavior.burst {
-                crate::persona::affect::reserve_burst(&db, chat, text(&t.last, "id"))?;
+                crate::persona::affect::reserve_burst(&db, chat, text(&t.last, "message_key"))?;
             }
             let mut targeting = targeting::validate(
                 &db,

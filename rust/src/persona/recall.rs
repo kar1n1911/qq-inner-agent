@@ -45,9 +45,12 @@ impl Budget {
             return Ok(vec![]);
         }
         let rows = if !request.around_message_id.is_empty() {
+            let Some(key) = store.resolve_message_key(chat, &request.around_message_id)? else {
+                return Ok(vec![]);
+            };
             let anchor = store.rows(
-                "SELECT ts FROM messages WHERE chat=? AND id=?",
-                params![chat, request.around_message_id],
+                "SELECT ts FROM messages WHERE chat=? AND message_key=?",
+                params![chat, key],
             )?;
             let Some(anchor) = anchor.first() else {
                 return Ok(vec![]);

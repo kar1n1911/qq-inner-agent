@@ -103,7 +103,7 @@ pub fn build(db: &Store, chat: &str, settings: &Settings) -> Result<Option<Diges
     }
     // 只扫描 id，未选中的正文不载入；不会把几百条完整正文送给模型。
     let ids = db.rows(
-        &format!("SELECT id FROM messages WHERE {UNREAD} ORDER BY rowid"),
+        &format!("SELECT id,message_key FROM messages WHERE {UNREAD} ORDER BY rowid"),
         [chat],
     )?;
     let total = ids.len();
@@ -120,7 +120,7 @@ pub fn build(db: &Store, chat: &str, settings: &Settings) -> Result<Option<Diges
             .sample_max
             .min((sample.len() as f64 * settings.sample_percent / 100.).round() as usize)
     };
-    sample.sort_unstable_by_key(|&i| (rank(chat, ids[i]["id"].as_str().unwrap_or_default()), i));
+    sample.sort_unstable_by_key(|&i| (rank(chat, ids[i]["message_key"].as_str().unwrap_or_default()), i));
     sample.truncate(sample_count);
     sample.sort_unstable();
     let positions: Vec<_> = (0..head_end)
@@ -131,8 +131,8 @@ pub fn build(db: &Store, chat: &str, settings: &Settings) -> Result<Option<Diges
     let mut messages = Vec::with_capacity(positions.len());
     for &i in &positions {
         messages.extend(db.rows(
-            "SELECT * FROM messages WHERE chat=? AND id=?",
-            rusqlite::params![chat, ids[i]["id"].as_str()],
+            "SELECT * FROM messages WHERE chat=? AND message_key=?",
+            rusqlite::params![chat, ids[i]["message_key"].as_str()],
         )?);
     }
     db.enhance_ocr(&mut messages)?;

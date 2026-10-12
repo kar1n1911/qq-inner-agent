@@ -453,13 +453,15 @@ fn full_update_with(
 struct StoreMigration;
 impl StoreMigration {
     fn required(database: &Path) -> Result<bool> {
-        crate::store::Store::requires_received_at_migration(database)
+        Ok(crate::store::Store::requires_received_at_migration(database)?
+            || crate::store::Store::requires_message_key_migration(database)?)
     }
     fn backup(database: &Path, backup: &Path) -> Result<()> {
         crate::store::Store::backup_database(database, backup)
     }
     fn migrate(database: &Path) -> Result<()> {
-        crate::store::Store::migrate_received_at(database)
+        crate::store::Store::migrate_received_at(database)?;
+        crate::store::Store::migrate_message_keys(database)
     }
 }
 

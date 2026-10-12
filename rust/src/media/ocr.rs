@@ -397,7 +397,7 @@ impl Worker {
                         let db = store.lock().map_err(|_| anyhow::anyhow!("store_poisoned"))?;
                         // A reload disabling OCR or retention deletion must not resurrect results.
                         if db.ocr_enabled.get() && !cancelled.load(Ordering::Acquire) {
-                            db.execute("INSERT OR REPLACE INTO media_ocr(chat,message_id,hash,text,engine,created,confidence,reliable) SELECT ?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM messages WHERE chat=? AND id=?)",
+                            db.execute("INSERT OR REPLACE INTO media_ocr(chat,message_id,hash,text,engine,created,confidence,reliable) SELECT ?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM messages WHERE chat=? AND message_key=?)",
                                 params![job.chat,job.id,if hashes.len() == 1 { hashes[0].clone() } else { sha256(hashes.join(":").as_bytes()) },text,settings.engine,job.created,confidence,reliable,job.chat,job.id])?;
                         }
                     }
@@ -449,7 +449,7 @@ impl Store {
     pub fn set_ocr_enabled(&self, enabled: bool) -> Result<()> {
         if enabled {
             self.connection().execute_batch("CREATE TABLE IF NOT EXISTS media_ocr(chat TEXT NOT NULL,message_id TEXT NOT NULL,hash TEXT NOT NULL,text TEXT NOT NULL,engine TEXT NOT NULL,created REAL NOT NULL,confidence REAL,reliable INTEGER,PRIMARY KEY(chat,message_id));
-                CREATE TRIGGER IF NOT EXISTS media_ocr_cleanup AFTER DELETE ON messages BEGIN DELETE FROM media_ocr WHERE chat=OLD.chat AND message_id=OLD.id; END;")?;
+                CREATE TRIGGER IF NOT EXISTS media_ocr_cleanup AFTER DELETE ON messages BEGIN DELETE FROM media_ocr WHERE chat=OLD.chat AND message_id=OLD.message_key; END;")?;
             // Upgrade databases created before quality signals existed. NULL means unknown.
             let columns = self.rows("PRAGMA table_info(media_ocr)", [])?;
             for (name, kind) in [("confidence", "REAL"), ("reliable", "INTEGER")] {
@@ -471,7 +471,7 @@ impl Store {
         for row in rows {
             if let Some(ocr) = self.first(
                 "SELECT text, reliable FROM media_ocr WHERE chat=? AND message_id=?",
-                params![row["chat"].as_str(), row["id"].as_str()],
+                params![row["chat"].as_str(), row["message_key"].as_str()],
             )? {
                 if let (Some(original), Some(text)) = (row["text"].as_str(), ocr["text"].as_str()) {
                     let replacement = if ocr["reliable"].as_i64() == Some(1) {
@@ -700,16 +700,11 @@ TSV"
     fn legacy_schema_and_low_quality_context() {
         let db = Store::in_memory().unwrap();
         db.execute("CREATE TABLE media_ocr(chat TEXT,message_id TEXT,hash TEXT,text TEXT,engine TEXT,created REAL,PRIMARY KEY(chat,message_id))", []).unwrap();
-        db.execute(
-            "INSERT INTO media_ocr VALUES('a','1','hash','深文峰','tesseract',1)",
-            [],
-        )
-        .unwrap();
         db.set_ocr_enabled(true).unwrap();
         db.set_ocr_enabled(true).unwrap();
+        db.message(&json!({"chat":"a","id":"1","text":"look [image] [image]","ts":1})).unwrap();
+        db.execute("INSERT INTO media_ocr(chat,message_id,hash,text,engine,created) SELECT 'a',message_key,'hash','深文峰','tesseract',1 FROM messages WHERE chat='a' AND id='1'", []).unwrap();
         for token in ["[image]", "[图片]"] {
-            db.message(&json!({"chat":"a","id":"1","text":format!("look {token} [image]"),"ts":1}))
-                .unwrap();
             db.execute(
                 "UPDATE messages SET text=? WHERE chat='a' AND id='1'",
                 params![format!("look {token} [image]")],
@@ -747,7 +742,7 @@ TSV"
             (1, "[image: 文字]"),
             (0, "[图片(文字识别可信度低,仅供参考): 文字]"),
         ] {
-            db.execute("INSERT OR REPLACE INTO media_ocr VALUES('a','1','hash','文字','tesseract',1,0.9,?)", [reliable]).unwrap();
+            db.execute("INSERT OR REPLACE INTO media_ocr SELECT 'a',message_key,'hash','文字','tesseract',1,0.9,? FROM messages WHERE chat='a' AND id='1'", [reliable]).unwrap();
             let expected = original.replace("\n[/合并转发]", &format!("\n{rendered}\n[/合并转发]"));
             assert_eq!(db.history("a", None).unwrap()[0]["text"], expected);
             assert_eq!(
@@ -875,7 +870,8 @@ TSV"
         .unwrap();
         let event = json!({"message":[{"type":"image","resolved_forward_image":true,"data":{"file":"opaque-id","url":url,"summary":"[动画表情]"}}]});
         let start = Instant::now();
-        worker.enqueue("group:1", "a", &event, 1.);
+        let key = db.lock().unwrap().resolve_message_key("group:1", "a").unwrap().unwrap();
+        worker.enqueue("group:1", &key, &event, 1.);
         assert!(start.elapsed() < Duration::from_millis(100));
         loop {
             if db
@@ -942,9 +938,10 @@ TSV"
         )
         .unwrap()
         .unwrap();
+        let key = db.lock().unwrap().resolve_message_key("a", "1").unwrap().unwrap();
         worker.enqueue(
             "a",
-            "1",
+            &key,
             &json!({"message":[
                 {"type":"image","data":{"file":clear}},
                 {"type":"image","data":{"file":blurry}}
@@ -988,9 +985,10 @@ TSV"
         )
         .unwrap()
         .unwrap();
+        let key = db.lock().unwrap().resolve_message_key("a", "1").unwrap().unwrap();
         worker.enqueue(
             "a",
-            "1",
+            &key,
             &json!({"message":[{"type":"image","data":{"file":file}}]}),
             1.,
         );
@@ -1024,7 +1022,7 @@ TSV"
                 .unwrap();
         }
         db.execute(
-            "INSERT INTO media_ocr VALUES('a','1','hash','hello','tesseract',1,0.9,1)",
+            "INSERT INTO media_ocr SELECT 'a',message_key,'hash','hello','tesseract',1,0.9,1 FROM messages WHERE chat='a'",
             [],
         )
         .unwrap();

@@ -80,7 +80,7 @@ fn whitelist_and_real_evidence_fail_closed() {
         "INSERT INTO notes(chat,text) VALUES('group:1','耐心的真实笔记')",
         "INSERT INTO memory_layers(id,chat,subject,layer,slot,text,sources) VALUES('m','group:1','group','events','s','耐心的真实经历','[]')",
         "INSERT INTO learned_memories(chat,text) VALUES('group:1','耐心的真实经历')",
-        "INSERT INTO messages(chat,id,text,self) VALUES('group:1','m','耐心的真实经历',0)",
+        "INSERT INTO messages(message_key,chat,id,text,self) VALUES('test-message','group:1','m','耐心的真实经历',0)",
     ] {
         let db = Store::in_memory().unwrap();
         db.execute(sql,[]).unwrap();
@@ -124,9 +124,9 @@ fn unrelated_expired_other_chat_and_self_messages_do_not_block() {
         "INSERT INTO notes(chat,text) VALUES('group:1','今天讨论盆栽')",
         "INSERT INTO learned_memories(chat,text) VALUES('group:1','今天讨论盆栽')",
         "INSERT INTO memory_layers(id,chat,subject,layer,slot,text,sources) VALUES('m','group:1','group','events','s','今天讨论盆栽','[]')",
-        "INSERT INTO messages(chat,id,text,self) VALUES('group:1','m','今天讨论盆栽',0)",
-        "INSERT INTO messages(chat,id,text,self) VALUES('group:1','m','我很有耐心',1)",
-        "INSERT INTO messages(chat,id,text,self) VALUES('group:1','m','[@99]基于经历评价耐心',0)",
+        "INSERT INTO messages(message_key,chat,id,text,self) VALUES('test-message','group:1','m','今天讨论盆栽',0)",
+        "INSERT INTO messages(message_key,chat,id,text,self) VALUES('test-message','group:1','m','我很有耐心',1)",
+        "INSERT INTO messages(message_key,chat,id,text,self) VALUES('test-message','group:1','m','[@99]基于经历评价耐心',0)",
         "INSERT INTO notes(chat,text) VALUES('group:2','耐心的经历')",
         "INSERT INTO learned_memories(chat,text,expires) VALUES('group:1','耐心的经历',10)",
         "INSERT INTO memory_layers(id,chat,subject,layer,slot,text,sources,expires) VALUES('m','group:1','group','events','s','耐心的经历','[]',10)",

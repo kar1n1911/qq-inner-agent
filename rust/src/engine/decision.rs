@@ -206,13 +206,14 @@ pub fn topic_delivery(
         .collect();
     // Same validity window as targeting::validate; a valid model target wins.
     let explicit = response["replyTo"].as_str().and_then(|id| {
-        messages
+        let mut matches = messages
             .iter()
             .enumerate()
             .rev()
             .take(100)
-            .find(|(_, m)| m.id == id)
-            .map(|(i, _)| i)
+            .filter(|(_, m)| m.id == id);
+        let first = matches.next().map(|(i, _)| i);
+        (matches.next().is_none()).then_some(first).flatten()
     });
     let find_target = |content: &str| {
         let mut matches: Vec<_> = messages

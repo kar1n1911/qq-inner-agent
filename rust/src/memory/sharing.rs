@@ -344,7 +344,7 @@ mod tests {
             memory(&db, chat, "person:77", "person", "PERSON_SECRET");
             expression(&db, chat, "group");
             expression(&db, chat, "person:77");
-            db.execute("INSERT INTO messages(chat,id,sender,name,text,ts) VALUES(?,'MESSAGE_ID','8811','MESSAGE_NICK','RAW_CHAT_BODY',1000)",[chat]).unwrap();
+            db.message(&json!({"chat":chat,"id":"MESSAGE_ID","sender":"8811","name":"MESSAGE_NICK","text":"RAW_CHAT_BODY","ts":1000})).unwrap();
             memory(&db, chat, "group", "bad-name", "rust MESSAGE_NICK");
             memory(&db, chat, "group", "bad-body", "rust RAW_CHAT_BODY");
             memory(&db, chat, "group", "bad-identity", "rust 8811");
@@ -410,8 +410,7 @@ mod tests {
             ("group:1", "AliceUnique", "881122", "BobUnique", "993344"),
             ("group:2", "BobUnique", "993344", "AliceUnique", "881122"),
         ] {
-            db.execute("INSERT INTO messages(chat,id,sender,name,text,ts) VALUES(?,'SOURCE_MESSAGE',?,?,'RAW_UTTERANCE',1000)",
-                params![chat, sender, name]).unwrap();
+            db.message(&json!({"chat":chat,"id":"SOURCE_MESSAGE","sender":sender,"name":name,"text":"RAW_UTTERANCE","ts":1000})).unwrap();
             memory(&db, chat, "group", "safe", "rust compiler");
             for (key, value) in [("name", other_name), ("qq", other_sender)] {
                 memory(&db, chat, "group", key, &format!("rust compiler {value}"));
@@ -438,7 +437,7 @@ mod tests {
         }
         assert_eq!(recall(&db, "group:2", 1000., &m, &e, false).unwrap().len(), 2);
         // Added after the hourly feature cache: vetoes must still take effect.
-        db.execute("INSERT INTO messages(chat,id,sender,name,text,ts) VALUES('group:2','TARGET_ID','778899','TargetNick','TARGET_RAW_BODY',1001)", []).unwrap();
+        db.message(&json!({"chat":"group:2","id":"TARGET_ID","sender":"778899","name":"TargetNick","text":"TARGET_RAW_BODY","ts":1001})).unwrap();
         for (i, secret) in ["TARGET_ID", "778899", "TargetNick", "TARGET_RAW_BODY"].iter().enumerate() {
             memory(&db, "group:1", "group", &format!("bad{i}"), &format!("rust {secret}"));
         }
@@ -462,8 +461,7 @@ mod tests {
             for _ in 0..10 {
                 rows.push(json!({"chat":chat,"layer":"traits"}));
             }
-            db.execute("INSERT INTO messages(chat,id,sender,name,text,ts) VALUES(?,'ID','QQ',?,'BODY',1000)",
-                params![chat, format!("nickname{i}")]).unwrap();
+            db.message(&json!({"chat":chat,"id":"ID","sender":"QQ","name":format!("nickname{i}"),"text":"BODY","ts":1000})).unwrap();
         }
         let grouped = by_chat(&rows, false);
         assert_eq!(grouped.len(), 100);
@@ -594,7 +592,7 @@ mod tests {
         memory(&db, "group:1", "group", "safe", "rust compiler");
         memory(&db, "group:2", "group", "safe", "baking bread");
         memory(&db, "group:2", "person:77", "poison", "rust compiler");
-        db.execute("INSERT INTO messages(chat,id,sender,name,text,ts) VALUES('group:2','id','77','rust compiler','rust compiler',1000)",[]).unwrap();
+        db.message(&json!({"chat":"group:2","id":"id","sender":"77","name":"rust compiler","text":"rust compiler","ts":1000})).unwrap();
         assert!(recall(&db, "group:1", 1000., &m, &settings().1, false)
             .unwrap()
             .is_empty());

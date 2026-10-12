@@ -22,7 +22,7 @@ pub fn enable(store: &Store) -> Result<()> {
             chat TEXT NOT NULL, id TEXT NOT NULL, has_face INTEGER NOT NULL,
             PRIMARY KEY(chat,id));
          CREATE TRIGGER IF NOT EXISTS humanize_faces_cleanup AFTER DELETE ON messages
-         BEGIN DELETE FROM humanize_faces WHERE chat=OLD.chat AND id=OLD.id; END;",
+         BEGIN DELETE FROM humanize_faces WHERE chat=OLD.chat AND id=OLD.message_key; END;",
     )?;
     Ok(())
 }
@@ -31,6 +31,10 @@ pub fn capture(store: &Store, chat: &str, id: &str, event: &Value) -> Result<()>
     if !chat.starts_with("group:") {
         return Ok(());
     }
+    let Some(key) = store.resolve_message_key(chat, id)? else {
+        store.execute("INSERT INTO message_identity_audit(kind,table_name,chat,raw_id,detail,created) VALUES('unresolved_reference','humanize_faces',?,?,'capture has no unique stored message',strftime('%s','now'))",rusqlite::params![chat,id])?;
+        return Ok(());
+    };
     let valid_id = |s: &str| !s.is_empty() && s.len() <= 5 && s.bytes().all(|b| b.is_ascii_digit());
     let has_face = if let Some(segments) = event["message"].as_array() {
         segments
@@ -46,7 +50,7 @@ pub fn capture(store: &Store, chat: &str, id: &str, event: &Value) -> Result<()>
     };
     store.execute(
         "INSERT OR IGNORE INTO humanize_faces VALUES(?,?,?)",
-        rusqlite::params![chat, id, has_face],
+        rusqlite::params![chat, key, has_face],
     )?;
     Ok(())
 }
@@ -56,7 +60,7 @@ pub fn capture(store: &Store, chat: &str, id: &str, event: &Value) -> Result<()>
 pub fn face_probability(store: &Store, chat: &str, now: f64) -> Result<f64> {
     let rows = store.rows(
         "SELECT m.ts,f.has_face FROM messages m JOIN humanize_faces f
-         ON m.chat=f.chat AND m.id=f.id
+         ON m.chat=f.chat AND m.message_key=f.id
          WHERE m.chat=? AND m.self=0 AND m.ts>=? AND m.ts<=?",
         rusqlite::params![chat, now - 30. * 86400., now],
     )?;

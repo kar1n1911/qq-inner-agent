@@ -45,39 +45,59 @@ impl Store {
         )?;
         Ok(())
     }
-    pub fn message(&self, m: &Value) -> Result<bool> {
-        // IGNORE 保留原行；REPLACE 会删除旧行再插入，不能用于消息去重。
-        let inserted = self.execute(
-            "INSERT OR IGNORE INTO messages(chat,id,sender,name,text,ts,self,received_at) VALUES(?,?,?,?,?,?,?,?)",
-            params![
-                m["chat"].as_str(),
-                m["id"].as_str(),
-                m["sender"].as_str(),
-                m["name"].as_str(),
-                m["text"].as_str(),
-                m["ts"].as_f64(),
-                truthy(&m["self"]) as i32,
-                m["received_at"]
-                    .as_f64()
-                    .unwrap_or(Store::UNKNOWN_RECEIVED_AT)
-            ],
-        )? > 0;
-        if !inserted {
+    fn record_message_in_transaction(&self, m: &Value, deduplicate: bool) -> Result<(bool, String)> {
+        let chat = m["chat"].as_str();
+        let id = m["id"].as_str();
+        let same = if deduplicate { self.first(
+            "SELECT message_key FROM messages WHERE chat IS ? AND id IS ? AND sender IS ? AND text IS ? AND ts IS ? AND self=? ORDER BY rowid DESC LIMIT 1",
+            params![chat,id,m["sender"].as_str(),m["text"].as_str(),m["ts"].as_f64(),truthy(&m["self"]) as i32],
+        )? } else { None };
+        if let Some(row) = same {
             if let Some(received_at) = m["received_at"].as_f64() {
-                self.execute(
-                    "UPDATE messages SET received_at=? WHERE chat=? AND id=?",
-                    params![received_at, m["chat"].as_str(), m["id"].as_str()],
-                )?;
+                self.execute("UPDATE messages SET received_at=? WHERE message_key=?",params![received_at,row["message_key"].as_str()])?;
             }
+            return Ok((false, row["message_key"].as_str().unwrap().to_owned()));
         }
-        Ok(inserted)
+        self.execute("INSERT INTO message_sequence DEFAULT VALUES", [])?;
+        let key = format!("local-message:{}", self.db.last_insert_rowid());
+        if self.first("SELECT 1 FROM messages WHERE chat IS ? AND id IS ? LIMIT 1", params![chat,id])?.is_some() {
+            let detail = if deduplicate { "same raw id with distinct message evidence" } else { "same raw id on a separate outbound send" };
+            self.execute("INSERT INTO message_identity_audit(kind,table_name,chat,raw_id,message_key,detail,created) VALUES('id_collision','messages',?,?,?,?,strftime('%s','now'))",params![chat,id,key,detail])?;
+        }
+        self.execute(
+            "INSERT INTO messages(message_key,chat,id,sender,name,text,ts,self,received_at) VALUES(?,?,?,?,?,?,?,?,?)",
+            params![key,chat,id,m["sender"].as_str(),m["name"].as_str(),m["text"].as_str(),m["ts"].as_f64(),truthy(&m["self"]) as i32,m["received_at"].as_f64().unwrap_or(Store::UNKNOWN_RECEIVED_AT)],
+        )?;
+        Ok((true, key))
+    }
+    pub fn record_message(&self, m: &Value) -> Result<(bool, String)> {
+        if !self.db.is_autocommit() {
+            return self.record_message_in_transaction(m, true);
+        }
+        let tx = self.immediate()?;
+        let result = self.record_message_in_transaction(m, true)?;
+        tx.commit()?;
+        Ok(result)
+    }
+    pub fn message(&self, m: &Value) -> Result<bool> {
+        Ok(self.record_message(m)?.0)
+    }
+    pub fn record_distinct_message(&self, m: &Value) -> Result<String> {
+        let tx = self.immediate()?;
+        let (_, key) = self.record_message_in_transaction(m, false)?;
+        tx.commit()?;
+        Ok(key)
     }
     pub fn outbound_message(&self, m: &Value, delivery_id: &str) -> Result<()> {
         let tx = self.immediate()?;
-        self.message(m)?;
+        if self.first("SELECT 1 FROM outbound_message_facts WHERE delivery_id=?", [delivery_id])?.is_some() {
+            tx.commit()?;
+            return Ok(());
+        }
+        let (_, key) = self.record_message_in_transaction(m, false)?;
         self.execute(
             "INSERT INTO outbound_message_facts(chat,id,delivery_id,time_source) VALUES(?,?,?,'local_estimate')",
-            params![m["chat"].as_str(), m["id"].as_str(), delivery_id],
+            params![m["chat"].as_str(), key, delivery_id],
         )?;
         tx.commit()?;
         Ok(())
@@ -86,7 +106,7 @@ impl Store {
     pub fn confirm_outbound(&self, chat: &str, id: &str, server_ts: f64) -> Result<bool> {
         let tx = self.immediate()?;
         let changed = self.execute(
-            "UPDATE messages SET ts=? WHERE chat=? AND id=? AND self=1 AND EXISTS (SELECT 1 FROM outbound_message_facts WHERE chat=? AND id=? AND time_source='local_estimate')",
+            "UPDATE messages SET ts=? WHERE chat=? AND message_key=? AND self=1 AND EXISTS (SELECT 1 FROM outbound_message_facts WHERE chat=? AND id=? AND time_source='local_estimate')",
             params![server_ts, chat, id, chat, id],
         )? > 0;
         if changed {
@@ -107,7 +127,7 @@ impl Store {
         let tx = self.immediate()?;
         let inserted = messages
             .iter()
-            .map(|m| self.message(m))
+            .map(|m| self.record_message_in_transaction(m, true).map(|result| result.0))
             .collect::<Result<Vec<_>>>()?;
         tx.commit()?;
         Ok(inserted)
@@ -229,16 +249,19 @@ impl Store {
         Ok(self.first("SELECT count(*) AS total, coalesce(sum(proactive),0) AS proactive, coalesce(max(ts),0) AS last FROM deliveries WHERE chat=? AND ts>? AND status IN ('sent','sent_unconfirmed','confirmed','pending','uncertain','ack_missing')",params![chat,now-3600.])?.unwrap())
     }
     pub fn mark_handled(&self, chat: &str, id: &str, pause: bool) -> Result<()> {
-        self.execute("INSERT INTO handled VALUES(?,?,?) ON CONFLICT(chat) DO UPDATE SET human_id=excluded.human_id,pause_done=excluded.pause_done",params![chat,id,pause as i32])?;
+        let key = self.resolve_message_key(chat, id)?.unwrap_or_else(|| id.to_owned());
+        ensure!(id.starts_with("local-message:") || self.rows("SELECT message_key FROM messages WHERE chat=? AND id=? LIMIT 2",params![chat,id])?.len() < 2,"ambiguous_message_id");
+        self.execute("INSERT INTO handled VALUES(?,?,?) ON CONFLICT(chat) DO UPDATE SET human_id=excluded.human_id,pause_done=excluded.pause_done",params![chat,key,pause as i32])?;
         Ok(())
     }
     pub fn handled(&self, chat: &str) -> Result<Option<Value>> {
         self.first("SELECT * FROM handled WHERE chat=?", [chat])
     }
     pub fn assessment(&self, chat: &str, human_id: &str) -> Result<Option<Value>> {
+        let key = self.resolve_message_key(chat, human_id)?.unwrap_or_else(|| human_id.to_owned());
         let mut row = self.first(
             "SELECT * FROM send_assessments WHERE chat=? AND human_id=?",
-            params![chat, human_id],
+            params![chat, key],
         )?;
         if let Some(r) = &mut row {
             decode(r, &["details"])?;

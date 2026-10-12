@@ -171,7 +171,7 @@ pub fn group_activity(db: &Store, chat: &str, now: f64, silence: f64) -> Result<
         && (days.len() >= 2 || samples >= 200)
         && hours[hour] >= 2
         && hours[hour] as f64 >= *hours.iter().max().unwrap() as f64 * 0.1;
-    let n=db.first("SELECT count(DISTINCT r.message_id) AS n FROM media_receipts r JOIN messages m ON m.chat=r.chat AND m.id=r.message_id WHERE r.chat=? AND m.self=0 AND m.ts<=? AND m.ts>=?",params![chat,now,now-30.*86400.])?.unwrap()["n"].as_f64().unwrap_or(0.);
+    let n=db.first("SELECT count(DISTINCT r.message_id) AS n FROM media_receipts r JOIN messages m ON m.chat=r.chat AND m.message_key=r.message_id WHERE r.chat=? AND m.self=0 AND m.ts<=? AND m.ts>=?",params![chat,now,now-30.*86400.])?.unwrap()["n"].as_f64().unwrap_or(0.);
     let activity = activity_level(rate, since, silence);
     Ok(GroupActivity {
         activity,
@@ -497,7 +497,7 @@ pub fn candidates(
         }
         let score = if source == chat {
             let mut best = 0f64;
-            for context in db.rows("SELECT m.text,c.valence,c.rationality FROM media_contexts c JOIN messages m ON m.chat=c.chat AND m.id=c.message_id WHERE c.chat=? AND c.hash=? AND m.self=0",params![chat,hash])? {
+            for context in db.rows("SELECT m.text,c.valence,c.rationality FROM media_contexts c JOIN messages m ON m.chat=c.chat AND m.message_key=c.message_id WHERE c.chat=? AND c.hash=? AND m.self=0",params![chat,hash])? {
                 best=best.max(context_score(similarity(query,context["text"].as_str().unwrap_or("")),affect,&context));
             }
             best
@@ -625,6 +625,8 @@ pub fn observe(db: &Store, chat: &str, now: f64, c: &Config) -> Result<()> {
     if !c.enabled {
         return Ok(());
     }
+    let keys = db.history(chat, Some(100))?.into_iter()
+        .map(|row| row["message_key"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
     let history = messages(db, chat)?;
     let awake = group_activity(db, chat, now, c.silence_seconds)?.awake;
     for (i, m) in history.iter().enumerate() {
@@ -641,14 +643,14 @@ pub fn observe(db: &Store, chat: &str, now: f64, c: &Config) -> Result<()> {
         };
         for r in db.rows(
             "SELECT hash FROM media_contexts WHERE chat=? AND message_id=? AND role='usage'",
-            params![chat, m.id],
+            params![chat, keys[i]],
         )? {
             let hash = r["hash"].as_str().unwrap();
             let learned = learn(
                 db,
                 Feedback {
                     chat,
-                    event: &m.id,
+                    event: &keys[i],
                     source: chat,
                     hash,
                     classification: &stage,

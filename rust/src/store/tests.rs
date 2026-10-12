@@ -28,7 +28,7 @@ fn schema_migration_and_constraints() -> Result<()> {
         .execute("INSERT INTO activity_rhythm(id) VALUES(1)", [])
         .is_err());
     let again = Store::initialize(s.db)?;
-    assert_eq!(again.schema()?["tables"].as_object().unwrap().len(), 19);
+    assert_eq!(again.schema()?["tables"].as_object().unwrap().len(), 22);
     Ok(())
 }
 
@@ -54,6 +54,8 @@ fn received_at_migration_is_idempotent_and_marks_unknown_history() -> Result<()>
     assert!(error.to_string().contains("database migration required"));
     Store::migrate_received_at(&path)?;
     Store::migrate_received_at(&path)?;
+    Store::migrate_message_keys(&path)?;
+    Store::migrate_message_keys(&path)?;
     let store = Store::open(&path)?;
     let row = &store.rows(
         "SELECT ts,received_at FROM messages WHERE id='old'",
@@ -73,6 +75,69 @@ fn received_at_migration_is_idempotent_and_marks_unknown_history() -> Result<()>
 fn message(id: &str, ts: f64) -> Value {
     json!({"chat":"g","id":id,"sender":"1","name":"名字","text":"中文🙂","ts":ts})
 }
+// Basis: the message-id audit found 518 inversions in 1022 VM messages;
+// OB11 exposes no msgSeq. Distinct evidence must not be lost under one raw id.
+#[test]
+fn local_message_keys_keep_collisions_and_replays_distinct() -> Result<()> {
+    let s = Store::in_memory()?;
+    let first = message("reused", 100.);
+    let mut second = message("reused", 101.);
+    second["text"] = json!("另一条消息");
+    let (inserted, first_key) = s.record_message(&first)?;
+    assert!(inserted);
+    let (inserted, second_key) = s.record_message(&second)?;
+    assert!(inserted);
+    assert_ne!(first_key, second_key);
+    assert!(first_key.starts_with("local-message:"));
+    assert_eq!(s.record_message(&second)?, (false, second_key));
+    assert_eq!(s.rows("SELECT id,text,ts FROM messages WHERE chat='g' ORDER BY ts", [])?,
+        vec![json!({"id":"reused","text":"中文🙂","ts":100.}),json!({"id":"reused","text":"另一条消息","ts":101.})]);
+    assert_eq!(s.rows("SELECT kind,raw_id FROM message_identity_audit", [])?,
+        vec![json!({"kind":"id_collision","raw_id":"reused"})]);
+    assert!(s.resolve_message_key("g", "reused")?.is_none());
+    assert_eq!(s.rows("SELECT kind FROM message_identity_audit WHERE kind='ambiguous_lookup'", [])?.len(), 1);
+    let outbound = json!({"chat":"g","id":"same-ack","sender":"bot","text":"同文","ts":200.,"self":true});
+    for _ in 0..2 {
+        let delivery = s.delivery("g", false, 200.)?;
+        s.outbound_message(&outbound, &delivery)?;
+        s.outbound_message(&outbound, &delivery)?;
+    }
+    assert_eq!(s.rows("SELECT id FROM messages WHERE id='same-ack'", [])?.len(), 2);
+    assert_eq!(s.rows("SELECT id FROM outbound_message_facts", [])?.len(), 2);
+    Ok(())
+}
+
+// Basis: the same audit and the first-stage migration plan require all old
+// rows to remain readable, with unverifiable references retained for review.
+#[test]
+fn message_key_migration_is_atomic_idempotent_and_audits_orphans() -> Result<()> {
+    let path = std::env::temp_dir().join(format!("qq-message-key-{}-{}.sqlite", std::process::id(),rand::random::<u64>()));
+    let db = Connection::open(&path)?;
+    db.execute_batch("CREATE TABLE messages(chat TEXT,id TEXT,sender TEXT,name TEXT,text TEXT,ts REAL,self INTEGER DEFAULT 0,received_at REAL NOT NULL DEFAULT -1,PRIMARY KEY(chat,id));
+        INSERT INTO messages VALUES('g','old','1','n','original',123,0,124);
+        CREATE TABLE media_ocr(chat TEXT,message_id TEXT,hash TEXT,text TEXT,engine TEXT,created REAL,PRIMARY KEY(chat,message_id));
+        INSERT INTO media_ocr VALUES('g','old','h','ocr','e',125);
+        CREATE TABLE media_receipts(chat TEXT,message_id TEXT,segment INTEGER,PRIMARY KEY(chat,message_id,segment));
+        INSERT INTO media_receipts VALUES('g','missing',0);
+        CREATE TABLE memory_layers(id TEXT PRIMARY KEY,chat TEXT,subject TEXT,layer TEXT,slot TEXT,sources TEXT,expires REAL);
+        INSERT INTO memory_layers VALUES('one','g','group','short_term','old','[{\"id\":\"old\"}]',NULL);")?;
+    drop(db);
+    Store::migrate_message_keys(&path)?;
+    Store::migrate_message_keys(&path)?;
+    let s = Store::open(&path)?;
+    let key = s.resolve_message_key("g", "old")?.unwrap();
+    assert_eq!(s.rows("SELECT id,text,ts,received_at FROM messages", [])?,
+        vec![json!({"id":"old","text":"original","ts":123.,"received_at":124.})]);
+    assert_eq!(s.rows("SELECT message_id FROM media_ocr", [])?[0]["message_id"], key);
+    assert_eq!(s.rows("SELECT slot,sources FROM memory_layers", [])?[0], json!({"slot":key,"sources":format!("[{{\"id\":\"{key}\"}}]")}));
+    assert_eq!(s.rows("SELECT message_id FROM media_receipts", [])?[0]["message_id"], "unresolved:media_receipts:1");
+    assert_eq!(s.rows("SELECT kind,table_name,raw_id FROM message_identity_audit", [])?,
+        vec![json!({"kind":"unresolved_reference","table_name":"media_receipts","raw_id":"missing"})]);
+    assert_eq!(s.rows("SELECT count(*) AS n FROM migration_message_key_v1", [])?[0]["n"], 1);
+    drop(s);
+    fs::remove_file(path)?;
+    Ok(())
+}
 // Basis: 2026-10-12 NapCat protocol msgTime finding and the S-section time contract.
 #[test]
 fn replay_preserves_server_time_and_updates_receive_time() -> Result<()> {
@@ -80,7 +145,7 @@ fn replay_preserves_server_time_and_updates_receive_time() -> Result<()> {
     let mut first = message("replay", 1000.);
     first["received_at"] = json!(1002.);
     assert!(s.message(&first)?);
-    let mut replay = message("replay", 9999.);
+    let mut replay = message("replay", 1000.);
     replay["received_at"] = json!(1010.);
     assert!(!s.message(&replay)?);
     let row = &s.history("g", None)?[0];
@@ -98,10 +163,11 @@ fn outbound_time_source_can_be_confirmed_without_changing_inbound_time() -> Resu
     let delivery = s.delivery("g", false, 200.)?;
     s.finish_delivery(&delivery, "sent_unconfirmed", Some(&json!(42)))?;
     s.outbound_message(&json!({"chat":"g","id":"42","text":"out","ts":201.,"self":true}), &delivery)?;
-    assert_eq!(s.rows("SELECT m.ts,f.time_source FROM messages m JOIN outbound_message_facts f USING(chat,id) WHERE m.id='42'", [])?[0],
+    let key = s.resolve_message_key("g", "42")?.unwrap();
+    assert_eq!(s.rows("SELECT m.ts,f.time_source FROM messages m JOIN outbound_message_facts f ON f.chat=m.chat AND f.id=m.message_key WHERE m.id='42'", [])?[0],
         json!({"ts":201.,"time_source":"local_estimate"}));
-    assert!(s.confirm_outbound("g", "42", 199.)?);
-    assert_eq!(s.rows("SELECT m.ts,f.time_source,d.status FROM messages m JOIN outbound_message_facts f USING(chat,id) JOIN deliveries d ON d.id=f.delivery_id WHERE m.id='42'", [])?[0],
+    assert!(s.confirm_outbound("g", &key, 199.)?);
+    assert_eq!(s.rows("SELECT m.ts,f.time_source,d.status FROM messages m JOIN outbound_message_facts f ON f.chat=m.chat AND f.id=m.message_key JOIN deliveries d ON d.id=f.delivery_id WHERE m.id='42'", [])?[0],
         json!({"ts":199.,"time_source":"server","status":"confirmed"}));
     assert!(!s.confirm_outbound("g", "in", 999.)?);
     assert_eq!(s.rows("SELECT ts,received_at FROM messages WHERE id='in'", [])?[0], json!({"ts":100.,"received_at":110.}));
@@ -113,9 +179,9 @@ fn messages_history_batch_and_active_chats() -> Result<()> {
     assert!(s.history("g", None)?.is_empty());
     assert!(s.active_chats(0.)?.is_empty());
     assert!(s.message(&message("a", 10.25))?);
-    assert!(!s.message(&message("a", 99.))?);
+    assert!(!s.message(&message("a", 10.25))?);
     assert_eq!(
-        s.messages(&[message("b", 10.25), message("a", 88.), message("c", 9.)])?,
+        s.messages(&[message("b", 10.25), message("a", 10.25), message("c", 9.)])?,
         vec![true, false, true]
     );
     assert_eq!(
@@ -404,15 +470,15 @@ fn group_hours_migrates_once_and_ingests_atomically() -> Result<()> {
         ("self", 100., 1),
     ] {
         legacy.execute(
-            "INSERT INTO messages(chat,id,sender,name,text,ts,self) VALUES('g',?,'u','n','text',?,?)",
-            rusqlite::params![id, now - age, own],
+            "INSERT INTO messages(message_key,chat,id,sender,name,text,ts,self) VALUES(?,'g',?,'u','n','text',?,?)",
+            rusqlite::params![format!("test-g-{id}"), id, now - age, own],
         )?;
     }
     // Existing retention-limited active group must be awake immediately after upgrade.
     for i in 0..507 {
         legacy.execute(
-            "INSERT INTO messages(chat,id,sender,name,text,ts,self) VALUES('busy',?,'u','n','text',?,0)",
-            rusqlite::params![i.to_string(), now - (i - 20).max(0) as f64 * 40.],
+                "INSERT INTO messages(message_key,chat,id,sender,name,text,ts,self) VALUES(?,'busy',?,'u','n','text',?,0)",
+                rusqlite::params![format!("test-busy-{i}"), i.to_string(), now - (i - 20).max(0) as f64 * 40.],
         )?;
     }
     let s = Store::initialize(legacy)?;

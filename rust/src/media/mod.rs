@@ -99,13 +99,13 @@ impl Collector {
             "invalid_media_chat"
         );
         store.enable_media()?;
-        store.message(&serde_json::to_value(&m)?)?;
+        let (_, key) = store.record_message(&serde_json::to_value(&m)?)?;
         let segments = segments(event);
         for (index, segment) in segments.iter().enumerate() {
             if !matches!(segment["type"].as_str(), Some("image" | "face")) {
                 continue;
             }
-            match self.collect(store, &m, segment, index) {
+            match self.collect(store, &m, &key, segment, index) {
                 Ok(true) => report.collected += 1,
                 Ok(false) => {}
                 // 不记录可能含凭据的临时 URL；错误码和消息 id 足以定位失败。
@@ -115,19 +115,19 @@ impl Collector {
             }
         }
         // 后续消息也仅存 id；已有使用场景可随新证据重新分类，不产生学习更新。
-        store.execute("INSERT OR IGNORE INTO media_contexts(chat,hash,message_id,role,valence,rationality) SELECT c.chat,c.hash,?,'after',c.valence,c.rationality FROM media_contexts c JOIN messages m ON m.chat=c.chat AND m.id=c.message_id WHERE c.chat=? AND c.role='usage' AND m.id<>? AND m.ts<=? AND m.ts>=?", params![m.id,m.chat,m.id,m.ts,m.ts-self.config.classification.gap_seconds])?;
-        for row in store.rows("SELECT message_id FROM media_stages WHERE chat=? AND message_id IN (SELECT id FROM messages WHERE chat=? ORDER BY ts DESC,rowid DESC LIMIT 24)",params![m.chat,m.chat])? {
+        store.execute("INSERT OR IGNORE INTO media_contexts(chat,hash,message_id,role,valence,rationality) SELECT c.chat,c.hash,?,'after',c.valence,c.rationality FROM media_contexts c JOIN messages previous ON previous.chat=c.chat AND previous.message_key=c.message_id WHERE c.chat=? AND c.role='usage' AND c.message_id<>? AND previous.ts<=? AND previous.ts>=?", params![key,m.chat,key,m.ts,m.ts-self.config.classification.gap_seconds])?;
+        for row in store.rows("SELECT message_id FROM media_stages WHERE chat=? AND message_id IN (SELECT message_key FROM messages WHERE chat=? ORDER BY ts DESC,rowid DESC LIMIT 24)",params![m.chat,m.chat])? {
             store.record_media_stage(&m.chat,row["message_id"].as_str().unwrap(),now,&self.config.classification)?;
         }
-        store.record_media_stage(&m.chat, &m.id, now, &self.config.classification)?;
+        store.record_media_stage(&m.chat, &key, now, &self.config.classification)?;
         Ok(report)
     }
-    fn collect(&self, store: &Store, m: &policy::Message, s: &Value, index: usize) -> Result<bool> {
+    fn collect(&self, store: &Store, m: &policy::Message, key: &str, s: &Value, index: usize) -> Result<bool> {
         let tx = store.immediate()?;
         if store
             .first(
                 "SELECT 1 FROM media_receipts WHERE chat=? AND message_id=? AND segment=?",
-                params![m.chat, m.id, index as i64],
+                params![m.chat, key, index as i64],
             )?
             .is_some()
         {
@@ -223,7 +223,7 @@ impl Collector {
                         params![v["chat"].as_str(), v["hash"].as_str()],
                     )?;
                 }
-                Self::save(store, m, index, &hash, kind, &file, bytes)?;
+                Self::save(store, m, key, index, &hash, (kind, &file, bytes))?;
                 store.update_media_source(
                     &m.chat,
                     &hash,
@@ -243,7 +243,7 @@ impl Collector {
                 fs::remove_file(self.root.join(v["file"].as_str().unwrap()))?;
             }
         } else {
-            Self::save(store, m, index, &hash, kind, &file, bytes)?;
+            Self::save(store, m, key, index, &hash, (kind, &file, bytes))?;
             store.update_media_source(
                 &m.chat,
                 &hash,
@@ -257,22 +257,22 @@ impl Collector {
     fn save(
         store: &Store,
         m: &policy::Message,
+        key: &str,
         index: usize,
         hash: &str,
-        kind: &str,
-        file: &str,
-        bytes: u64,
+        asset: (&str, &str, u64),
     ) -> Result<()> {
+        let (kind, file, bytes) = asset;
         let (valence, rationality) = media_affect(store, &m.chat, m.ts)?;
         // 哈希去重使 N 次使用只有一份字节、一条素材，occurrences 仍准确计 N 次。
         store.execute("INSERT INTO media_assets(chat,hash,kind,file,occurrences,first_seen,last_seen,bytes,fitness) VALUES(?,?,?,?,1,?,?,?,'{}') ON CONFLICT(chat,hash) DO UPDATE SET occurrences=occurrences+1,first_seen=min(first_seen,excluded.first_seen),last_seen=max(last_seen,excluded.last_seen)",params![m.chat,hash,kind,file,m.ts,m.ts,bytes])?;
         store.execute(
             "INSERT INTO media_receipts VALUES(?,?,?)",
-            params![m.chat, m.id, index as i64],
+            params![m.chat, key, index as i64],
         )?;
-        store.execute("INSERT OR IGNORE INTO media_contexts(chat,hash,message_id,role,valence,rationality) VALUES(?,?,?,'usage',?,?)", params![m.chat,hash,m.id,valence,rationality])?;
-        for row in store.rows("SELECT id FROM messages WHERE chat=? AND id<>? AND ts<=? ORDER BY ts DESC,rowid DESC LIMIT 2",params![m.chat,m.id,m.ts])? {
-            store.execute("INSERT OR IGNORE INTO media_contexts(chat,hash,message_id,role,valence,rationality) VALUES(?,?,?,'before',?,?)",params![m.chat,hash,row["id"].as_str(),valence,rationality])?;
+        store.execute("INSERT OR IGNORE INTO media_contexts(chat,hash,message_id,role,valence,rationality) VALUES(?,?,?,'usage',?,?)", params![m.chat,hash,key,valence,rationality])?;
+        for row in store.rows("SELECT message_key FROM messages WHERE chat=? AND message_key<>? AND ts<=? ORDER BY ts DESC,rowid DESC LIMIT 2",params![m.chat,key,m.ts])? {
+            store.execute("INSERT OR IGNORE INTO media_contexts(chat,hash,message_id,role,valence,rationality) VALUES(?,?,?,'before',?,?)",params![m.chat,hash,row["message_key"].as_str(),valence,rationality])?;
         }
         Ok(())
     }
@@ -369,7 +369,7 @@ impl Store {
         }
         if old_senders {
             // 只回填能由 usage 引用证实的历史人类；已清理的历史无法恢复，不伪造人数。
-            self.execute("INSERT OR IGNORE INTO media_senders SELECT c.chat,c.hash,m.sender FROM media_contexts c JOIN messages m ON m.chat=c.chat AND m.id=c.message_id JOIN media_assets a ON a.chat=c.chat AND a.hash=c.hash WHERE c.role='usage' AND m.self=0 AND m.sender IS NOT NULL AND m.sender<>''", [])?;
+            self.execute("INSERT OR IGNORE INTO media_senders SELECT c.chat,c.hash,m.sender FROM media_contexts c JOIN messages m ON m.chat=c.chat AND m.message_key=c.message_id JOIN media_assets a ON a.chat=c.chat AND a.hash=c.hash WHERE c.role='usage' AND m.self=0 AND m.sender IS NOT NULL AND m.sender<>''", [])?;
             self.execute("UPDATE media_assets SET distinct_senders=(SELECT count(*) FROM media_senders s WHERE s.chat=media_assets.chat AND s.hash=media_assets.hash)", [])?;
         }
         let context_columns = self.rows("PRAGMA table_info(media_contexts)", [])?;
@@ -446,7 +446,7 @@ impl Store {
     }
     pub fn media_stages(&self, chat: &str, limit: i64) -> Result<Vec<Value>> {
         let mut rows = self.rows(
-            "SELECT message_id,observed,classification FROM media_stages WHERE chat=? ORDER BY observed DESC,message_id DESC LIMIT ?",
+            "SELECT coalesce(m.id,s.message_id) AS message_id,s.observed,s.classification FROM media_stages s LEFT JOIN messages m ON m.chat=s.chat AND m.message_key=s.message_id WHERE s.chat=? ORDER BY s.observed DESC,s.message_id DESC LIMIT ?",
             params![chat, limit],
         )?;
         for row in &mut rows {
@@ -463,6 +463,8 @@ impl Store {
         now: f64,
         config: &conversation::Config,
     ) -> Result<()> {
+        let key = self.resolve_message_key(chat, id)?
+            .ok_or_else(|| anyhow::anyhow!("missing_message"))?;
         let history = self.history(chat, Some(24))?;
         let messages = history
             .iter()
@@ -473,12 +475,12 @@ impl Store {
                 serde_json::from_value(v)
             })
             .collect::<std::result::Result<Vec<policy::Message>, _>>()?;
-        let target = messages
+        let target = history
             .iter()
-            .position(|m| m.id == id)
+            .position(|m| m["message_key"] == key)
             .ok_or_else(|| anyhow::anyhow!("missing_message"))?;
         let result = conversation::classify(&messages, target, now, config);
-        self.execute("INSERT INTO media_stages VALUES(?,?,?,?) ON CONFLICT(chat,message_id) DO UPDATE SET observed=excluded.observed,classification=excluded.classification",params![chat,id,now,serde_json::to_string(&result)?])?;
+        self.execute("INSERT INTO media_stages VALUES(?,?,?,?) ON CONFLICT(chat,message_id) DO UPDATE SET observed=excluded.observed,classification=excluded.classification",params![chat,key,now,serde_json::to_string(&result)?])?;
         Ok(())
     }
 }

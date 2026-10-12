@@ -156,7 +156,7 @@ pub fn clearly_low_mood(store: &Store, chat: &str, subject: &str, now: f64) -> R
     }
     let ratings = store.rows(
         "SELECT r.mood,r.confidence,r.rated_at FROM message_ratings r
-         JOIN messages m ON m.chat=r.chat AND m.id=r.message_id
+         JOIN messages m ON m.chat=r.chat AND m.message_key=r.message_id
          WHERE r.chat=? AND m.self=0 AND (?='group' OR 'person:'||m.sender=?)
          ORDER BY r.rated_at DESC LIMIT 64",
         params![chat, subject, subject],
@@ -204,18 +204,19 @@ pub fn rate(
     unit(agreement)?;
     unit(confidence)?;
     ensure!(confidence >= 0. && now.is_finite(), "invalid_affect");
+    let key = store.resolve_message_key(chat, id)?.ok_or_else(|| anyhow::anyhow!("invalid_affect_source"))?;
     ensure!(
         !store
             .rows(
-                "SELECT id FROM messages WHERE chat=? AND id=? AND self=0",
-                params![chat, id]
+                "SELECT message_key FROM messages WHERE chat=? AND message_key=? AND self=0",
+                params![chat, key]
             )?
             .is_empty(),
         "invalid_affect_source"
     );
     store.execute(
         "INSERT OR REPLACE INTO message_ratings VALUES(?,?,?,?,?,?)",
-        params![id, chat, mood, agreement, confidence, now],
+        params![key, chat, mood, agreement, confidence, now],
     )?;
     Ok(())
 }
@@ -274,9 +275,10 @@ pub fn update(
     unit(signal)?;
     unit(confidence)?;
     ensure!(confidence >= 0., "invalid_affect_confidence");
+    let key = store.resolve_message_key(chat, id)?.ok_or_else(|| anyhow::anyhow!("invalid_affect_source"))?;
     let evidence = store.rows(
-        "SELECT sender FROM messages WHERE chat=? AND id=? AND self=0",
-        params![chat, id],
+        "SELECT sender FROM messages WHERE chat=? AND message_key=? AND self=0",
+        params![chat, key],
     )?;
     ensure!(
         evidence
@@ -288,7 +290,7 @@ pub fn update(
     let old = read(store, chat, subject, target, now)?;
     // 先置信缩放再硬限幅：负性非对称不突破单步 ±0.15。
     let step = bounded_step(signal, confidence);
-    store.execute("INSERT INTO affect_state VALUES(?,?,?,?,0,?,?,?) ON CONFLICT(chat,subject,dimension) DO UPDATE SET value=excluded.value,confidence=excluded.confidence,updated=excluded.updated,sources=excluded.sources",params![chat,subject,target.key(),(old+step).clamp(-1.,1.),confidence,now,json!([id]).to_string()])?;
+    store.execute("INSERT INTO affect_state VALUES(?,?,?,?,0,?,?,?) ON CONFLICT(chat,subject,dimension) DO UPDATE SET value=excluded.value,confidence=excluded.confidence,updated=excluded.updated,sources=excluded.sources",params![chat,subject,target.key(),(old+step).clamp(-1.,1.),confidence,now,json!([key]).to_string()])?;
     Ok(())
 }
 pub fn reset(store: &Store, chat: &str, subject: &str) -> Result<()> {
@@ -296,7 +298,7 @@ pub fn reset(store: &Store, chat: &str, subject: &str) -> Result<()> {
         "DELETE FROM affect_state WHERE chat=? AND subject=?",
         params![chat, subject],
     )?;
-    store.execute("DELETE FROM message_ratings WHERE chat=? AND message_id IN (SELECT id FROM messages WHERE chat=? AND (?='group' OR 'person:'||sender=?))",params![chat,chat,subject,subject])?;
+    store.execute("DELETE FROM message_ratings WHERE chat=? AND message_id IN (SELECT message_key FROM messages WHERE chat=? AND (?='group' OR 'person:'||sender=?))",params![chat,chat,subject,subject])?;
     store.execute("DELETE FROM affect_bursts WHERE chat=?", [chat])?;
     Ok(())
 }
@@ -320,10 +322,12 @@ pub fn reserve_burst(store: &Store, chat: &str, human_id: &str) -> Result<()> {
 }
 pub const CONTRACT:&str="可选 affect 字段为 {mood,agreement,rationality,affinity,confidence}，各值独立判断，前三轴和 affinity 在 [-1,1]，confidence 在 [0,1]。只评最后一条真实人类消息；affinity 是独立关系信号，绝不能由 agreement 推导。不得以提升任何指标为目标，不得在回复中复述评分或借情绪施压。";
 pub fn apply(store: &Store, chat: &str, last: &Value, value: &Value, now: f64) -> Result<()> {
+    let source = last["message_key"].as_str().or_else(|| last["id"].as_str()).unwrap_or("");
+    let Some(key) = store.resolve_message_key(chat, source)? else { return Ok(()); };
     if !store
         .rows(
             "SELECT message_id FROM message_ratings WHERE chat=? AND message_id=?",
-            params![chat, text(last, "id")],
+            params![chat, key],
         )?
         .is_empty()
     {
@@ -346,7 +350,7 @@ pub fn apply(store: &Store, chat: &str, last: &Value, value: &Value, now: f64) -
         unit(n)?;
     }
     ensure!(confidence >= 0., "invalid_affect");
-    let id = text(last, "id");
+    let id = key.as_str();
     let subject = format!("person:{}", text(last, "sender"));
     rate(store, chat, id, mood, agreement, confidence, now)?;
     for (d, n) in [
@@ -405,8 +409,8 @@ pub fn behavior(
     let affinity = read(store, chat, &subject, Dimension::Affinity, now)?;
     let rationality = read(store, chat, &subject, Dimension::Rationality, now)?;
     let disposition = Some(disposition(mood, rationality));
-    let burst =
-        disposition == Some(Disposition::Angry) && burst_allowed(store, chat, text(last, "id"))?;
+    let id = last["message_key"].as_str().or_else(|| last["id"].as_str()).unwrap_or("");
+    let burst = disposition == Some(Disposition::Angry) && burst_allowed(store, chat, id)?;
     Ok(Behavior {
         group_mood: if chat.starts_with("group:") {
             read(store, chat, "group", Dimension::Mood, now)?

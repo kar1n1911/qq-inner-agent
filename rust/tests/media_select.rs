@@ -34,12 +34,15 @@ fn classified(stage: Stage, relation: Relation, confident: bool) -> Classificati
 fn message(db: &Store, chat: &str, id: &str, ts: f64, text: &str, own: bool) {
     db.message(&json!({"chat":chat,"id":id,"sender":if own {"99"} else {"20"},"name":"不得输出的昵称","text":text,"ts":ts,"self":own})).unwrap();
 }
+fn key(db: &Store, chat: &str, id: &str) -> String {
+    db.resolve_message_key(chat, id).unwrap().unwrap()
+}
 fn asset(db: &Store, chat: &str, hash: &str, tier: &str, context: &str) {
     db.execute("INSERT INTO media_assets(chat,hash,kind,file,occurrences,first_seen,last_seen,bytes,source_tier,distinct_senders) VALUES(?,?,'face','14',1,0,0,0,?,3)",params![chat,hash,tier]).unwrap();
     message(db, chat, &format!("context-{hash}"), 100., context, false);
     db.execute(
         "INSERT INTO media_contexts(chat,hash,message_id,role) VALUES(?,?,?,'before')",
-        params![chat, hash, format!("context-{hash}")],
+        params![chat, hash, key(db, chat, &format!("context-{hash}"))],
     )
     .unwrap();
 }
@@ -88,7 +91,7 @@ fn history(db: &Store, chat: &str) {
             );
             db.execute(
                 "INSERT INTO media_receipts VALUES(?,?,0)",
-                params![chat, id],
+                params![chat, key(db, chat, &id)],
             )
             .unwrap();
         }
@@ -563,8 +566,8 @@ fn real_classifier_closing_silence_is_valid_but_standalone_stays_excluded() {
     history(&db, "group:10");
     asset(&db, "group:10", "cat", "unknown", "猫猫");
     db.execute(
-        "INSERT INTO media_contexts(chat,hash,message_id,role) VALUES('group:10','cat','closing','usage')",
-        [],
+        "INSERT INTO media_contexts(chat,hash,message_id,role) VALUES('group:10','cat',?,'usage')",
+        [key(&db, "group:10", "closing")],
     )
     .unwrap();
     let c = config();
@@ -583,8 +586,8 @@ fn real_classifier_closing_silence_is_valid_but_standalone_stays_excluded() {
     message(&db, "group:11", "after", 400., "火箭", false);
     asset(&db, "group:11", "single", "unknown", "天气");
     db.execute(
-        "INSERT INTO media_contexts(chat,hash,message_id,role) VALUES('group:11','single','single','usage')",
-        [],
+        "INSERT INTO media_contexts(chat,hash,message_id,role) VALUES('group:11','single',?,'usage')",
+        [key(&db, "group:11", "single")],
     )
     .unwrap();
     ms::observe(&db, "group:11", 1000., &c).unwrap();
@@ -1109,8 +1112,8 @@ fn human_rescue_and_legacy_pending_learn_in_the_selected_stage_bucket() {
     message(&db, "group:10", "rescue", NOW, "新话题", false);
     message(&db, "group:10", "response", NOW + 1., "喜欢", false);
     db.execute(
-        "INSERT INTO media_contexts(chat,hash,message_id,role) VALUES('group:10','cat','rescue','usage')",
-        [],
+        "INSERT INTO media_contexts(chat,hash,message_id,role) VALUES('group:10','cat',?,'usage')",
+        [key(&db, "group:10", "rescue")],
     )
     .unwrap();
     let classification = classified(Stage::Closing, Relation::Continuation, true);
@@ -1386,7 +1389,7 @@ mod engine_bus {
             let db = store.lock().unwrap();
             let feedback = db
                 .rows(
-                    "SELECT bucket,signal FROM media_feedback WHERE event='media-sent'",
+                    "SELECT f.bucket,f.signal FROM media_feedback f JOIN messages m ON m.chat=f.chat AND m.message_key=f.event WHERE m.id='media-sent'",
                     [],
                 )
                 .unwrap();

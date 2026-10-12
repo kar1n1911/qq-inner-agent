@@ -374,7 +374,7 @@ fn migration_reopen_and_context_lookup_use_original_messages() {
             &s,
             &event(3, json!([{"type":"text","data":{"text":"后续反应"}}])),
         );
-        let lookup:String=s.connection().query_row("SELECT m.text FROM media_contexts c JOIN messages m ON c.chat=m.chat AND c.message_id=m.id WHERE c.role='after'",[],|r|r.get(0)).unwrap();
+        let lookup:String=s.connection().query_row("SELECT m.text FROM media_contexts c JOIN messages m ON c.chat=m.chat AND c.message_id=m.message_key WHERE c.role='after'",[],|r|r.get(0)).unwrap();
         assert_eq!(lookup, "后续反应");
     }
     let s = Store::open(&path).unwrap();
@@ -609,8 +609,8 @@ fn old_media_schema_migrates_conservatively_and_backfills_only_known_humans() {
     CREATE TABLE media_contexts(chat TEXT NOT NULL,hash TEXT NOT NULL,message_id TEXT NOT NULL,role TEXT NOT NULL,PRIMARY KEY(chat,hash,message_id,role));
     INSERT INTO media_assets VALUES('group:10','legacy','image','media/group:10/legacy.bin',50,1,9,3,'{}');
     INSERT INTO media_assets VALUES('group:11','missing-history','image','media/group:11/old.bin',99,1,9,3,'{}');
-    INSERT INTO messages(chat,id,sender,name,text,ts,self) VALUES('group:10','1','20','','',1,0),('group:10','2','20','','',2,0),('group:10','3','21','','',3,0),('group:10','4','99','','',4,1),('group:10','5','22','','',5,0);
-    INSERT INTO media_contexts VALUES('group:10','legacy','1','usage'),('group:10','legacy','2','usage'),('group:10','legacy','3','usage'),('group:10','legacy','4','usage'),('group:10','legacy','5','before'),('group:10','legacy','deleted','usage');").unwrap();
+    INSERT INTO messages(message_key,chat,id,sender,name,text,ts,self) VALUES('test-1','group:10','1','20','','',1,0),('test-2','group:10','2','20','','',2,0),('test-3','group:10','3','21','','',3,0),('test-4','group:10','4','99','','',4,1),('test-5','group:10','5','22','','',5,0);
+    INSERT INTO media_contexts VALUES('group:10','legacy','test-1','usage'),('group:10','legacy','test-2','usage'),('group:10','legacy','test-3','usage'),('group:10','legacy','test-4','usage'),('group:10','legacy','test-5','before'),('group:10','legacy','deleted','usage');").unwrap();
     s.enable_media().unwrap();
     s.enable_media().unwrap();
     let row = &s.media_assets("group:10").unwrap()[0];

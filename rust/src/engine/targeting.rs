@@ -27,7 +27,7 @@ pub fn validate(
     let mut targets = Targets {
         reply_to: response["replyTo"]
             .as_str()
-            .filter(|id| recent.iter().any(|m| m["id"].as_str() == Some(id)))
+            .filter(|id| recent.iter().filter(|m| m["id"].as_str() == Some(id)).count() == 1)
             .map(str::to_owned),
         mention: response["mention"]
             .as_str()
@@ -45,7 +45,9 @@ pub fn validate(
     if hint == Hint::SelfChat {
         // Preserve a validated model choice; otherwise quote the latest inbound
         // addressed trigger, retained separately from later open messages.
-        targets.reply_to = targets.reply_to.or_else(|| addressed_id.map(str::to_owned));
+        targets.reply_to = targets.reply_to.or_else(|| addressed_id
+            .filter(|id| recent.iter().filter(|m| m["id"].as_str() == Some(id)).count() == 1)
+            .map(str::to_owned));
     } else if (targets.reply_to.is_some() || targets.mention.is_some())
         && draw().partial_cmp(&0.1) != Some(std::cmp::Ordering::Less)
     {

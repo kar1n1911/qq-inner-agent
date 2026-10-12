@@ -163,7 +163,7 @@ impl Store {
             .iter()
             .rev()
             .find(|m| !crate::config::truthy(&m["self"]))
-            .map(|m| text(m, "id"))
+            .map(|m| text(m, "message_key"))
             .unwrap_or("");
         self.execute("INSERT INTO chat_learning VALUES(?,'','[]',?,?,1) ON CONFLICT(chat) DO UPDATE SET style='',sources='[]',updated=excluded.updated,last_id=excluded.last_id,epoch=epoch+1",params![chat,now,last])?;
         // JS 的旧式 style/learned_memories 为 chat 级清理；三层和表达仅删指定 subject。

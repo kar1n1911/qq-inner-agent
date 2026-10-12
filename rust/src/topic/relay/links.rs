@@ -98,7 +98,7 @@ pub fn collect(
         if chat == current {
             continue;
         }
-        let rows = db.rows("SELECT id,sender,text FROM messages WHERE chat=? AND self=0 AND ts>=? AND ts<=? ORDER BY ts DESC,id LIMIT 200", params![chat, now - 86400., now])?;
+        let rows = db.rows("SELECT id,message_key,sender,text FROM messages WHERE chat=? AND self=0 AND ts>=? AND ts<=? ORDER BY ts DESC,rowid DESC LIMIT 200", params![chat, now - 86400., now])?;
         let mut links: BTreeMap<String, Vec<Evidence>> = BTreeMap::new();
         for row in rows {
             let body = text(&row, "text");
@@ -106,7 +106,7 @@ pub fn collect(
             // Existing card normalization is unchanged; opaque cards yield no URL.
             for url in extract(body) {
                 links.entry(url).or_default().push(Evidence {
-                    message_id: text(&row, "id").into(),
+                    message_id: text(&row, "message_key").into(),
                     author: text(&row, "sender").into(),
                     text: body.into(),
                 });

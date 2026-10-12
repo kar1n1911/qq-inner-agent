@@ -34,6 +34,9 @@ struct Harness {
     release: Semaphore,
 }
 impl Harness {
+    fn key(&self, chat: &str, id: &str) -> String {
+        self.store.lock().unwrap().resolve_message_key(chat, id).unwrap().unwrap()
+    }
     fn now(&self) -> f64 {
         *self.now.lock().unwrap()
     }
@@ -956,7 +959,7 @@ async fn restore_keeps_memory_without_replaying_and_reload_drops_old_result() {
     fresh.restore().unwrap();
     fresh.tick().unwrap();
     fresh.wait_idle().await;
-    assert_eq!(fresh.chats()[0].1.last_id, "m1");
+    assert_eq!(fresh.chats()[0].1.last_id, h.key("group:10", "m1"));
     assert!(!fresh.chats()[0].1.pending);
     assert!(fresh.chats()[0].1.pause_done);
     assert_eq!(h.rows("SELECT * FROM notes").len(), 1);
@@ -2306,7 +2309,7 @@ async fn off_duty_ingest_records_batch_and_resumes_backlog_after_active_window()
         assert!(state.pending);
         assert!(!state.pause_done);
         assert_eq!(state.hint, qq_inner_core::engine::policy::Hint::Open);
-        assert_eq!(state.last_id, "backlog25");
+        assert_eq!(state.last_id, h.key("group:10", "backlog25"));
         assert_eq!(state.last_human, h.now());
         assert_eq!(state.due, h.now());
         assert_eq!(h.rows("SELECT * FROM messages WHERE self=0").len(), 26);
@@ -3546,7 +3549,7 @@ async fn mood_learning_goal_prevents_heated_traits_through_engine() {
                 .expect("learning must reach review")
                 .1;
             assert_eq!(review["candidates"][0]["candidate"]["emotional"], emotional);
-            assert_eq!(review["sources"][0]["id"], "m1");
+            assert_eq!(review["sources"][0]["id"], h.key("group:10", "m1"));
             let traits = h.rows("SELECT * FROM memory_layers WHERE layer='traits'");
             let skips = h.rows("SELECT * FROM decisions WHERE action='skipped'");
             if low && emotional {
@@ -3565,7 +3568,7 @@ async fn mood_learning_goal_prevents_heated_traits_through_engine() {
             }
             assert_eq!(
                 h.rows("SELECT last_id FROM chat_learning")[0]["last_id"],
-                "m1"
+                h.key("group:10", "m1")
             );
             let mood = h
                 .rows("SELECT value FROM affect_state WHERE dimension='mood' AND subject='group'")
@@ -3617,7 +3620,7 @@ async fn mood_learning_goal_preserves_partial_through_engine() {
     e.wait_idle().await;
     assert_eq!(
         h.rows("SELECT last_id FROM chat_learning")[0]["last_id"],
-        "m3"
+        h.key("group:10", "m3")
     );
     assert_eq!(
         h.rows("SELECT * FROM memory_layers WHERE layer='traits'"),
@@ -4179,7 +4182,7 @@ async fn outbound_facts_match_each_acknowledged_bubble_without_claiming_confirma
     let sends: Vec<_> = h.trace.lock().unwrap().iter()
         .filter(|event| event[0] == "send")
         .map(|event| event[2].clone()).collect();
-    let rows = h.rows("SELECT m.text,d.status,f.time_source FROM messages m JOIN outbound_message_facts f ON f.chat=m.chat AND f.id=m.id JOIN deliveries d ON d.id=f.delivery_id WHERE m.self=1 ORDER BY m.rowid");
+    let rows = h.rows("SELECT m.text,d.status,f.time_source FROM messages m JOIN outbound_message_facts f ON f.chat=m.chat AND f.id=m.message_key JOIN deliveries d ON d.id=f.delivery_id WHERE m.self=1 ORDER BY m.rowid");
     assert_eq!(sends, vec![json!("第一条"),json!("第二条"),json!("第三条")]);
     assert_eq!(rows.iter().map(|row| row["text"].clone()).collect::<Vec<_>>(), sends);
     assert!(rows.iter().all(|row| row["status"] == "sent_unconfirmed" && row["time_source"] == "local_estimate"));
@@ -4366,18 +4369,27 @@ async fn target_b5_counts_excess_utterances_not_blocked_intentions() {
                 db.execute("INSERT INTO affect_state VALUES('group:10','person:20',?,-1,0,1,?,'[]')",
                     rusqlite::params![dimension, h.now()]).unwrap();
             }
-            for _ in 0..initial {
-                qq_inner_core::persona::affect::reserve_burst(&db, "group:10", "m1").unwrap();
+            if human == "new" {
+                for _ in 0..initial {
+                    qq_inner_core::persona::affect::reserve_burst(&db, "group:10", "m1").unwrap();
+                }
             }
         }
         *h.model.lock().unwrap() = model;
         e.ingest(&h.event(&json!({"id":human,"text":"盆土干了怎么处理？"}))).unwrap();
+        if human != "new" {
+            let db = h.store.lock().unwrap();
+            let key = db.resolve_message_key("group:10", human).unwrap().unwrap();
+            for _ in 0..initial {
+                qq_inner_core::persona::affect::reserve_burst(&db, "group:10", &key).unwrap();
+            }
+        }
         *h.now.lock().unwrap() += 10.;
         e.tick().unwrap();
         e.wait_idle().await;
         assert_eq!(*h.sends.lock().unwrap(), sends, "{label}");
         let rows = h.rows("SELECT human_id,count FROM affect_bursts WHERE chat='group:10'");
         assert_eq!(rows[0]["count"], count, "{label}");
-        assert_eq!(rows[0]["human_id"], human, "{label}");
+        assert_eq!(rows[0]["human_id"], h.key("group:10", human), "{label}");
     }
 }
