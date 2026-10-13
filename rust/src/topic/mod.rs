@@ -302,7 +302,7 @@ fn bounded(item: &Item, cap: usize) -> Option<Item> {
     }
     let mut left = cap - item.url.chars().count();
     let mut cut = |s: &str| {
-        let out: String = s.chars().take(left).collect();
+        let out: String = crate::utils::text::clip_chars(s, left);
         left -= out.chars().count();
         out
     };

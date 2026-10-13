@@ -317,7 +317,7 @@ struct Limited {
 impl Engine for Limited {
     fn recognize(&self, image: &[u8]) -> Result<OcrOutput> {
         let mut output = self.engine.recognize(image)?;
-        output.text = output.text.chars().take(self.max_chars).collect();
+        output.text = crate::utils::text::clip_chars(&output.text, self.max_chars);
         Ok(output)
     }
 }
@@ -389,7 +389,7 @@ impl Worker {
                         hashes.push(sha256(&bytes));
                         outputs.push(engine.recognize(&bytes)?);
                     }
-                    let text: String = outputs.iter().map(|o| o.text.as_str()).collect::<Vec<_>>().join("\n").chars().take(settings.max_chars).collect();
+                    let text: String = crate::utils::text::clip_chars(&outputs.iter().map(|o| o.text.as_str()).collect::<Vec<_>>().join("\n"), settings.max_chars);
                     // A clear image must not hide uncertainty in another image in the message.
                     let confidence = outputs.iter().map(|o| o.confidence).fold(1.0, f64::min);
                     let reliable = outputs.iter().all(|o| o.reliable);

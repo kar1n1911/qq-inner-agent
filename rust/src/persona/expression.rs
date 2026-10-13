@@ -250,10 +250,7 @@ pub fn decorate(response: &Value, choices: &Value, max_characters: usize) -> Val
     } else {
         String::new()
     };
-    let output = trim(text(response, "text"))
-        .chars()
-        .take(max_characters.saturating_sub(suffix.chars().count()))
-        .collect::<String>()
+    let output = crate::utils::text::clip_chars(trim(text(response, "text")), max_characters.saturating_sub(suffix.chars().count()))
         + &suffix;
     json!({"text":output,"faceId":face,"decorated":!emoji.is_empty()||truthy(&face)})
 }

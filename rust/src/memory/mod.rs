@@ -13,21 +13,11 @@ use anyhow::{ensure, Result};
 use rusqlite::params;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
+pub(crate) use crate::utils::text::js_trim as trim;
+pub(crate) use crate::utils::value::{array, num, text};
 /// Rust-only learning extension, appended to FORM without changing shared generated prompts.
 pub const AFFECT_LEARNING_CONTRACT: &str = "learning.layers[] 的 upsert 候选应提供 emotional 布尔值：仅当候选结论本身把本轮气话、宣泄或一时情绪当成稳定特质时为 true；可独立核实的普通事实为 false，即使原话带情绪。省略按 false 兼容旧输出。情绪化结论仍遵守 skip 分诊，程序还会依据群级/人物级 mood 阻止此类结论落库或升格；不能由 agreement 推断 emotional。";
 
-pub(crate) fn text<'a>(v: &'a Value, k: &str) -> &'a str {
-    v[k].as_str().unwrap_or("")
-}
-pub(crate) fn num(v: &Value, k: &str) -> f64 {
-    v[k].as_f64().unwrap_or(0.)
-}
-pub(crate) fn array(v: &Value) -> &[Value] {
-    v.as_array().map(Vec::as_slice).unwrap_or(&[])
-}
-pub(crate) fn trim(s: &str) -> &str {
-    s.trim_matches(|c:char|matches!(c,'\u{0009}'..='\u{000d}'|'\u{0020}'|'\u{00a0}'|'\u{1680}'|'\u{2000}'..='\u{200a}'|'\u{2028}'|'\u{2029}'|'\u{202f}'|'\u{205f}'|'\u{3000}'|'\u{feff}'))
-}
 pub(crate) fn len(s: &str) -> usize {
     s.encode_utf16().count()
 }

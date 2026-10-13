@@ -440,7 +440,7 @@ impl Backend {
         {
             text = text.replace(secret, "[redacted]");
         }
-        capture.events.push(json!({"receivedAt":chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis,true),"messageId":event.get("message_id").map(config::js_string).unwrap_or_default(),"postType":event["post_type"],"chatType":event["message_type"],"types":types,"text":text.chars().take(1000).collect::<String>()}));
+        capture.events.push(json!({"receivedAt":chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis,true),"messageId":event.get("message_id").map(config::js_string).unwrap_or_default(),"postType":event["post_type"],"chatType":event["message_type"],"types":types,"text":crate::utils::text::clip_chars(&text, 1000)}));
         if capture.events.len() > 30 {
             capture.events.remove(0);
         }

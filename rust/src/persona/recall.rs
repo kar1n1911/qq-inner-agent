@@ -60,7 +60,7 @@ impl Budget {
                 params![chat, num(anchor, "ts"), limit],
             )?
         } else if !request.query.trim().is_empty() {
-            let query: String = request.query.chars().take(200).collect();
+            let query: String = crate::utils::text::clip_chars(&request.query, 200);
             store.rows("SELECT id,ts,text FROM messages WHERE chat=? AND instr(text,?)>0 ORDER BY ts DESC,id LIMIT ?",params![chat,query,limit])?
         } else {
             vec![]

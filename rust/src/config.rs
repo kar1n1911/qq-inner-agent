@@ -144,7 +144,7 @@ fn number(v: &Value, min: f64, max: f64, integer: bool) -> bool {
 }
 // JS trim 的空白集合与 Rust trim 不同：包含 BOM，不包含 U+0085。
 fn nonblank(s: &str) -> bool {
-    !s.trim_matches(|c:char|matches!(c,'\u{0009}'..='\u{000d}'|'\u{0020}'|'\u{00a0}'|'\u{1680}'|'\u{2000}'..='\u{200a}'|'\u{2028}'|'\u{2029}'|'\u{202f}'|'\u{205f}'|'\u{3000}'|'\u{feff}')).is_empty()
+    !crate::utils::text::js_trim(s).is_empty()
 }
 // JS 无 u 标志的 \d 只匹配 ASCII；不用 Rust 的 Unicode 数字判断。$ 在这里严格匹配结尾。
 fn qq_id(s: &str) -> bool {

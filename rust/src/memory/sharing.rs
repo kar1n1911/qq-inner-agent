@@ -17,11 +17,7 @@ pub(crate) struct Cache {
 }
 
 pub fn share(a: &HashSet<String>, b: &HashSet<String>) -> f64 {
-    if a.is_empty() || b.is_empty() {
-        return 0.;
-    }
-    ((a.intersection(b).count() as f64 / a.len().min(b.len()) as f64 - 0.35) / (0.75 - 0.35))
-        .clamp(0., 1.)
+    crate::utils::score::set_overlap(a, b)
 }
 
 fn group(chat: &str) -> bool {

@@ -3,6 +3,7 @@ pub mod provider;
 pub mod provider_transport;
 
 use crate::config::{js_string, truthy, Onebot};
+use crate::utils::{crypto::uuid_v4 as uuid, text::js_trim};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use std::{
@@ -579,21 +580,6 @@ fn backoff(delay: &mut f64, elapsed: Duration, max: f64, jitter: f64) -> Duratio
     *delay = (*delay * 2.0).min(max);
     wait
 }
-fn uuid() -> String {
-    // 复用 rand 生成 RFC 4122 UUID v4，不增加 uuid 依赖。
-    let mut b: [u8; 16] = rand::random();
-    b[6] = (b[6] & 15) | 64;
-    b[8] = (b[8] & 63) | 128;
-    let hex: String = b.iter().map(|v| format!("{v:02x}")).collect();
-    format!(
-        "{}-{}-{}-{}-{}",
-        &hex[..8],
-        &hex[8..12],
-        &hex[12..16],
-        &hex[16..20],
-        &hex[20..]
-    )
-}
 pub(crate) fn js_number(v: &Value) -> f64 {
     match v {
         Value::Null => 0.0,
@@ -607,7 +593,7 @@ pub(crate) fn js_number(v: &Value) -> f64 {
         Value::Number(n) => n.as_f64().unwrap_or(f64::NAN),
         _ => {
             let s = js_string(v);
-            let s = s.trim_matches(|c: char| matches!(c, '\u{0009}'..='\u{000d}'|'\u{0020}'|'\u{00a0}'|'\u{1680}'|'\u{2000}'..='\u{200a}'|'\u{2028}'|'\u{2029}'|'\u{202f}'|'\u{205f}'|'\u{3000}'|'\u{feff}'));
+            let s = js_trim(&s);
             if s.is_empty() {
                 return 0.0;
             }

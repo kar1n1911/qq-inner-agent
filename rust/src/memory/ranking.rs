@@ -3,6 +3,7 @@ use crate::config::Memory;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use super::memory_unicode as unicode;
+use crate::utils::value::{number_or as n, text as s};
 pub type Token = Vec<u16>;
 fn contains(ranges: &[(u32, u32)], c: char) -> bool {
     ranges
@@ -34,12 +35,6 @@ pub fn tokens(text: &str) -> Vec<Token> {
         }
     }
     out
-}
-fn n(v: &Value, key: &str, default: f64) -> f64 {
-    v[key].as_f64().unwrap_or(default)
-}
-fn s<'a>(v: &'a Value, key: &str) -> &'a str {
-    v[key].as_str().unwrap_or("")
 }
 #[derive(Default, Debug)]
 pub struct RankingStats {

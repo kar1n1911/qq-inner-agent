@@ -8,6 +8,7 @@
 //! 时区与时刻上比对。
 use crate::config::{Agent, QuietHours, Schedule};
 use crate::memory::text::similarity;
+pub(crate) use crate::utils::text::{clip_chars, js_trim};
 use chrono::{DateTime, FixedOffset, Local, TimeZone, Timelike, Utc};
 use chrono_tz::Tz;
 use std::cmp::Ordering;
@@ -428,16 +429,6 @@ pub enum Hint {
     Other,
     #[serde(rename = "open")]
     Open,
-}
-
-pub(crate) fn js_trim(s: &str) -> &str {
-    s.trim_matches(|c: char| matches!(c, '\u{0009}'..='\u{000d}'|'\u{0020}'|'\u{00a0}'|'\u{1680}'|'\u{2000}'..='\u{200a}'|'\u{2028}'|'\u{2029}'|'\u{202f}'|'\u{205f}'|'\u{3000}'|'\u{feff}'))
-}
-
-/// 明确的移植差异：Rust String 不容纳孤立代理项，截断按 char 而非 JS UTF-16
-/// 码元；因此补充平面字符不会被切半，同样上限下可能比 JS 多保留字符。
-pub(crate) fn clip_chars(s: &str, limit: usize) -> String {
-    s.chars().take(limit).collect()
 }
 
 /// 无正则依赖的 CQ 替换；返回 None 时继续搜索内部的 CQ 起点，匹配 JS 正则行为。

@@ -13,3 +13,4 @@ pub mod transport;
 
 pub mod prompt_overlay;
 pub mod update;
+pub(crate) mod utils;

@@ -1,22 +1,7 @@
 use super::*;
 use crate::config::{js_string, truthy};
 use rusqlite::{params, Transaction, TransactionBehavior};
-
-// 复用 rand 生成 RFC 4122 v4 UUID，不新增依赖。
-pub(crate) fn uuid() -> String {
-    let mut bytes: [u8; 16] = rand::random();
-    bytes[6] = (bytes[6] & 15) | 64;
-    bytes[8] = (bytes[8] & 63) | 128;
-    let h: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-    format!(
-        "{}-{}-{}-{}-{}",
-        &h[..8],
-        &h[8..12],
-        &h[12..16],
-        &h[16..20],
-        &h[20..]
-    )
-}
+pub(crate) use crate::utils::crypto::uuid_v4 as uuid;
 // JSON 列使用紧凑 UTF-8 TEXT，与 JSON.stringify/parse 数据格式互通。
 // SQL NULL 保留为 JSON null；缺失行用 Option，默认对象不补入不存在的 chat 键。
 pub(crate) fn decode(row: &mut Value, keys: &[&str]) -> Result<()> {
