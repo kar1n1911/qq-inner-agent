@@ -5,6 +5,7 @@ use futures_util::future::BoxFuture;
 use qq_inner_core::{
     config::{defaults, merge, Config},
     engine::orientation::{OrientationProvider, OrientationTransport},
+    engine::io::{adapters::onebot::OneBotAdapter, PortReply},
     engine::{Engine, EngineTransport, Options},
     transport::{OneBotError, State},
     store::Store,
@@ -405,6 +406,35 @@ fn ingest(id: &str, text: &str) -> Value {
 }
 fn run() -> Value {
     json!({"op":"run"})
+}
+
+#[tokio::test]
+async fn opted_in_incoming_reaches_ported_outbound_after_existing_gates() {
+    // P2 target: a typed OneBot ingress schedules the existing cycle; its
+    // delivery uses ChatPort only for the chat admitted through that ingress.
+    let (engine, harness) = setup(&base("ported_roundtrip", json!({}), vec![]));
+    let actions = Arc::new(Mutex::new(Vec::<(String, Value)>::new()));
+    let seen = actions.clone();
+    let adapter = Arc::new(OneBotAdapter::new("onebot", Arc::new(move |action, params| {
+        seen.lock().unwrap().push((action, params));
+        Box::pin(async { PortReply::Ok(json!({"message_id":"out:1"})) })
+    }), Arc::new(|| (true, true))).unwrap());
+    let event = harness.event(&json!({"id":"in:1","text":[
+        {"type":"at","data":{"qq":"99"}},
+        {"type":"text","data":{"text":"你好"}}
+    ]}));
+    let incoming = adapter.map_event(&event, harness.now() + 3.).unwrap().unwrap();
+    engine.ingest_incoming(&incoming, adapter).unwrap();
+    let messages = harness.rows("SELECT message_key,id,ts,received_at FROM messages");
+    assert_eq!(messages[0]["id"], "in:1");
+    assert_ne!(messages[0]["message_key"], "in:1");
+    assert_eq!(messages[0]["ts"], harness.now());
+    assert_eq!(messages[0]["received_at"], harness.now() + 3.);
+    engine.tick().unwrap();
+    engine.wait_idle().await;
+    assert!(actions.lock().unwrap().iter().any(|(name, _)| name == "send_group_msg"));
+    assert_eq!(*harness.sends.lock().unwrap(), 0, "opted-in chat must bypass legacy sender");
+    engine.stop().await;
 }
 
 #[tokio::test]

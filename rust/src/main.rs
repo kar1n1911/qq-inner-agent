@@ -304,6 +304,7 @@ struct Runtime {
     store: Arc<Mutex<Store>>,
     provider: Arc<Provider>,
     bot: Arc<OneBot>,
+    onebot_io: Option<Arc<qq_inner_core::engine::io::adapters::onebot::OneBotAdapter>>,
     notices: mpsc::UnboundedReceiver<Notification>,
     engine: Arc<Engine>,
     connection: Option<JoinHandle<()>>,
@@ -316,6 +317,9 @@ struct Runtime {
     now: Clock,
     log: Logger,
     control: Option<Arc<Backend>>,
+}
+fn use_onebot_io(value: Option<&str>) -> bool {
+    value == Some("1")
 }
 impl Runtime {
     fn new(
@@ -336,6 +340,27 @@ impl Runtime {
         ));
         let (bot, notices) = OneBot::new(c.onebot.clone(), c.onebot_token.text.clone());
         let bot = existing_bot.unwrap_or_else(|| Arc::new(bot));
+        let onebot_io = if use_onebot_io(std::env::var("QQ_INNER_ONEBOT_IO").ok().as_deref()) {
+            use qq_inner_core::engine::io::{adapters::onebot::OneBotAdapter, PortReply};
+            let action_bot = bot.clone();
+            let state_bot = bot.clone();
+            Some(Arc::new(OneBotAdapter::new(
+                "onebot",
+                Arc::new(move |action, params| {
+                    let bot = action_bot.clone();
+                    Box::pin(async move {
+                        match bot.call(&action, params).await {
+                            Ok(data) => PortReply::Ok(data),
+                            Err(error) => PortReply::Failed { code: error.code, uncertain: error.uncertain },
+                        }
+                    })
+                }),
+                Arc::new(move || {
+                    let state = state_bot.state();
+                    (state.connected, state.online)
+                }),
+            )?))
+        } else { None };
         let engine = Engine::new_with_media(
             c.clone(),
             store.clone(),
@@ -368,6 +393,7 @@ impl Runtime {
             store,
             provider,
             bot,
+            onebot_io,
             notices,
             engine,
             connection: None,
@@ -424,6 +450,26 @@ impl Runtime {
                     control.observe(&event);
                 }
                 if !self.engine.participates() { return; }
+                if let Some(adapter) = &self.onebot_io {
+                    let context = event_rejected_context(&event);
+                    let incoming = match adapter.map_event(&event, (self.now)()) {
+                        Ok(Some(incoming)) => incoming,
+                        Ok(None) => return,
+                        Err(error) => {
+                            (self.log)("event_rejected", event_rejected_payload(context, "map_incoming_failed", &error.to_string()));
+                            return;
+                        }
+                    };
+                    let engine = self.engine.clone();
+                    let adapter = adapter.clone();
+                    let outcome = tokio::task::spawn_blocking(move || engine.ingest_incoming(&incoming, adapter)).await;
+                    match outcome {
+                        Ok(Ok(())) => {}
+                        Ok(Err(error)) => (self.log)("event_rejected", event_rejected_payload(context, "ingest_incoming_failed", &error.to_string())),
+                        Err(error) => (self.log)("event_rejected", event_rejected_payload(context, "ingest_task_failed", &error.to_string())),
+                    }
+                    return;
+                }
                 let event = qq_inner_core::engine::policy::resolve_forwards(
                     &event,
                     &self.bot,
@@ -724,6 +770,12 @@ async fn run(root: PathBuf) -> Result<()> {
 mod tests {
     use super::*;
     use std::process::{Command as Process, Stdio};
+    #[test]
+    fn onebot_io_path_is_explicit_and_defaults_to_legacy() {
+        assert!(!use_onebot_io(None));
+        assert!(!use_onebot_io(Some("0")));
+        assert!(use_onebot_io(Some("1")));
+    }
     struct Temp(PathBuf);
     impl Temp {
         fn new() -> Self {

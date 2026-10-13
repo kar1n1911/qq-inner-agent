@@ -178,6 +178,12 @@ pub enum Command {
         chat: ChatAddress,
         media: MediaRef,
     },
+    /// ACK means the target port confirmed the protocol recall action.
+    /// A timeout/disconnect is `Failed { uncertain: true }`, never success.
+    Recall {
+        port: String,
+        message_id: String,
+    },
     FetchHistory {
         chat: ChatAddress,
         count: usize,
@@ -229,7 +235,8 @@ impl Command {
             | Self::FetchMembers { chat }
             | Self::FetchGroupInfo { chat }
             | Self::SetGroupCard { chat, .. } => &chat.port,
-            Self::FetchForward { port, .. }
+            Self::Recall { port, .. }
+            | Self::FetchForward { port, .. }
             | Self::FetchFriendList { port }
             | Self::FetchGroupList { port }
             | Self::LoginInfo { port }

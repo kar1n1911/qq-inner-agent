@@ -31,7 +31,7 @@ use futures_util::future::BoxFuture;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex, MutexGuard},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -245,6 +245,7 @@ pub struct Engine {
     pub orientation: GroupOrientation,
     provider: Arc<dyn OrientationProvider>,
     transport: Arc<dyn EngineTransport>,
+    io_chats: Mutex<HashMap<String, Arc<dyn io::ChatPort>>>,
     options: Options,
     media_config: media_select::Config,
     collector: Option<crate::media::Collector>,
@@ -374,6 +375,7 @@ impl Engine {
             store,
             provider,
             transport,
+            io_chats: Mutex::new(HashMap::new()),
             options,
             media_config,
             collector,
@@ -488,6 +490,115 @@ impl Engine {
     }
     pub fn ingest(&self, event: &Value) -> Result<()> {
         self.ingest_with_source(event, false)
+    }
+    /// Opt-in P2 ingress. Protocol JSON remains inside the adapter; the same
+    /// pending-chat cycle and send gates used by `ingest` handle the reply.
+    pub fn ingest_incoming(&self, incoming: &io::types::Incoming, port: Arc<dyn io::ChatPort>) -> Result<()> {
+        use io::types::{ChatKind, Segment};
+        if !self.participates() || incoming.self_message { return Ok(()); }
+        ensure!(incoming.chat.port == incoming.port, "wrong_incoming_port");
+        ensure!(incoming.ts.is_finite() && incoming.ts > 0. && incoming.received_at.is_finite() && incoming.received_at > 0., "invalid_incoming_time");
+        ensure!(incoming.self_id == self.transport.self_id(), "wrong_self_id");
+        let a = &self.config.agent;
+        if a.ignored_users.contains(&incoming.sender.id) { return Ok(()); }
+        let chat = format!("{}:{}", incoming.chat.kind.as_str(), incoming.chat.id);
+        if !policy::allowed(&chat, a) { return Ok(()); }
+        ensure!(port.manifest().name == incoming.port, "wrong_incoming_port");
+        let mut text = String::new();
+        let mut at_self = false;
+        let mut at_other = false;
+        for segment in &incoming.segments {
+            match segment {
+                Segment::Text(part) => text.push_str(part),
+                Segment::Mention { id } => {
+                    at_self |= id == &incoming.self_id;
+                    at_other |= id != &incoming.self_id && id != "all";
+                    text.push_str(&format!(" [@{id}] "));
+                }
+                Segment::Reply { .. } => text.push_str(" [reply] "),
+                Segment::Face { id } => text.push_str(&format!(" [QQface:{id}] ")),
+                _ => anyhow::bail!("incoming_segment_unimplemented"),
+            }
+        }
+        let text = crate::utils::text::clip_chars(crate::utils::text::js_trim(&text), a.max_input_chars as usize);
+        if text.is_empty() { return Ok(()); }
+        // Owner commands, media capture, and notice handling remain on the
+        // legacy path until their neutral contracts exist; never half-process.
+        ensure!(!text.trim_start().starts_with('/'), "incoming_command_unimplemented");
+        let now = self.now();
+        let identity = self.self_identity.identity(&incoming.self_id, &chat);
+        let named = policy::named(&text, a.aliases.iter().map(String::as_str))
+            || policy::named(&text, [&identity.nickname, &identity.card].into_iter().map(String::as_str));
+        let hint = if incoming.chat.kind == ChatKind::Private || at_self || named {
+            Hint::SelfChat
+        } else if at_other { Hint::Other } else { Hint::Open };
+        let m = policy::Message {
+            chat: chat.clone(), id: incoming.message_id.clone(),
+            sender: incoming.sender.id.clone(),
+            name: crate::utils::text::clip_chars(&incoming.sender.name, 80),
+            text, ts: incoming.ts, is_self: false, hint,
+        };
+        let mut value = serde_json::to_value(&m)?;
+        value["received_at"] = json!(incoming.received_at);
+        let mut core = self.core();
+        let state = if now - m.ts > a.active_window_seconds {
+            None
+        } else {
+            core.state(&chat, a.max_active_chats)
+        };
+        let (inserted, key) = self.db()?.record_message(&value)?;
+        if !inserted { return Ok(()); }
+        value["message_key"] = json!(key);
+        if a.identity.enabled && incoming.chat.kind == ChatKind::Group {
+            self.db()?.ensure_orientation(&chat, now)?;
+        }
+        self.orientation.observe(&chat)?;
+        let db = self.db()?;
+        if a.learning.enabled { LayeredMemory::new(&db).capture(&value, now, &a.memory)?; }
+        let Some(s) = state else { return Ok(()); };
+        db.observe(&value, now)?;
+        s.version += 1;
+        s.last_human = now;
+        if m.hint == Hint::SelfChat { s.addressed_id = Some(m.id.clone()); }
+        else if !s.pending { s.addressed_id = None; }
+        s.last_id = key;
+        if !(s.pending && s.hint == Hint::SelfChat) { s.hint = m.hint; }
+        s.pending = true;
+        s.pause_done = false;
+        s.due = now + a.debounce_seconds;
+        self.io_chats.lock().unwrap().insert(chat, port);
+        Ok(())
+    }
+    async fn send_chat(
+        &self, chat: &str, text: &str, face: Option<&str>,
+        reply_to: Option<&str>, mention: Option<&str>,
+    ) -> std::result::Result<Value, OneBotError> {
+        use io::types::{ChatAddress, ChatKind, Command, CommandResult, PortReply, Segment};
+        let port = self.io_chats.lock().unwrap().get(chat).cloned();
+        let Some(port) = port else {
+            return self.transport.send(chat, text, face, reply_to, mention).await;
+        };
+        let (kind, id) = chat.split_once(':').ok_or_else(|| OneBotError {
+            code: "invalid_chat".into(), uncertain: false,
+        })?;
+        let kind = match kind {
+            "group" => ChatKind::Group,
+            "private" => ChatKind::Private,
+            _ => return Err(OneBotError { code: "invalid_chat".into(), uncertain: false }),
+        };
+        let address = ChatAddress::new(kind, &port.manifest().name, id).map_err(|e| OneBotError {
+            code: e.code, uncertain: false,
+        })?;
+        let mut segments = Vec::new();
+        if let Some(id) = mention { segments.push(Segment::Mention { id: id.into() }); }
+        if !text.is_empty() || face.is_none() { segments.push(Segment::Text(text.into())); }
+        if let Some(id) = face { segments.push(Segment::Face { id: id.into() }); }
+        match port.deliver(Command::Send { chat: address, segments, reply_to: reply_to.map(str::to_owned) }).await {
+            PortReply::Ok(CommandResult::Sent { message_id }) => Ok(json!({"message_id":message_id})),
+            PortReply::Failed { code, uncertain } => Err(OneBotError { code, uncertain }),
+            PortReply::Unsupported { .. } => Err(OneBotError { code: "send_unsupported".into(), uncertain: false }),
+            _ => Err(OneBotError { code: "invalid_send_ack".into(), uncertain: true }),
+        }
     }
     /// History contributes to perception without changing live reply scheduling.
     pub fn ingest_backfill(&self, event: &Value) -> Result<()> {
@@ -2289,8 +2400,7 @@ impl Engine {
             };
             attempted += 1;
             let result = self
-                .transport
-                .send(chat, bubble, bubble_face, reply_to, mention)
+                .send_chat(chat, bubble, bubble_face, reply_to, mention)
                 .await
                 .and_then(|receipt| {
                     if receipt.get("message_id").is_some_and(|id| !id.is_null() && id != "") {

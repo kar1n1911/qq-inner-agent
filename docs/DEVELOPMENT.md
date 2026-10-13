@@ -182,6 +182,8 @@ JSON 逐项包含 `IDENTITY`、`OUTPUT_CONTRACT`、`FORMATION`、`EVALUATION`、
 
 **现状**:✅ 正常。`onebot.forwardEnabled` 已开,合并转发可解析。
 
+P2 过渡开关为进程环境变量 `QQ_INNER_ONEBOT_IO=1`；未设置时通知、入站及发送均继续走旧路径。开启后，普通 OneBot 消息由 `engine/io/adapters/onebot.rs` 映射为 `Incoming`，`Engine::ingest_incoming` 沿用原有决策和发送闸门，只有经该入口接纳的会话在最终文本发送时调用 `ChatPort::deliver`。协议 ID 仅作消息字段，Store 仍分配 `message_key`；服务器 `ts` 与本机 `received_at` 分别保存。此阶段新入口对媒体段和主人命令显式拒绝，非消息事件尚无中立 `Incoming` 契约；需要这些功能时保持默认旧路径。撤回 `Command::Recall` 只在 OneBot `delete_msg` 收到成功 ACK 后返回 `Ok`，超时或断线保留 uncertain 失败态。
+
 ### 8.1 OneBot 接口(内核 ↔ NapCat)
 
 - **传输**:WebSocket `ws://127.0.0.1:3001/`(正向 WS,NapCat 作服务端);`config.onebot.url/selfId/token`。
