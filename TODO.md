@@ -699,8 +699,22 @@ runningRevision:  58bfb56
 - 自带 **Adapter Manifest 与 [Adapter Protocol v1](https://github.com/A-Dawn/A_memorix/blob/main/docs/ADAPTER_PROTOCOL_V1.md)**：
   「远程 Adapter 只能使用 gRPC / HTTP-JSON / 固定 Namespace MCP；进程内 Adapter 只能依赖顶层公开 Python API，
   不能导入 `a_memorix.core`」—— **这套约束可反过来检验我们的端口边界**；
-- ⚠️ **许可证 AGPL-3.0-only** —— 接入前**必须显式确认**它对本项目的影响
-  （尤其网络服务条款）。我们的用法是**客户端连接未修改的服务**，但这条不能靠推测，要确认后再动。
+- ✅ **许可证已澄清（2026-10-12，用户指出）**：AGPL-3.0-only 的 **§13 网络条款不适用** ——
+  A_memorix 是**本机进程内的库**，数据落在本机 SQLite 目录，**不对外提供网络服务**。
+  copyleft 只在**将来分发产物**时才需要再看，与现在本地集成无关。**此条不再拦路。**
+
+**VM 环境（2026-10-12 实测）**：
+
+- Python **3.14.4**（要求 3.12+）、pip 26.2.1、磁盘 89G 可用；
+- PyPI 可达，`a-memorix 2.0.0a4` 可下载（与 README 声明的当前版本一致）；
+- ⚠️ **该 VM 缺 `ensurepip`**（未装 `python3-venv`），`python3 -m venv` 会直接失败；
+  改用 **`pip install --target <独立目录>` + `PYTHONPATH`**，效果等价且不污染系统 Python；
+- 安装位置：`~/.local/share/a-memorix-pkgs`。
+
+**集成路径（关键）**：Rust 核心**不能直接 import Python** →
+必须走 **gRPC / 独立进程**，而**不是**用 `pyo3` 把 Python 嵌进内核（那会让内核依赖 Python 运行时，
+违背端口化的初衷）。这恰好是 `MemoryPort` 该证明的能力：
+**换一个进程外、跨语言的后端，内核不应有感。**
 
 **为什么选它做 `MemoryPort` 的第一个实现**：它是**跨语言、跨进程**的（Python + gRPC），
 而我们的核心是 Rust —— 这恰好是端口抽象最该证明的能力：
