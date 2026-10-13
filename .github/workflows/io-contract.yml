@@ -1,0 +1,13 @@
+name: IO contract boundary
+on:
+  push:
+  pull_request:
+jobs:
+  io-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check P0 boundary and contract targets
+        working-directory: rust
+        run: cargo test --test io_contract

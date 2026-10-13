@@ -4,6 +4,7 @@ pub mod activity;
 pub mod backlog;
 mod backfill;
 pub mod decision;
+pub mod io;
 pub mod orientation;
 pub mod policy;
 mod self_identity;
