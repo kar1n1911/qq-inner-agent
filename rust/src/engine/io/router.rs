@@ -32,6 +32,10 @@ impl ChatRouter {
         self.ports.get(name)
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.ports.is_empty()
+    }
+
     pub fn capabilities_for(&self, chat: &ChatAddress) -> Result<Capabilities, IoError> {
         self.get(&chat.port)
             .map(|port| port.capabilities())

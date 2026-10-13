@@ -61,7 +61,9 @@ impl ChatPort for TestChat {
         self.deliveries.fetch_add(1, Ordering::SeqCst);
         Box::pin(async { PortReply::Ok(CommandResult::Ok) })
     }
-    fn attach(&self, _: mpsc::Sender<Incoming>) {}
+    fn attach(&self, _: mpsc::Sender<Incoming>) -> Result<(), IoError> {
+        Ok(())
+    }
 }
 
 #[tokio::test]
@@ -137,11 +139,11 @@ fn memory_evidence_locates_by_internal_message_key() {
 #[test]
 fn io_source_has_no_dependency_on_kernel_implementation() {
     // Target ①: P-5 / §12 + X1. The CI workflow runs this same test.
-    fn inspect(dir: &Path) {
+    fn inspect(dir: &Path, root: &Path) {
         for item in fs::read_dir(dir).unwrap() {
             let path = item.unwrap().path();
             if path.is_dir() {
-                inspect(&path);
+                inspect(&path, root);
                 continue;
             }
             if path.extension().is_none_or(|ext| ext != "rs") {
@@ -158,7 +160,7 @@ fn io_source_has_no_dependency_on_kernel_implementation() {
                 "parent escape in {}",
                 path.display()
             );
-            if path.file_name().is_some_and(|name| name == "mod.rs") {
+            if path == root.join("mod.rs") {
                 assert!(
                     !source.contains("super::"),
                     "io root depends on engine sibling in {}",
@@ -177,5 +179,130 @@ fn io_source_has_no_dependency_on_kernel_implementation() {
             );
         }
     }
-    inspect(&Path::new(env!("CARGO_MANIFEST_DIR")).join("src/engine/io"));
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/engine/io");
+    inspect(&root, &root);
+}
+
+#[tokio::test]
+async fn null_io_is_complete_and_real_calls_fail_explicitly() {
+    // Availability + target ①: P1 requires all six faces, but no default success.
+    let io = Io::null();
+    let chat: ChatAddress = "group:null-chat:room".parse().unwrap();
+    assert_eq!(
+        io.chat().get("null-chat").unwrap().state(),
+        PortState::Disconnected
+    );
+    let (sink, _) = mpsc::channel(1);
+    assert_eq!(
+        io.chat()
+            .get("null-chat")
+            .unwrap()
+            .attach(sink)
+            .err()
+            .unwrap()
+            .code,
+        "chat_port_unavailable"
+    );
+    assert_eq!(io.model().manifest().kind, PortKind::Model);
+    assert_eq!(io.memory().manifest().kind, PortKind::Memory);
+    assert_eq!(io.external().manifest().kind, PortKind::External);
+    assert_eq!(io.persona().manifest().kind, PortKind::Persona);
+    assert_eq!(io.db().store().err().unwrap().code, "db_port_unavailable");
+    assert_eq!(
+        io.chat()
+            .deliver(Command::Health {
+                port: "null-chat".into()
+            })
+            .await,
+        PortReply::Failed {
+            code: "chat_port_unavailable".into(),
+            uncertain: false
+        }
+    );
+    let payload = serde_json::json!({});
+    assert_eq!(
+        io.model()
+            .complete(ModelRequest {
+                instance: "null-model",
+                system: "",
+                payload: &payload,
+                format: OutputFormat::Json,
+                max_tokens: 1,
+            })
+            .await,
+        PortReply::Failed {
+            code: "model_port_unavailable".into(),
+            uncertain: false
+        }
+    );
+    assert_eq!(
+        io.memory()
+            .retrieve(RetrievalQuery {
+                chat: chat.clone(),
+                subject: MemorySubject::Group,
+                layers: vec![MemoryLayer::ShortTerm],
+                limit: 1,
+            })
+            .await,
+        PortReply::Failed {
+            code: "memory_port_unavailable".into(),
+            uncertain: false
+        }
+    );
+    assert_eq!(
+        io.external()
+            .fetch(FetchRequest {
+                source: "https://example.invalid".into(),
+                timeout_ms: 1,
+                max_bytes: 1,
+                max_redirects: 0,
+            })
+            .await,
+        PortReply::Failed {
+            code: "external_port_unavailable".into(),
+            uncertain: false
+        }
+    );
+    assert_eq!(
+        io.persona().load(&chat).await,
+        PortReply::Failed {
+            code: "persona_port_unavailable".into(),
+            uncertain: false
+        }
+    );
+    assert_eq!(
+        io.chat()
+            .deliver(Command::Health {
+                port: "absent".into()
+            })
+            .await,
+        PortReply::Failed {
+            code: "unknown_port".into(),
+            uncertain: false
+        }
+    );
+}
+
+#[test]
+fn composition_rejects_missing_required_faces() {
+    // Availability: P1 composition requires chat + model + memory + one DB.
+    let registry = PortRegistry::new(Arc::new(TestDb(Mutex::new(()))));
+    assert_eq!(
+        Io::compose(registry, "model", "memory", None, None)
+            .err()
+            .unwrap()
+            .code,
+        "missing_chat_port"
+    );
+    let mut registry = PortRegistry::new(Arc::new(TestDb(Mutex::new(()))));
+    registry
+        .register_chat(Arc::new(TestChat::new("qq")))
+        .unwrap();
+    assert_eq!(
+        Io::compose(registry, "model", "memory", None, None)
+            .err()
+            .unwrap()
+            .code,
+        "missing_model_port"
+    );
 }

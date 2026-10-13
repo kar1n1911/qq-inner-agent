@@ -10,7 +10,7 @@ pub trait ChatPort: Send + Sync {
     fn capabilities(&self) -> Capabilities;
     fn state(&self) -> PortState;
     fn deliver<'a>(&'a self, command: Command) -> BoxFuture<'a, PortReply<CommandResult>>;
-    fn attach(&self, sink: mpsc::Sender<Incoming>);
+    fn attach(&self, sink: mpsc::Sender<Incoming>) -> Result<(), IoError>;
 }
 
 pub trait ModelPort: Send + Sync {
