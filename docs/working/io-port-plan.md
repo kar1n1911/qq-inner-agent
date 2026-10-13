@@ -94,7 +94,7 @@ rust/src/engine/io/                 ← I/O 系统唯一所在（零依赖叶子
     null.rs         ← 零 I/O 空实现（测试 / dry-run）
 ```
 
-`Engine` 字段从 `transport + provider + store` 收敛为 `io: Arc<Io>`。
+`Engine` 字段从 `transport + provider + store` 收敛为 `io: Arc<Io>`；`Io` 的最终形状以 §6.1 的端口组为准，§5.0 不再给出相互矛盾的单实例结构。
 
 **每个面是「端口组 + 路由」，不是一个端口** —— 通讯面会同时跑 OneBot / 微信 / TG / Discord，详见 §6。
 
@@ -106,20 +106,7 @@ rust/src/engine/io/                 ← I/O 系统唯一所在（零依赖叶子
 
 ### 5.0 聚合入口
 
-```rust
-pub struct Io {
-    chat:     Arc<dyn ChatPort>,
-    model:    Arc<dyn ModelPort>,
-    db:       Arc<dyn DbPort>,
-    memory:   Arc<dyn MemoryPort>,
-    external: Arc<dyn ExternalPort>,
-    persona:  Arc<dyn PersonaPort>,
-}
-impl Io {
-    pub fn chat(&self) -> &dyn ChatPort { … }
-    // … 其余同形
-}
-```
+`Io` 是六面聚合入口，最终字段类型、实例基数及路由策略见 §6.1–6.2。P1 可先注册每面一个实例，但公共访问入口仍暴露路由器，不能把 `&dyn ChatPort` 的单实例形状固化为引擎契约。六面的中立类型、trait、注册表和路由只在 `rust/src/engine/io/` 定义；适配器不得另建同名公共契约。
 
 ### 5.1 通用端口契约（所有端口共用）
 
@@ -133,13 +120,15 @@ pub struct PortManifest {
     pub host_permissions: Vec<HostPermission>, // http / spawn / fs_read / none
 }
 
-pub enum PortReply {
-    Ok(CommandResult),
+pub enum PortReply<T> {
+    Ok(T),
     Unsupported { capability: Capability },   // 一等公民：内核必须降级
-    Degraded { result: CommandResult, missing: Vec<Capability> },
+    Degraded { result: T, missing: Vec<Capability> },
     Failed { code: String, uncertain: bool }, // uncertain 保留"不确定不重试"语义
 }
 ```
+
+P0 必须把 `CommandResult` 与 `PortReply<T>` 的层次定死：前者只承载**成功**的通讯结果（见 §12）；`PortReply<T>` 给各可替换面承载本次能力变化与失败，通讯面的 `T=CommandResult`，记忆读取的 `T=Vec<MemoryHit>`，依此类推。`DbPort` 的本地锁句柄是过渡例外。不得在两层重复定义失败态。`Degraded.result` 是已取得的成功结果，`missing` 是本次缺失的能力；没有可用结果时用 `Unsupported` 或 `Failed`。`uncertain` 只描述外部副作用结果未知（尤其发送），不表示普通查询失败。
 
 **三条通用不变量**：
 1. **能力状态随每次响应返回**，不是只在启动时查一次 —— 后端会在运行中降级（依据：A_memorix 的 `SearchMemoryResponse` 带 `degraded` / `available_channels` / `unavailable_channels`，属收敛设计）。
@@ -153,7 +142,7 @@ pub trait ChatPort: Send + Sync {
     fn manifest(&self) -> &PortManifest;
     fn capabilities(&self) -> Capabilities;
     fn state(&self) -> PortState;                                  // 连通 / 在线
-    fn deliver<'a>(&'a self, cmd: Command) -> BoxFuture<'a, PortReply>;   // 出站
+    fn deliver<'a>(&'a self, cmd: Command) -> BoxFuture<'a, PortReply<CommandResult>>;   // 出站/查询
     fn attach(&self, sink: mpsc::Sender<Incoming>);                       // 入站
 }
 
@@ -165,17 +154,19 @@ pub struct Capabilities {
 }
 ```
 
-指令集与段模型直接采用 [`PLUGIN-PORTS.md`](../PLUGIN-PORTS.md) §3.1–3.2（`Incoming` / `Sender` / `Segment` / `MediaSrc` / `Command` / `CommandResult`），**不重造**。
+指令集与段模型以 [`PLUGIN-PORTS.md`](../PLUGIN-PORTS.md) §3.1–3.2 为语义起点；其旧 `Incoming`、`CommandResult` 示例**不是可直接复制的最终签名**，由本文 §12 的 P0 契约补足身份、时间、查询结果和错误层次。P0 收敛成一套定义，不保留两套并行类型。
 
 **不变量（可测）**：
 
 | # | 不变量 | 现在违反在哪 |
 |---|---|---|
-| C-1 | **chat / message id 是不透明字符串**：负数、超长均由适配器判定，内核不解析 | `send_media` 要求 `parse::<u64>()`、`send_targeted` 要求首字符 `1-9`（`transport/mod.rs:194-200, 230-236`） |
+| C-1 | **协议 chat id / message_id 是不透明字符串**：负数、超长由适配器判定；内核只解析自己的 `kind:<port>:<id>` 地址信封 | `send_media` 要求 `parse::<u64>()`、`send_targeted` 要求首字符 `1-9`（`transport/mod.rs:194-200, 230-236`） |
 | C-2 | **段顺序由内核给定，适配器不得重排** | 现在固定 `[reply][at][text][face]` 写在端口层，需保持 |
 | C-3 | **模型输出永不成为段**：适配器只接受类型化 `Segment` | 现已满足，搬家时不得退化 |
 | C-4 | `Unsupported` 必须可返回，且内核每个使用点都必须能降级 | 现在无此概念，`resolve_forwards` 等功能缺失即整段不可用 |
 | C-5 | `uncertain` 语义在适配器与内核两端都不得丢 | 现已满足 |
+| C-6 | 入站 `message_id` 仅作协议字段；存储分配内部单调 `message_key`，回填、引用、去重、审计均不得把协议 ID 当内部主键 | `messages.message_key`、`store/identity.rs` 已落地 |
+| C-7 | 入站 `ts` 是协议服务器时间；`received_at` 是本机实际接收时刻，回填与实时消息均不能用接收时刻改写 `ts` | `messages.ts` / `received_at` 已分列 |
 
 **契约测试**：`FakeChatPort` 分别构造 `history=false`（断言内核关回填、学习门控改只看实时）、负数 id、`Unsupported{profile}`、`uncertain` 发送 —— 四条都必须**降级而非报错**。
 
@@ -185,8 +176,8 @@ pub struct Capabilities {
 pub trait ModelPort: Send + Sync {
     fn manifest(&self) -> &PortManifest;
     fn capabilities(&self) -> ModelCapabilities;   // json_mode / thinking_field / truncation_signal / list_models
-    fn complete<'a>(&'a self, req: ModelRequest) -> BoxFuture<'a, Result<ModelReply, ModelError>>;
-    fn list_models<'a>(&'a self) -> BoxFuture<'a, Result<Vec<String>, ModelError>>;
+    fn complete<'a>(&'a self, req: ModelRequest<'a>) -> BoxFuture<'a, PortReply<ModelReply>>;
+    fn list_models<'a>(&'a self) -> BoxFuture<'a, PortReply<Vec<String>>>;
 }
 
 pub struct ModelRequest<'a> {
@@ -217,7 +208,7 @@ pub trait DbPort: Send + Sync {
 }
 ```
 
-覆盖表：`messages` `deliveries` `send_assessments` `expectations` `handled` `decisions` `calls` `group_hours` `group_orientation` `activity_rhythm` `decoration_usage` `media_*`(9) `humanize_*` `identity_*`。
+覆盖表：`messages` `deliveries` `outbound_message_facts` `message_identity_audit` `send_assessments` `expectations` `handled` `decisions` `calls` `group_hours` `group_orientation` `activity_rhythm` `decoration_usage` `media_*`（现有 **11 张**）`humanize_*` `identity_*`。其中 `outbound_message_facts` 的 `(chat,id)`、`message_identity_audit.chat`、媒体双地址字段都要进入 P2c 的迁移清单；审计记录不可因无法解析旧地址而静默丢弃。
 
 **为什么只统一句柄、不统一 SQL**：这 ~120 个点是**我方私有的事务型数据**，没有第二个实现者；把它们搬进一个"仓库"只会得到一个巨大的 god object，并破坏 `store/` 现有分层。**只有出现第二个真实后端时才值得抽象。**
 
@@ -231,10 +222,10 @@ pub trait DbPort: Send + Sync {
 ```rust
 pub trait MemoryPort: Send + Sync {
     fn manifest(&self) -> &PortManifest;
-    fn upsert<'a>(&'a self, entry: MemoryEntry) -> BoxFuture<'a, Result<(), IoError>>;
-    fn forget<'a>(&'a self, key: &'a MemoryKey) -> BoxFuture<'a, Result<(), IoError>>;
-    fn retrieve<'a>(&'a self, q: RetrievalQuery) -> BoxFuture<'a, Result<Vec<MemoryHit>, IoError>>;
-    fn reset<'a>(&'a self, scope: MemoryScope) -> BoxFuture<'a, Result<(), IoError>>;
+    fn upsert<'a>(&'a self, entry: MemoryEntry) -> BoxFuture<'a, PortReply<()>>;
+    fn forget<'a>(&'a self, key: &'a MemoryKey) -> BoxFuture<'a, PortReply<()>>;
+    fn retrieve<'a>(&'a self, q: RetrievalQuery) -> BoxFuture<'a, PortReply<Vec<MemoryHit>>>;
+    fn reset<'a>(&'a self, scope: MemoryScope) -> BoxFuture<'a, PortReply<()>>;
 }
 
 pub struct MemoryKey {
@@ -246,7 +237,7 @@ pub struct MemoryKey {
 pub struct MemoryEntry {
     pub key: MemoryKey,
     pub text: String,
-    pub sources: Vec<Evidence>,     // 真实消息 id + ts
+    pub sources: Vec<Evidence>,     // 内部 message_key + 协议 message_id + 服务器 ts；完整定义见 §12
     pub confidence: f64, pub importance: f64,
     pub expires: Option<f64>, pub keywords: Vec<String>,
 }
@@ -277,15 +268,16 @@ pub struct MemoryHit {
 ```rust
 pub trait ExternalPort: Send + Sync {
     fn manifest(&self) -> &PortManifest;
-    fn fetch<'a>(&'a self, req: FetchRequest) -> BoxFuture<'a, Result<Vec<FeedItem>, IoError>>;
-    fn read_bytes<'a>(&'a self, src: MediaSrc, limit: u64) -> BoxFuture<'a, Result<Vec<u8>, IoError>>;
-    fn ocr<'a>(&'a self, bytes: Vec<u8>) -> BoxFuture<'a, Result<String, IoError>>;
+    fn fetch<'a>(&'a self, req: FetchRequest) -> BoxFuture<'a, PortReply<Vec<FeedItem>>>;
+    fn read_bytes<'a>(&'a self, src: MediaSrc, limit: u64) -> BoxFuture<'a, PortReply<Vec<u8>>>;
+    fn ocr<'a>(&'a self, bytes: Vec<u8>) -> BoxFuture<'a, PortReply<String>>;
 }
 ```
 
 **不变量**：
 - **跳转策略统一**：现在 provider 显式 `.redirects(0)`（`provider_transport.rs:169-177`），而 `media::read_image`（`media/mod.rs:442-446`）与 `topic::fetch`（`topic/mod.rs:321-324`）沿用 ureq 默认 5 跳 → 三种客户端三种答案（[`audit-io.md`](audit-io.md) S1）。
 - **外部抓取/下载不得跨事务、跨 `core` 锁**：现在媒体下载发生在 `store.immediate()` 事务**与** `core` 锁内（[`audit-io.md`](audit-io.md) IO-08）—— 而同一仓库对 OCR 已明文要求"绝不持有数据库互斥锁"（`MEDIA.md:125`）。搬家时按 OCR 的正确写法统一。
+- **转发展开有界且不占主事件循环**：IO-07 是 ChatPort 查询/入站调度的问题，不是 `ExternalPort::fetch` 可单独修复的；P6 与通讯面协作，按每事件展开次数/耗时设上限，将网络等待移出主循环，完成后再按原入站顺序交给内核。不能只把 `get_forward_msg` 搬到适配器。
 - 预算独立于模型面。
 
 ### 5.7 `PersonaPort` —— 人设面（**只读来源，第一类**）
@@ -294,7 +286,7 @@ pub trait ExternalPort: Send + Sync {
 pub trait PersonaPort: Send + Sync {
     fn manifest(&self) -> &PortManifest;
     /// 只产出【声明式人设数据】。
-    fn load<'a>(&'a self, chat: &'a str) -> BoxFuture<'a, Result<PersonaSource, IoError>>;
+    fn load<'a>(&'a self, chat: &'a str) -> BoxFuture<'a, PortReply<PersonaSource>>;
 }
 
 pub struct PersonaSource {
@@ -327,7 +319,7 @@ pub struct PersonaSource {
 
 | 冲突 | 具体后果 | 代码位置 |
 |---|---|---|
-| **地址歧义** | QQ 群 `123` 与 TG 会话 `123` 在 `PRIMARY KEY(chat,id)` 上**互相覆盖** | `store/schema.sql:3` |
+| **地址歧义** | QQ 群 `123` 与 TG 会话 `123` 在以 `chat` 为键的表中互相覆盖；`messages` 现由内部 `message_key` 作主键，仍须隔离查询、去重和关联键 | `store/schema.sql:4,13-18` |
 | **路由不可判** | 引擎要发消息时无法知道走哪个端口 | — |
 | **能力串味** | 全局 `Capabilities` 会让 TG 的 `history=false` 施加到 QQ，或让 QQ 的 `group_card` 被 TG 用上 | §5.2 |
 | **身份串味** | 四个账号共用一份冷却与原值备份 | `persona/mod.rs:67` `CHECK(id=1)` |
@@ -368,11 +360,11 @@ pub struct Io {
 group:qq:663614559      private:tg:123456789      group:dc:987654321
 ```
 
-**为什么端口放第二段，而不是最前或最后**：全仓有 **35 处**非测试代码用 `starts_with("group:")` / `strip_prefix("group:")` 判类型（`memory/sharing.rs:28`、`persona/humanize.rs:31`、`persona/affect.rs:309`、`engine/orientation.rs:208` …）。端口放中间，**这 35 处类型判断全部继续有效**；只有需要"原始协议 id"的地方要再切一刀（如 `transport/mod.rs:231` 的 `parse::<u64>()`），这类约 **10 处**。放最前或最后都会一次性打断全部 35 处。
+**为什么端口放第二段**：审计到 **31 处**非测试代码字面使用 `group:` / `private:` 前缀；放中间可保留单纯判别种类的调用点，但不能断言这 31 处**全部**不变：逐处区分“仅判种类”和“顺便解析/构造地址”。需复核的解析、构造及协议 ID 使用点**至少 18 处**，含 `transport/mod.rs` 的发送路径；必须逐处列出旧输入、预期新输入、约束及错误码。前缀存在不等于原始协议 ID 已正确拆出。
 
 **不采用"只有一个端口时不加前缀"**：条件格式会制造两种数据形状，是歧义 bug 的温床。要么全加，要么全不加。
 
-**迁移成本**：一次性把既有行的 `chat` 由 `group:X` 改写为 `group:qq:X`（`qq` 为配置的默认端口名），涉及约 15 张表的主键/索引。机械 `UPDATE`，但**必须与 §5.5 的 `external_id` 确定性一起做**，否则键空间中途不一致。
+**迁移成本**：实测有 **33 张直接含 `chat` 字段的持久表**，另有 **2 张双地址媒体表**（源/目的 chat 均须迁移）。不能仅按 15 张表做机械 `UPDATE`：须逐表清点键、索引、外键、JSON 内地址、嵌入式来源、缓存与回填游标；特别核对 `outbound_message_facts`、`message_identity_audit`、链接共享及媒体跨 chat 关系。`group:X` → `group:qq:X` 的既有数据迁移必须保持 `message_key` 不变、`message_id` 不变、`ts` 与 `received_at` 各自不变。§5.5 的确定性 `external_id` 是同一键空间变更：**在 P2c 的单次迁移中一并重算/建立映射**，P5 只接入已迁好的语义，不能到 P5 再改一次地址键。**这是 schema/数据迁移，只能走现有 `./agent update full`（备份、排空、迁移、失败恢复）；`apply` 会拒绝 schema 变更。**
 
 ### 6.4 端口维度的传递与路由
 
@@ -380,6 +372,7 @@ group:qq:663614559      private:tg:123456789      group:dc:987654321
 - `Command.chat` 已含端口 → 路由直接读第二段。
 - 未注册端口 → `Failed { code: "unknown_port" }`。
 - 路由依据是**消息来源**，不是能力匹配：回复必须走它来的那个端口。
+- 无 chat 的账号级指令（登录资料、好友/群列表、资料/头像修改、健康探测）必须显式携带目标端口或绑定到来源端口；多实例时禁止静默选第一个。
 
 ### 6.5 能力必须按端口查询
 
@@ -398,10 +391,14 @@ fn capabilities_for(&self, chat: &str) -> Capabilities;
 |---|---|---|
 | `identity_state` 单行账号级 | `persona/mod.rs:67` `CHECK(id=1)` | 按端口（每账号一份冷却与备份） |
 | `activity_rhythm` 单行全局 | `store/schema.sql:32-34` `CHECK(id=1)` | 按端口（不同人群/时区） |
-| `calls` 无端口维度 | `store/schema.sql:8` | 加端口维度（模型预算隔离） |
-| 单连接任务 | `main.rs:224` | 一组任务，独立重连，**故障不连坐** |
+| `calls` 无模型来源维度 | `store/schema.sql:14` | 按**模型端口/实例**隔离预算，不用通讯端口名冒充模型键 |
+| 单连接任务 | `main.rs` 的 OneBot 连接任务 | 一组任务，独立重连，**故障不连坐** |
 | 单一 `self_id` | `transport.state().self_id` | 每端口各自账号 |
 | 扁平 `allowedGroups` | `agent.allowed_groups` | 端口前缀化后天然唯一（`group:qq:123`） |
+| 扁平 `allowedUsers`、主人/忽略名单与账号级命令路由 | 配置、控制端及 `engine` 的账号判断 | 显式端口与账号作用域；旧值迁移时绑定默认 `qq`，不得跨端口授权 |
+| 账号缓存与资料刷新 | `engine/self_identity.rs`、`persona/mod.rs` | 缓存键包括端口与账号；失联/重连不污染其他端口 |
+| 回填任务、控制端收发与调试目标 | `engine/backfill.rs`、`control.rs` | 各任务/命令携带端口，按来源路由并隔离可见状态 |
+| 链接共享及媒体跨 chat 关系 | `topic/relay/links.rs`、`store/media.sql` 等 | 源/目的 chat 均带端口，默认不跨协议共享 |
 
 ### 6.7 新增红线：跨协议不共享
 
@@ -559,7 +556,7 @@ pub trait HostIo: Send + Sync {
 }
 ```
 
-适配器**不持有** `Io`，只持有 `HostIo`；出站消息只能通过 `Command` 回流内核（由内核决定发不发）；权限按 `PortManifest.host_permissions` 授权（P-3：只给能力面，不定通道实现）。
+适配器**不持有** `Io`，只持有 `HostIo`；出站消息只能通过 `Command` 回流内核（由内核决定发不发）；权限按 `PortManifest.host_permissions` 授权（P-3：只给能力面，不定通道实现）。**权限判定放在宿主实现，不信任适配器自报**；注册时验证 manifest 与宿主授予集合，逐次调用再验证目标地址/文件路径/可执行程序及资源上限。`HostIo::log` 也须脱敏和限量。P9 必须证明未授权能力无法通过侧门取得，不能只证明 manifest 能被解析。
 
 ---
 
@@ -569,32 +566,33 @@ pub trait HostIo: Send + Sync {
 
 | 步 | 动作 | 风险 | 验收 |
 |---|---|---|---|
-| **P0** | 定契约（§12 清单）+ 两层测试方案 + P-5 的 CI 断言 | 零 | 断言能拦住反向依赖 |
+| **P0** | 定契约（§12 清单）+ 两层测试方案 + P-5 的 CI 断言 | **高（规格错误会传播全阶段）** | 静态契约表与假协议的编译期/行为拒绝项均明确 |
 | **P1** | 新增 `io/`（类型 + trait + registry 骨架 + `null.rs`），**不接线** | 零 | 编译过，旧测试全绿 |
 | **P2** | 通讯面搬家：`transport/mod.rs` → `adapters/onebot.rs`，旧路径留 **re-export shim** | 低 | `onebot_mock` 逐字等价 |
-| **P2b** | **通讯面多实例**：`ChatRouter` + `capabilities_for(chat)`（§6.1/6.5）+ `Incoming.port`；单端口时不改变行为 | 中 | 双假端口：来源路由、能力互不串味 |
-| **P2c** | **地址端口化**：`chat` 改为 `kind:<port>:<id>`（§6.3）+ 一次性数据迁移；约 35 处类型判断不改、约 10 处取原始 id 的地方要切第二刀 | **高** | 迁移前后同一端口行为逐字等价 |
+| **P2b** | **通讯面多实例的纯结构准备**：`ChatRouter` + `capabilities_for(chat)`（§6.1/6.5）+ `Incoming.port`；P2c 前只注册/运行一个通讯端口 | **高：若提前接第二端口会污染地址与状态** | 两假端口离线测来源路由；生产单端口等价 |
+| **P2c** | **地址端口化**：`chat` 改为 `kind:<port>:<id>`（§6.3）+ 一次性 schema/数据迁移；31 处字面前缀调用逐项分类、至少 18 处解析/构造/协议 ID 点逐项复核；33 张直接含 `chat` 的表 + 2 张双地址媒体表逐表登记 | **高** | `full` 迁移/回滚；身份、时间与多端口隔离目标测试 |
 | **P3** | **能力动态化**：`Capabilities` 消费点接进内核（回填 / 身份外显 / @引用 / 转发 / id 校验） | 中 | 测试替身：`history=false` 降级不报错 |
 | **P4** | 模型面搬家 + 修 M-1…M-4 | 中 | 10 项传输测试 + parity |
-| **P5** | 数据面拆分：`DbPort`（SQL 原地）+ `MemoryPort` + SQLite 语义实现；**先修 `external_id` 确定性** | 高 | Mem-1 / Mem-2 两条契约测试 |
-| **P5b** | **每端口单例**：`identity_state` / `activity_rhythm` / `calls` 加端口维度；连接任务改为每端口一个、故障不连坐（§6.6） | 中 | 双端口：身份冷却与作息互不影响 |
-| **P6** | 外部内容面搬家 + 统一跳转策略 + 下载移出事务/锁 | 中 | topic / media / OCR 套件 |
-| **P7** | 入口收敛：删 `transport/`，8 个裸 `call("…")` → 类型化 `Command`；`main.rs` / `control.rs` 切到 `Io` | 中 | clippy `-D warnings` + 全量 |
+| **P5** | 数据面拆分：`DbPort`（SQL 原地）+ `MemoryPort` + SQLite 语义实现；接入 P2c 已迁好的确定性 `external_id`，核对 `message_key` 证据及跨端口隔离 | **高：记忆往返、删除、共享可能不一致** | Mem-1 / Mem-2 + 证据键往返、跨端口隔离 |
+| **P5b** | **每端口单例**：§6.6 全清单（身份、节律、预算、账号缓存、名单、回填、链接共享、控制路由）逐项加端口维度；连接任务每端口一个 | **高：授权或账号状态串味** | 双端口：身份冷却、作息、控制与名单互不影响 |
+| **P6** | 外部内容面搬家 + 统一跳转策略 + IO-07 展开有界/不阻塞主循环 + IO-08 下载移出事务和 `core` 锁 | **高：阻塞与锁范围是独立缺陷** | 展开次数上限、主循环继续处理、网络期间事务与 `core` 锁均未持有 |
+| **P7** | 入口收敛：删 `transport/`，8 个裸 `call("…")` → 类型化 `Command`；`main.rs` / `control.rs`、账号级命令与调试收发切到 `Io` | **高：控制命令可能选错账号** | clippy `-D warnings` + 全量 + 双端口控制路由 |
 | **P8** | 人设面：`PersonaPort` + 组装顺序硬边界（§7.3） | 中 | 断言：卡内容不出现在基座区 |
-| **P9** | 一致性测试套件 + `HostIo` 权限面 + 注册表（**不加载任何真实插件**） | 中 | §11 |
+| **P9** | 一致性测试套件 + `HostIo` 权限面 + 注册表（**不加载任何真实插件**） | **高：宿主权限直接决定插件可触及的副作用** | §11 + 未授权 HTTP/文件/进程/发送的拒绝测试 |
 
 **排序理由**：
 - P3 必须**早于**任何第二协议实现 —— 先有抽象再生降级，等于用没被验证的抽象去接第二个协议。
 - **P2b/P2c 必须先于第二个通讯适配器**：不先把"地址带端口"和"能力按端口查"做掉，第二个协议一接进来就会污染第一个。这也是"多协议并列"能成立的前提。
-- P2c 是**全计划最高风险的迁移**（动约 15 张表的键空间）；它必须与 P5 的 `external_id` 确定性**协调**，否则键空间中途不一致。建议 P2c 单独排期、独立回滚。
-- P5 的"先修 `external_id`"是前置项，不是细节。
+- P2c 是高风险迁移（33 张直接含 `chat` 的表、2 张双地址媒体表），但**不是唯一最高风险**；只能在 `full` 的备份/排空/回滚链路执行，不能使用 `apply`。确定性 `external_id` 在 P2c 同一迁移中完成，P5 验证和消费，避免按旧键写入后再次重写。
+
+**危险点及排序修正**：P2b 若先于 P2c 放行第二端口，同名地址、共享状态与权限先被污染，事后迁移无法可靠区分来源，故两者之间设生产接线闸。P5 的记忆单写者/读合并/删除及 `Evidence` 键空间不一致，会造成跨群泄漏或不可逆遗忘，列高风险。P6 承诺顺带修 IO-07/08，但仅“搬家”不能界定转发展开次数、主循环等待及下载时的事务/`core` 锁边界，列高风险并加显式验收。P9 的 `HostIo` 若权限校验在适配器一侧或注册表漏校验，插件可绕过内核发送、读文件、起进程，列高风险。P7 的账号级控制路由同样不能仅以全量测试通过视为安全。
 
 ---
 
-## 11. 验收方式：不做例子，怎么证明抽象成立
+## 11. 验收方式：用异形假协议证伪抽象
 
 1. **基线等价**：OneBot 与 SQLite 搬到端口后行为**逐字不变**（现有套件全绿）。
-2. **契约测试（conformance）** —— 与实现无关，任何端口实现都得过。用测试替身压分歧路径：
+2. **契约测试（conformance）** —— 与实现无关，任何端口实现都得过。以下替身只验证局部分支，**不能单独证明六面可替换**：
 
 | 替身 | 断言 |
 |---|---|
@@ -605,15 +603,28 @@ pub trait HostIo: Send + Sync {
 | `FakeMemoryPort` 对 `Group` 查询返回 `person:` 级行 | 内核**回读过滤**守住 §15.4 |
 | `FakeMemoryPort` 返回 `Degraded` | 内核降级不崩溃 |
 | `FakeMemoryPort` 往返 | Mem-1 / Mem-2 成立 |
-| `FakeModelPort` 无凭据 | 请求照发（M-1 已修） |
-| `FakePersonaPort` 带 `system_prompt` 字段 | 该字段**不进入任何 prompt 区**（§7.3） |
+| `FakeModelPort` 无凭据 | P4 完成后请求照发（验证 M-1） |
+| `FakePersonaPort` 的源文件带 `system_prompt` 字段 | 运行时 `PersonaSource` 不承载该字段；导入时的人为采纳只进人设区，不进基座区（§7.3） |
 | **两个 `FakeChatPort` 同时注册** | 回复走**消息来源**的端口；未注册端口 → `unknown_port` |
 | **两个 `FakeChatPort` 能力不同**（一个有 `group_card`、一个 `history=false`） | 能力**互不串味**：各自按自己的 `capabilities_for(chat)` 降级 |
 | **两个端口的同名 id**（`group:qq:123` 与 `group:tg:123`） | 在 `messages` 里互不覆盖 |
 | **两个端口的群**（QQ 群 + TG 群） | 跨群共享 `overlap = 0`（§6.7 红线，**必须有目标测试**） |
 | **一个端口断线** | 其它端口照常收发（故障不连坐） |
 
-3. **能力包络清单** —— 把例子转成"架构必须能表达"的核对表，逐条证明契约能表达，但不实现（P-2）：
+3. **必须再做一个贯穿六面的“异形假协议”目标测试**，以同一未修改的引擎决策路径完成“入站 → 记忆读取/写入 → 模型请求 → 外部内容/人设读取 → 出站 → 持久化/回读”。它不是 Telegram/Ollama 等真实适配器，也不得用 OneBot JSON 伪装。其最小性质与反证条件如下：
+
+| 异形性质 | 必须观察到；否则抽象失败 |
+|---|---|
+| 地址采用 `room:…` 一类**非数字、含分隔符**的原始 ID；中立信封仍用 `group:odd:<opaque>`，另端口有相同原始 ID | 无 `u64`/QQ 首位规则泄入内核；来源端口路由正确，同名 ID 在库及回填中隔离 |
+| 入站原文不是 OneBot 的 `post_type/message/data` 形状；段含未知类型、非 QQ 提及和惰性转发 | 内核只消费中立段；未知段保留且不执行；展开按能力和上限受控，不阻塞主循环 |
+| 两条事件复用相同协议 `message_id`，服务器 `ts` 与本机 `received_at` 不同且先后可逆 | `message_key` 唯一且单调；协议 ID 原样留存；`ts` 和 `received_at` 不互相代替；证据/引用以 `message_key` 定位 |
+| 协议缺历史、群名片和头像，运行中能力又降级一次；发送返回一次 `uncertain` | 仅对应功能退化，其他端口继续；不重发不确定发送；账本状态与现有语义一致 |
+| 模型端无凭据、端点非 `/chat/completions`/`/messages`；记忆端用非 SQLite 自增键，回传乱序/跨 scope 命中 | 模型可请求且预算隔离；记忆 key 往返和按 key 删除成立；内核过滤越界命中，跨端口不共享 |
+| 外部端返回跳转/慢响应；人设端提供不可信卡内容；`HostIo` 拒绝未声明权限 | 跳转和锁边界一致；卡不覆盖基座；未授权 HTTP、文件、进程及绕过内核发送均被拒绝 |
+
+测试必须记录每一面是否真正被替换、被内核消费的中立值、最后的发送目标及持久化行。**任一面只能靠改 `Engine`、解析协议原文或新增 QQ 特判才能通过，即为六面可替换主张的反例**。P1 的空实现、P2b 的双假端口和单面 conformance 仍保留，完整目标测试在 P9 收口；在此之前不能宣称总体抽象已验证。
+
+4. **能力包络清单** —— 把例子转成"架构必须能表达"的核对表，逐条证明契约能表达，但不实现（P-2）：
 
 | 包络条目 | 由什么承载 | 状态 |
 |---|---|---|
@@ -623,7 +634,7 @@ pub trait HostIo: Send + Sync {
 | 负数/非数字 chat id | id 校验下沉进端口 | 待 P2c/P7 |
 | **同面多协议并列**（QQ + 微信 + TG + Discord） | `ChatRouter` + 端口化地址 + `capabilities_for(chat)` | 待 P2b/P2c |
 | **跨协议不共享** | §6.7 红线（先比端口再算 overlap） | 待 P5b |
-| **每账号独立身份/节律** | §6.6 单例拆分 | 待 P5b |
+| **每账号独立身份/节律** | §6.6 单例拆分；模型预算另按模型实例隔离 | 待 P5b |
 | 远程记忆后端 | `MemoryPort` + `HostIo` + 可序列化类型 | 待 P5/P9 |
 | 键空间往返无损 | Mem-1 | 待 P5 |
 | 人设来自外部卡 | `PersonaPort.load` | 待 P8 |
@@ -634,15 +645,33 @@ pub trait HostIo: Send + Sync {
 
 ## 12. P0–P2 可执行清单（建议批准范围）
 
-### P0 —— 契约与纪律（零代码风险）
+### P0 —— 契约与纪律（规格风险高，尚无运行时改动）
 
 - [ ] `types.rs` 落地：`Incoming` / `Sender` / `Segment` / `MediaSrc` / `Command` / `CommandResult` / `Capabilities` / `PortState` / `PortManifest` / `PortReply` / `MemoryKey` / `MemorySubject` / `MemoryLayer` / `MemoryEntry` / `MemoryHit` / `Evidence` / `PersonaSource` / `IoError`
-  - 硬要求：**只用 `serde` / `futures`，不放闭包与 trait object 进数据**（为跨进程序列化留路）
+  - 硬要求：中立数据可用 `serde` 序列化；异步签名可用 `futures`，数据内不放闭包、锁守卫、连接句柄或 trait object。`DbPort::store()` 是明确的**进程内过渡例外**，不宣称可跨进程序列化。
 - [ ] `ports.rs` 落地 6 个 trait 签名（§5）
 - [ ] **P-5 CI 断言**：`engine/io/**` 不得出现 `use crate::engine::{Engine, policy, cycle}` 等
 - [ ] **两层测试方案**（先写方案再写代码）：
   - 可用性层：每个端口的输入/输出正确、边界、失败路径
   - 目标层：**每步的目标测试都要注明设计依据**（哪份文档哪一行），使设计变更时测试会变红
+
+#### P0 必须冻结的类型和 trait 语义
+
+| 类型 / 方法 | 必填契约；实现者不得自行猜测 |
+|---|---|
+| `ChatAddress` | 中立信封为 `kind:<port>:<opaque-id>`，`kind ∈ {group,private}`；只拆前两个分隔符，余下原样作为协议 ID（允许冒号、前导零、负号、非数字）。`port` 为注册表唯一实例名，空段/未知端口在路由层拒绝；是否允许某种协议 ID 由对应适配器决定。P2c 之前旧 `kind:id` 只在迁移适配边界读取，不成为永久双格式。 |
+| `Incoming` | `port: String`、`chat: ChatAddress`、`message_id: String`（原始协议值）、`ts: f64`（服务器时间）、`received_at: f64`（本机接收时刻）、`self_id`、`sender`、`segments`、`self_message`、`raw`。适配器不得分配 `message_key`；存储层在接收/回填时分配内部单调键并返回。服务器时间缺失/无效时沿用现有拒收与异常记录语义，不能悄然令 `ts=received_at`。`raw` 仅供端口/审计，不供决策解析。 |
+| `Evidence` | `chat: ChatAddress`、`message_key: String` 为内部定位键；`message_id: Option<String>` 只作协议溯源，`ts: f64` 为服务器时间，`received_at: Option<f64>` 另列。无可解析内部键的旧证据需通过现有解析/审计路径处理，**不得**用原始 ID 冒充 `message_key`。`MemoryEntry.sources`、`MemoryHit.sources`、回填游标和引用解析必须按此往返。 |
+| `Command` 与查询结果 | 有 chat 的指令按 `ChatAddress` 路由；`LoginInfo` / `Health` / `FetchFriendList` / `FetchGroupList` / `SetProfile` / `SetAvatar` 等无 chat 的账号级指令必须显式带 `port`。`FetchHistory` 返回中立 `Incoming`/历史条目，成员、群资料、好友、群列表、账号资料各有类型化结果；不得以 `Items(Value)` 暗中透传 OneBot 原文。`Sent { message_id }` 仅是协议回执，内部 `message_key` 仍由存储层分配。 |
+| `CommandResult` / `PortReply<T>` / `IoError` | `CommandResult` 仅有成功的通讯结果（`Sent`、`History`、`Members`、`GroupInfo`、`Friends`、`Groups`、`LoginInfo`、`Health`、`Ok` 等）；泛型 `PortReply<T>` 独占 `Unsupported`、`Degraded`、`Failed { code, uncertain }`，其 `T` 是各方法的成功值。静态能力不足与运行时不支持都能走 `Unsupported`；运行时部分成功走 `Degraded`。错误码保留原值，`uncertain=true` 不自动重试/故障转移。内部失败用 `IoError`，在端口边界映射为保留错误码的 `Failed`。 |
+| `ChatPort` | `manifest` 的 `name` 与 `Incoming.port`、`ChatAddress.port` 相同；`attach` 入站后必须尊重背压和断线状态。`deliver` 接受类型化 `Command`，返回 `PortReply<CommandResult>`；查询可经 `deliver`，但类型化结果必须匹配命令。路由器先核对目标端口再调用适配器，不让适配器自行决定别的账号。 |
+| `ModelRequest` / `ModelReply` | 请求保留 `system`、结构化 `payload`、`format`、`max_tokens`，并显式指定模型实例/配置；`ModelReply.text` 保持原始文本。无凭据可请求本地端点，预算按模型实例记账；截断、空正文、非法 JSON、重试与错误码均沿用现有语义。`complete` 的 `ModelRequest<'a>` 生命周期与返回的 `BoxFuture<'a, …>` 对齐。 |
+| `RetrievalQuery` / `MemoryScope` | 查询至少包含 `chat: ChatAddress`、`subject: MemorySubject`、`layers: Vec<MemoryLayer>`、`limit`；scope 至少包含同一 `chat`、`subject` 与待重置层。缺省不得扩大到所有 chat/端口；无跨群授权时禁止跨 chat 命中。`MemoryKey` 四元组 `chat/subject/layer/slot` 往返、删除与幂等写入必须一致。 |
+| `FetchRequest` / `MediaSrc` / `PersonaSource` | 请求显式给定来源、超时/大小上限及允许的跳转策略，响应只含中立内容；媒体来源可为 URL/本地路径/不透明句柄，由适配器解析。人设只返回声明式 `name/description/personality/scenario/examples`；卡原文的 `system_prompt` 不成为运行时 `PersonaSource` 字段。 |
+| `PortManifest` / `HostPermission` / `PortState` | `name` 是唯一端口实例键，`kind` 属六面之一，`transport` 是运行方式声明，`core_api_version` 是兼容范围；`host_permissions` 默认空且按 HTTP 目标、可执行程序、文件路径及日志限额进一步收窄。`PortState` 至少区分可用、降级、断开；每次响应的能力状态可覆盖启动时声明。 |
+| 其余五面 | `DbPort` 仅统一当前 SQLite 句柄与事务边界；`MemoryPort` 保持按完整 key 寻址与回读过滤；`ExternalPort` 实施大小/跳转/超时上限；`PersonaPort` 不返回可覆盖系统基座的指令。路由/组合按 §6.2，任何未注册端口明确失败。 |
+
+**签名收敛规则**：§5 中的示意 Rust 签名若与本表冲突，以本表为 P0 最终语义，并在 P0 把签名改成同一套可编译定义；不得把冲突留到 P2。具体包括 `ModelRequest<'a>` 与现有 `BoxFuture` 所需的借用生命周期、`MemoryPort` 返回的降级信息、`DbPort` 的 `MutexGuard<Store>` 进程内例外，以及 `CommandResult`/`PortReply` 的重复失败态。P0 结束条件是这些类型和六个 trait 可编译、序列化边界明确、路由器能拒绝错误端口；**不是仅把名称列在清单上**。
 
 ### P1 —— 纯新增骨架（零行为变更）
 
@@ -651,7 +680,7 @@ pub trait HostIo: Send + Sync {
 - [ ] `router.rs` 落地 6 个端口组的组合策略（§6.2），先只支持"单实例"路径，多实例留桩
 - [ ] `null.rs` 实现全部端口：`deliver` 返回 `Unsupported`、`retrieve` 返回空、`complete` 返回 `Failed` —— 作为 dry-run 与测试基线
 
-### P2 —— 通讯面搬家（唯一行为敏感点）
+### P2 —— 通讯面搬家（本阶段行为敏感点）
 
 - [ ] `transport/mod.rs` → `engine/io/adapters/onebot.rs`，实现 `ChatPort`
 - [ ] `Incoming ↔ OneBot 事件`、`Command ↔ OneBot 动作` 双向映射
@@ -661,37 +690,55 @@ pub trait HostIo: Send + Sync {
 
 ### P2b —— 通讯面多实例（**新增，多协议并列的前提**）
 
-- [ ] `ChatRouter`：按 `Command.chat` 的端口段路由；未注册端口 → `unknown_port`
+- [ ] `ChatRouter`：按 `Command.chat` 的端口段路由；无 chat 的账号级命令必须显式指定端口；未注册端口 → `unknown_port`
 - [ ] `capabilities_for(chat)` 取代全局 `capabilities()`（§6.5）
 - [ ] `Incoming` 增加 `port` 字段（§6.4）
 - [ ] 双假端口契约测试：来源路由、能力互不串味（§11）
 - [ ] **单端口配置下行为逐字不变**（可先只注册一个端口）
+- [ ] **生产接线闸**：P2c 数据迁移与状态隔离验收完成前，运行配置必须拒绝第二个通讯端口；双假端口仅用于离线契约测试
 
-### P2c —— 地址端口化（**新增，全计划最高风险**）
+### P2c —— 地址端口化（**新增，高风险 schema/数据迁移**）
 
 - [ ] `chat` 由 `kind:<id>` 改为 `kind:<port>:<id>`（§6.3）
-- [ ] 一次性数据迁移（约 15 张表）；与 P5 的 `external_id` 确定性**协调排期**
-- [ ] **验收：迁移前后同一端口行为逐字等价**；约 10 处取原始协议 id 的地方改切第二刀，其余约 35 处类型判断不动
-- [ ] 建议**单独排期、独立回滚**
+- [ ] 建立逐表迁移矩阵：33 张直接含 `chat` 字段的持久表、2 张双地址媒体表；逐列记录主键/索引/外键/源与目的地址、JSON/缓存/审计/回填游标，并复核 11 张 `media_*` 表的实际覆盖范围；`outbound_message_facts`、`message_identity_audit` 必列
+- [ ] 把 31 处字面 `group:`/`private:` 前缀调用分为仅判类型与解析/构造两类；至少 18 处解析/构造/协议 ID 点逐处记录输入、输出、错误码，不能把 31 处一概视为无需修改
+- [ ] 同次迁移完成 §5.5 的确定性 `external_id` / 旧键映射，P5 不再二次改键；迁移保持 `message_key`、协议 `message_id`、服务器 `ts`、本机 `received_at` 各自含义及数值，审计表保留可追溯性
+- [ ] **只用 `./agent update full`**：备份 → UPDATE-2 排空 → schema/数据迁移 → 构建/启动；失败恢复备份和旧服务。`apply` 对 schema 变更必须拒绝，不列为可用部署方式
+- [ ] **验收**：迁移前后单端口决策/投递等价；同名 ID 双端口不覆盖；双地址媒体与链接共享不串味；迁移失败可回滚；P2b 的第二端口闸仅在这些测试通过后移除
 
 ---
 
 ## 13. 未定项
 
-1. **`Capabilities` 的形态**：注册时静态声明 + 响应内动态 `Degraded`，还是只有其一？我倾向**两者都要**。
+1. **`Capabilities` 的形态**：P0 已定注册时静态声明 + 响应内动态 `Unsupported`/`Degraded`；实施不得只保留其中之一。
 2. **P9 注册表留到什么程度**：只留 trait + 空注册表，还是连发现/沙箱都留到真做插件时再定？按 P-3 我倾向**后者**。
 3. **`DbPort` 是否永久非插件点**（不换 PostgreSQL 等）？本计划按"永久非插件点"推进。
 4. **`first_mes`**（内核议题，§7.5）：群聊要不要为卡破例先发言？
 5. **P2 的 shim 保留到哪一步**：我在 P7 删除；如果你想更早收敛可提前。
-6. **地址格式**：`kind:<port>:<id>`（我推荐，代价最小）还是 `port:kind:<id>`（更直读但打断 35 处类型判断）？
+6. **地址格式**：P0 已定 `kind:<port>:<id>`；若改变需重新审计 31 处前缀调用与至少 18 处解析/构造/协议 ID 点，不可在实施中临时切换。
 7. **记忆面多后端是否允许"多写者"**：我按**单写者 + 只读镜像**设计（§6.2）；如果需要真正的多写，`forget` 的语义会分叉（一个删、一个墓碑），要重新定。
 8. **是否合并跨平台身份**：我按"同一人在两个平台 = 两个独立 subject"设计（§6.8）；若将来要做身份解析，`MemorySubject::Person` 需要加端口维度。
-9. **P2c 是否本轮就做**：它是多协议成立的前提，但也是最高风险项；也可以先做 P2b（路由就绪）+ 只跑单端口，把 P2c 推迟到真的接第二个协议之前。
+9. **P2c 排期**：允许 P2b 先做路由骨架与离线双假端口；P2c 未完成前生产只跑单通讯端口，第二端口必须被配置校验拒绝。
 
 ---
 
-## 14. 与既有文档的关系
+## 14. W（utils 归一化）与端口层的职责边界
 
-- [`docs/PLUGIN-PORTS.md`](../PLUGIN-PORTS.md)：§3.1–3.4 的中立模型照用；**§4 迁移路径由本文取代**；其 §5 待定问题中 #2（Forward 展开归属）、#3（`Fetch*` 返回形状）、#4（id 校验归属）本文已给倾向：**Forward 归端口、id 校验归端口、`Fetch*` 用中立结构**。
+按 X1 的约束，**统一后的 I/O 类型、trait、注册表、路由全部集中在 `rust/src/engine/io/`；插件作者只需要知道这一个位置。**`utils` 只提供跨模块同义、无状态、无协议判断的纯原语，不能成为第二套端口 API 或让插件作者再去找别的目录。
+
+| 去向 | 可做什么 | 不可借机做什么 |
+|---|---|---|
+| **W / `rust/src/utils/`** | 已核实同义的 JS `trim` 空白集合、UUID v4、集合重叠评分、基础取值、按 Unicode 标量截断；必要时提供 ASCII 数字、正 `u64`、地址组件拆分等**纯原语**，保持调用点原错误码与约束 | 不推出全仓通用 `valid_chat_id`，不决定 `group/private`、QQ 号/face ID、消息身份或路由 |
+| **端口层 / `engine/io/`** | 中立地址信封解析、端口名校验、协议 ID 的适配器级校验/编码、能力与错误映射、入站/出站中立类型、路由；逐一收敛至少 18 个地址/协议 ID 使用点 | 不把 OneBot 的正整数/首位非零规则当跨协议规则；不改既有业务错误码或 `message_key` 语义 |
+| **保持在业务调用点** | 具体授权、允许群/用户、主人/忽略名单、学习/发送闸门、记忆红线、是否允许空值及具体错误码 | 不因使用共同原语而抹平不同业务含义 |
+| **暂不归并** | JSON 业务校验、`message_key` 回退、face/QQ ID 特殊规则、UTF-16 计数、段解析、迁移决策、URL 规则、tokenizer、跨运行时原子写入、模型预算 | 不在 W 中“先统一语义”，再在 P2c/P5 中重做一次 |
+
+**顺序**：W 只收敛已证明同义的原语并保持各调用点语义；P0 冻结端口中立契约；P2c 逐点迁移地址/协议 ID；P5 处理证据键与记忆。对同名不同义的会话 ID 校验，**端口层负责定义新信封和各协议规则，W 不预先统一**。若某规则既不是纯原语也不属 I/O（如授权/记忆策略），继续留业务层。
+
+---
+
+## 15. 与既有文档的关系
+
+- [`docs/PLUGIN-PORTS.md`](../PLUGIN-PORTS.md)：§3.1–3.4 是中立模型的早期分析，**最终身份/时间/地址/查询结果/错误层次以本文 P0 为准**；**§4 迁移路径由本文取代**；其 §5 待定问题中 #2（Forward 展开归属）、#3（`Fetch*` 返回形状）、#4（id 校验归属）本文已定：**Forward 协议展开归端口且受 IO-07 上限/调度约束、id 的协议校验归适配器、`Fetch*` 用中立结构**。
 - [`docs/working/audit-io.md`](audit-io.md)：本文顺带修 IO-07（转发展开无上限 + 阻塞主循环）、IO-08（下载跨事务/锁）、S1（跳转策略不一致）。
 - `TODO.md` F1：以本文为落地清单。
