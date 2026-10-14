@@ -18,6 +18,7 @@ fn manifest(name: &str, kind: PortKind) -> PortManifest {
         },
         host_permissions: Vec::new(),
         dependencies: Vec::new(),
+        config_fields: Vec::new(),
     }
 }
 

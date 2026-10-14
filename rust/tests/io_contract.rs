@@ -39,6 +39,7 @@ impl TestChat {
                 },
                 host_permissions: vec![],
                 dependencies: vec![],
+                config_fields: vec![],
             },
             deliveries: AtomicUsize::new(0),
         }

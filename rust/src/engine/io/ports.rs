@@ -17,6 +17,9 @@ pub trait ModelPort: Send + Sync {
     fn manifest(&self) -> &PortManifest;
     fn capabilities(&self) -> ModelCapabilities;
     fn complete<'a>(&'a self, request: ModelRequest<'a>) -> BoxFuture<'a, PortReply<ModelReply>>;
+    fn stream<'a>(&'a self, _request: ModelRequest<'a>) -> BoxFuture<'a, PortReply<ModelStream>> {
+        Box::pin(async { PortReply::Unsupported { capability: Capability::Custom("streaming".into()) } })
+    }
     fn list_models<'a>(&'a self) -> BoxFuture<'a, PortReply<Vec<String>>>;
 }
 

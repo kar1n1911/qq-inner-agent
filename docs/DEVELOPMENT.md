@@ -646,3 +646,9 @@ relevance ≥ 4、originality ≥ 4，正向标签含 `urgency`（时效需求�
 `engine_parity::topic_lifecycle_delivery_targets_and_necessity` 逐条验证第 1 层无引用发出、
 第 2 层正确引用（包括非法/缺失 replyTo 和合法模型优先）、第 3 层不发/带引用发出，
 并检查实际发送日志中的 reply 段。
+
+### X3 模型端口与选择
+
+`provider.ioPort` 默认 `legacy`，仍走原有 OpenAI/Anthropic 兼容传输。显式选 `ollama`、`openai`、`claude` 才由 `engine/io/adapters/` 接管模型调用；`provider.kind` 保留给旧路径。Ollama URL 通常为 `http://127.0.0.1:11434`，无需密钥；OpenAI、Claude 分别使用兼容 API 基础 URL 与保存于 `secrets.json` 的密钥。`provider.contextWindowTokens=0` 表示未知，不猜模型窗口。新路径在适配器实例内按 `requestsPerHour` 限流，120 秒超时且不自动重试（断线时服务端是否已处理无法确定）；旧路径的 SQLite 预算与重试行为不变。新路径引擎没有工具执行循环，若模型返回工具调用会显式报 `model_tool_call_unhandled`，不会当成空文本成功。
+
+模型插件的依赖与配置字段统一声明在 `rust/src/engine/io/adapters/model_config.json`；WebUI 的 `/api/model-plugins` 只返回字段定义，不返回密钥值。宿主 HTTP 权限仍由 `PortManifest.host_permissions` 独立声明，依赖声明本身不授予权限。设置保存仍使用 `/api/config` 的差异 patch；密钥沿用只写、仅展示“已配置/未配置”的路径。`ModelRequest.payload` 的工具定义、调用、结果形态见端口计划 §5.3。协议参考：[OpenAI Chat Completions](https://developers.openai.com/api/reference/resources/chat)、[Claude Messages](https://platform.claude.com/docs/en/api/messages/create)、[Ollama API](https://github.com/ollama/ollama/blob/main/docs/api.md)。

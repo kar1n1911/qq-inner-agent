@@ -12,7 +12,7 @@ function greetingFor(date) {
 }
 const $ = id => document.getElementById(id);
 startI18n();
-let csrf = '', saved = null, dirty = false, polling = false, logs = [], online = false;
+let csrf = '', saved = null, dirty = false, polling = false, logs = [], online = false, modelPlugins = {};
 let learningView = '', preset = {};
 // Object key order is irrelevant; arrays are atomic ordered values. Missing
 // advanced keys are rejected rather than silently resetting unrelated settings.
@@ -46,6 +46,14 @@ function page(name) {
   for (const b of document.querySelectorAll('.nav')) b.classList.toggle('active', b.dataset.page === name);
   $('page-title').textContent = { overview: 'Overview', config: 'Configuration', activity: 'Activity & logs', advanced: 'Advanced' }[name];
 }
+function renderModelPlugin() {
+  const port = document.querySelector('[data-config="provider.ioPort"]').value;
+  const spec = modelPlugins[port];
+  const fields = spec?.config_fields || [];
+  $('model-plugin-dependencies').textContent = spec ? `${translate('Required service')}: ${spec.dependencies.filter(d => d.required).map(d => translate(d.role)).join(', ')}. ${fields.map(f => `${translate(f.label)}${f.required ? ` (${translate('required')})` : ''}`).join(' · ')}. ${translate('Secrets are never displayed.')}` : translate('The existing compatible provider path remains active.');
+  $('api-key').required = !!spec && fields.some(f => f.key === 'api_key' && f.required) && !saved?.hasApiKey;
+  document.querySelector('[data-config="provider.contextWindowTokens"]').disabled = !spec;
+}
 function populate(data) {
   saved = data; preset = {};
   setLanguage(data.config.ui.language);
@@ -59,6 +67,7 @@ function populate(data) {
   $('quiet-enabled').checked = !!q; $('quiet-start').value = q?.start ?? 23;
   $('quiet-end').value = q?.end ?? 8; $('quiet-timezone').value = q?.timezone || 'Europe/Stockholm';
   $('key-status').textContent = data.hasApiKey ? 'Saved securely' : 'Not configured';
+  renderModelPlugin();
   $('api-key').value = ''; $('onebot-token').value = ''; $('clear-api-key').checked = false;
   $('advanced-json').value = JSON.stringify(data.config, null, 2);
   $('use-advanced').checked = false; $('threshold-output').textContent = data.config.agent.threshold.toFixed(2);
@@ -100,7 +109,7 @@ async function refresh() {
     $('qq-value').textContent = fresh && s.qqOnline ? 'Online' : 'Disconnected';
     $('qq-detail').textContent = fresh && s.onebotConnected ? `Account ${s.selfId}` : 'Waiting for NapCat / SnowLuma';
     $('model-value').textContent = s?.model || saved?.config.provider.model || 'Not set';
-    $('provider-detail').textContent = s?.provider === 'anthropic' ? 'Anthropic-compatible API' : 'OpenAI-compatible API';
+    $('provider-detail').textContent = ({anthropic:'Anthropic-compatible API',ollama:'Ollama plugin',claude:'Claude plugin',openai:'OpenAI-compatible API'})[s?.provider] || 'OpenAI-compatible API';
     $('chat-value').textContent = saved ? saved.config.agent.allowedGroups.length + saved.config.agent.allowedUsers.length : '—';
     $('mode-badge').textContent = state.serviceState !== 'active' ? 'Service stopped' : s?.mode === 'waiting_for_setup' ? 'Setup needed' : s?.scheduleActive === false ? 'Inactive hours' : s?.mode === 'dry_run' ? 'Preview mode' : 'Agent active';
     $('readiness').textContent = s?.missing?.length ? 'Complete setup: ' + s.missing.join(' + ') + '.' : s?.scheduleActive === false ? 'AI participation is paused by the activity schedule or rest block.' : 'The agent is ready to participate in enabled conversations.';
@@ -190,6 +199,9 @@ async function refresh() {
 }
 async function boot() {
   const session = await api('/api/session'); csrf = session.csrf;
+  modelPlugins = await api('/api/model-plugins');
+  const ports = document.querySelector('[data-config="provider.ioPort"]');
+  for (const name of Object.keys(modelPlugins)) { const option = element('option', `${({openai:'OpenAI',ollama:'Ollama',claude:'Claude'})[name] || name} plugin`); option.value = name; ports.append(option); }
   populate(await api('/api/config'));
   $('login').hidden = true; $('console').hidden = false;
   await refresh();
@@ -207,6 +219,7 @@ for (const selector of ['#interface-language', '[data-config="ui.language"]']) {
     $('interface-language').value = language;
     document.querySelector('[data-config="ui.language"]').value = language;
     if (saved) {
+      renderModelPlugin();
       if ($('use-advanced').checked) {
         try { const c = JSON.parse($('advanced-json').value); c.ui = { ...c.ui, language }; $('advanced-json').value = JSON.stringify(c, null, 2); } catch {}
       }
@@ -217,6 +230,7 @@ for (const selector of ['#interface-language', '[data-config="ui.language"]']) {
 $('logout').addEventListener('click', async () => { try { await api('/api/logout', { method: 'POST', body: '{}' }); } finally { signedOut(); } });
 $('refresh').addEventListener('click', refresh);
 $('config-form').addEventListener('input', () => { changed(); $('threshold-output').textContent = Number(document.querySelector('[data-config="agent.threshold"]').value).toFixed(2); });
+document.querySelector('[data-config="provider.ioPort"]').addEventListener('change', renderModelPlugin);
 $('config-form').addEventListener('submit', async e => {
   e.preventDefault(); document.querySelectorAll('[data-save]').forEach(b => b.disabled = true);
   try {

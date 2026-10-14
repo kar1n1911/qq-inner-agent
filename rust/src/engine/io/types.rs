@@ -337,6 +337,8 @@ pub struct PortManifest {
     /// Declarative runtime services used by an optional capability.
     #[serde(default)]
     pub dependencies: Vec<PortDependency>,
+    #[serde(default)]
+    pub config_fields: Vec<PortConfigField>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -344,6 +346,15 @@ pub struct PortDependency {
     pub role: String,
     pub needed_for: String,
     pub required: bool,
+}
+
+/// A declarative configuration input, separate from host authorization.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PortConfigField {
+    pub key: String,
+    pub label: String,
+    pub required: bool,
+    pub secret: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -400,6 +411,9 @@ pub struct ModelCapabilities {
     pub thinking_field: bool,
     pub truncation_signal: bool,
     pub list_models: bool,
+    /// None means unknown; callers must not assume a window size.
+    #[serde(default)]
+    pub context_window_tokens: Option<u32>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -415,6 +429,17 @@ pub enum PortReply<T> {
     Unsupported { capability: Capability },
     Degraded { result: T, missing: Vec<Capability> },
     Failed { code: String, uncertain: bool },
+}
+
+impl<T> PortReply<T> {
+    pub fn into_result(self) -> Result<T, IoError> {
+        match self {
+            Self::Ok(value) => Ok(value),
+            Self::Unsupported { .. } => Err(IoError::new("capability_unsupported")),
+            Self::Degraded { .. } => Err(IoError::new("port_reply_degraded")),
+            Self::Failed { code, .. } => Err(IoError::new(code)),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -446,6 +471,10 @@ pub enum OutputFormat {
 pub struct ModelRequest<'a> {
     pub instance: &'a str,
     pub system: &'a str,
+    /// Neutral input: either a messages array or {messages, tools}. Message
+    /// roles are user/assistant/tool; assistant.tool_calls holds ModelToolCall,
+    /// tool messages carry ModelToolResult fields, and tools holds
+    /// ModelToolDefinition. Adapters validate and translate these values.
     pub payload: &'a Value,
     pub format: OutputFormat,
     pub max_tokens: u32,
@@ -454,7 +483,48 @@ pub struct ModelRequest<'a> {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ModelReply {
     pub text: String,
+    /// An empty text is successful only when at least one structured call exists.
+    #[serde(default)]
+    pub tool_calls: Vec<ModelToolCall>,
 }
+
+/// Neutral schema for payload.tools entries and tool calls. `input_schema`
+/// and `arguments` are JSON values, not provider-specific wire blocks.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ModelToolDefinition {
+    pub name: String,
+    pub description: String,
+    pub input_schema: Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ModelToolCall {
+    /// Some protocols identify a call only by tool name.
+    pub id: Option<String>,
+    pub name: String,
+    pub arguments: Value,
+}
+
+/// In payload.messages, a tool result uses role=tool and this shape.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ModelToolResult {
+    pub tool_call_id: Option<String>,
+    pub name: Option<String>,
+    pub content: String,
+    #[serde(default)]
+    pub is_error: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum ModelDelta {
+    Text(String),
+    ToolCallStart { id: Option<String>, name: String },
+    ToolCallArguments { id: Option<String>, fragment: String },
+    ToolCallEnd { id: Option<String> },
+    Done,
+}
+
+pub type ModelStream = tokio::sync::mpsc::Receiver<PortReply<ModelDelta>>;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum MemorySubject {

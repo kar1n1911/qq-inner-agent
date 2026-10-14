@@ -1,9 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+const modelPlugins = JSON.parse(fs.readFileSync(new URL('../rust/src/engine/io/adapters/model_config.json', import.meta.url), 'utf8'));
+
 export const defaults = {
   ui: { language: 'zh-CN' },
-  provider: { kind: 'openai', baseUrl: 'https://api.openai.com/v1', model: '',
+  provider: { kind: 'openai', ioPort: 'legacy', contextWindowTokens: 0, baseUrl: 'https://api.openai.com/v1', model: '',
     maxTokens: 1600, tokenParameter: 'max_completion_tokens', timeoutSeconds: 60,
     retries: 2, requestsPerHour: 120, anthropicAuth: 'x-api-key', workspaceId: '', thinking: null },
   onebot: { url: 'ws://127.0.0.1:3001/', selfId: '', heartbeatSeconds: 30,
@@ -87,6 +89,8 @@ export function validate(c) {
   if (typeof schedule.timezone !== 'string' || !schedule.timezone.trim()) throw Error('Invalid schedule timezone');
   new Intl.DateTimeFormat('en', { timeZone: schedule.timezone }).format();
   if (!['openai', 'anthropic'].includes(c.provider.kind)) throw Error('provider.kind must be openai or anthropic');
+  if (c.provider.ioPort !== 'legacy' && !Object.hasOwn(modelPlugins, c.provider.ioPort)) throw Error('Invalid provider.ioPort');
+  if (!Number.isInteger(c.provider.contextWindowTokens) || c.provider.contextWindowTokens < 0 || c.provider.contextWindowTokens > 2000000) throw Error('Invalid provider.contextWindowTokens');
   for (const [name, raw, schemes] of [['provider.baseUrl', c.provider.baseUrl, ['https:', 'http:']], ['onebot.url', c.onebot.url, ['ws:', 'wss:']]]) {
     const u = new URL(raw);
     if (!schemes.includes(u.protocol) || u.username || u.password || u.search || u.hash) throw Error(`${name}: invalid URL (no credentials/query/fragment)`);
@@ -149,7 +153,7 @@ export function loadConfig(root) {
 }
 export function readiness(c) {
   const missing = [];
-  if (!c.apiKey) missing.push('API key');
+  if (!c.apiKey && c.provider.ioPort !== 'ollama') missing.push('API key');
   if (!c.provider.model) missing.push('model');
   if (!c.agent.allowedGroups.length && !c.agent.allowedUsers.length) missing.push('selected chat IDs');
   return missing;

@@ -303,6 +303,7 @@ struct Runtime {
     raw: Value,
     store: Arc<Mutex<Store>>,
     provider: Arc<Provider>,
+    model_port: Option<Arc<qq_inner_core::engine::io::adapters::model_http::HttpModel>>,
     bot: Arc<OneBot>,
     onebot_io: Option<Arc<qq_inner_core::engine::io::adapters::onebot::OneBotAdapter>>,
     notices: mpsc::UnboundedReceiver<Notification>,
@@ -321,6 +322,19 @@ struct Runtime {
 fn use_onebot_io(value: Option<&str>) -> bool {
     value == Some("1")
 }
+struct SelectedModelPort {
+    port: Arc<qq_inner_core::engine::io::adapters::model_http::HttpModel>,
+    model: String,
+    max_tokens: u32,
+}
+impl qq_inner_core::engine::orientation::OrientationProvider for SelectedModelPort {
+    fn text<'a>(&'a self, system: &'a str, payload: Value) -> futures_util::future::BoxFuture<'a, Result<String>> {
+        Box::pin(async move { Ok(self.port.complete_engine(&self.model, system, payload, self.max_tokens).await?) })
+    }
+    fn json<'a>(&'a self, system: &'a str, payload: Value) -> futures_util::future::BoxFuture<'a, Result<Value>> {
+        Box::pin(async move { Ok(self.port.complete_engine_json(&self.model, system, payload, self.max_tokens).await?) })
+    }
+}
 impl Runtime {
     fn new(
         loaded: config::Loaded,
@@ -338,6 +352,21 @@ impl Runtime {
             c.api_key.text.clone(),
             store.clone(),
         ));
+        let model_port = if c.provider.io_port == "legacy" { None } else {
+            Some(Arc::new(qq_inner_core::engine::io::adapters::model_http::HttpModel::configured(
+                &c.provider.io_port, &c.provider.base_url, Some(c.api_key.text.clone()),
+                (c.provider.context_window_tokens > 0).then_some(c.provider.context_window_tokens),
+                c.provider.requests_per_hour.round() as u32,
+            )?))
+        };
+        let engine_provider: Arc<dyn qq_inner_core::engine::orientation::OrientationProvider> =
+            if let Some(port) = &model_port {
+                Arc::new(SelectedModelPort {
+                    port: port.clone(),
+                    model: c.provider.model.text.clone(),
+                    max_tokens: c.provider.max_tokens.round() as u32,
+                })
+            } else { provider.clone() };
         let (bot, notices) = OneBot::new(c.onebot.clone(), c.onebot_token.text.clone());
         let bot = existing_bot.unwrap_or_else(|| Arc::new(bot));
         let onebot_io = if use_onebot_io(std::env::var("QQ_INNER_ONEBOT_IO").ok().as_deref()) {
@@ -364,7 +393,7 @@ impl Runtime {
         let engine = Engine::new_with_media(
             c.clone(),
             store.clone(),
-            provider.clone(),
+            engine_provider,
             bot.clone(),
             Options {
                 prompts: loaded.prompts.clone(),
@@ -392,6 +421,7 @@ impl Runtime {
             raw: loaded.raw,
             store,
             provider,
+            model_port,
             bot,
             onebot_io,
             notices,
@@ -507,7 +537,7 @@ impl Runtime {
             "onebotConnected":bot.connected, "qqOnline":bot.online, "selfId":bot.self_id,
             "participation":self.engine.participation_state(),
             "reconnects":bot.reconnects, "activeChats":self.engine.chats().len(),
-            "model":self.raw["provider"]["model"], "provider":c.provider.kind, "apiCallsThisRun":self.provider.calls(),
+            "model":self.raw["provider"]["model"], "provider":if c.provider.io_port == "legacy" { &c.provider.kind } else { &c.provider.io_port }, "apiCallsThisRun":self.model_port.as_ref().map_or_else(|| self.provider.calls(), |p| p.calls()),
             "lastCycleAt":self.engine.last_cycle(), "lastError":self.engine.last_error()}))
     }
     fn report(&self) -> Result<()> {
@@ -613,6 +643,7 @@ impl Runtime {
                 Arc::new(LiveRemote {
                     bot: replacement.bot.clone(),
                     provider: replacement.provider.clone(),
+                    model_port: replacement.model_port.clone(),
                     config: replacement.config.clone(),
                 }),
                 vec![
@@ -695,7 +726,7 @@ async fn run(root: PathBuf) -> Result<()> {
     rt.engine.restore()?;
     (rt.log)(
         "started",
-        json!({"mode":mode(&rt.config), "missing":config::readiness(&rt.config), "provider":rt.config.provider.kind, "model":rt.raw["provider"]["model"], "selectedChats":rt.config.agent.allowed_groups.len()+rt.config.agent.allowed_users.len()}),
+        json!({"mode":mode(&rt.config), "missing":config::readiness(&rt.config), "provider":if rt.config.provider.io_port == "legacy" { &rt.config.provider.kind } else { &rt.config.provider.io_port }, "model":rt.raw["provider"]["model"], "selectedChats":rt.config.agent.allowed_groups.len()+rt.config.agent.allowed_users.len()}),
     );
     rt.maintain(true)?;
     rt.report()?;
@@ -705,6 +736,7 @@ async fn run(root: PathBuf) -> Result<()> {
         Arc::new(LiveRemote {
             bot: rt.bot.clone(),
             provider: rt.provider.clone(),
+            model_port: rt.model_port.clone(),
             config: rt.config.clone(),
         }),
         vec![
@@ -814,6 +846,16 @@ mod tests {
         }
     }
 
+    #[test]
+    fn model_port_is_opt_in_and_legacy_remains_default() {
+        let dir = Temp::new();
+        dir.config(json!({}));
+        assert!(dir.runtime().model_port.is_none());
+        dir.config(json!({"provider":{"ioPort":"ollama","baseUrl":"http://127.0.0.1:11434","model":"test"}}));
+        let runtime = dir.runtime();
+        assert_eq!(qq_inner_core::engine::io::ModelPort::manifest(runtime.model_port.as_ref().unwrap().as_ref()).name, "ollama");
+    }
+
     #[tokio::test]
     async fn rejected_event_keeps_original_log_with_message_attribution() {
         let dir = Temp::new();
@@ -842,7 +884,7 @@ mod tests {
         let mut rt = dir.runtime();
         let (stop, _) = watch::channel(false);
         let backend = Backend::new(rt.config.data_dir.clone(), rt.store.clone(), Arc::new(LiveRemote {
-            bot: rt.bot.clone(), provider: rt.provider.clone(), config: rt.config.clone(),
+            bot: rt.bot.clone(), provider: rt.provider.clone(), model_port: rt.model_port.clone(), config: rt.config.clone(),
         }), vec![]);
         backend.attach_runtime(rt.engine.clone(), stop);
         let event = |id| json!({"post_type":"message","message_type":"private",
@@ -1126,7 +1168,7 @@ mod tests {
         assert_eq!(store.lock().unwrap().rows("SELECT status FROM deliveries", []).unwrap()[0]["status"], "pending");
         let (stop, mut requested) = watch::channel(false);
         let backend = Backend::new(rt.config.data_dir.clone(), store.clone(), Arc::new(LiveRemote {
-            bot: rt.bot.clone(), provider: rt.provider.clone(), config: rt.config.clone(),
+            bot: rt.bot.clone(), provider: rt.provider.clone(), model_port: rt.model_port.clone(), config: rt.config.clone(),
         }), vec![]);
         backend.attach_runtime(rt.engine.clone(), stop);
         let result = qq_inner_core::control::Handler::request(&backend, "agent.exit", json!({})).await.unwrap();

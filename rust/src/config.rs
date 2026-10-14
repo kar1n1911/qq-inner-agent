@@ -475,6 +475,8 @@ pub fn validate(c: &Value) -> std::result::Result<(), ConfigError> {
         [json!("openai"), json!("anthropic")].contains(&c["provider"]["kind"]),
         "provider.kind must be openai or anthropic",
     )?;
+    check(c["provider"]["ioPort"] == "legacy" || c["provider"]["ioPort"].as_str().is_some_and(crate::engine::io::adapters::model_http::HttpModel::supports), "Invalid provider.ioPort")?;
+    check(c["provider"]["contextWindowTokens"].as_u64().is_some_and(|n| n <= 2_000_000), "Invalid provider.contextWindowTokens")?;
     url_host(
         &c["provider"]["baseUrl"],
         "provider.baseUrl",
@@ -644,6 +646,10 @@ pub struct Ui {
 pub struct Provider {
     /// 配置键 `provider.kind`。
     pub kind: String,
+    #[serde(default = "default_model_port")]
+    pub io_port: String,
+    #[serde(default)]
+    pub context_window_tokens: u32,
     /// 配置键 `provider.baseUrl`。
     #[serde(deserialize_with = "deserialize_js_string")]
     pub base_url: String,
@@ -666,6 +672,8 @@ pub struct Provider {
     /// 配置键 `provider.thinking`。
     pub thinking: Option<String>,
 }
+
+fn default_model_port() -> String { "legacy".into() }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1239,7 +1247,7 @@ pub fn load_with_env(root: &Path, env: impl Fn(&str) -> Option<String>) -> Resul
 
 pub fn readiness(c: &Config) -> Vec<String> {
     let mut missing = Vec::new();
-    if !c.api_key.is_truthy {
+    if !c.api_key.is_truthy && c.provider.io_port != "ollama" {
         missing.push("API key".into());
     }
     if !c.provider.model.is_truthy {

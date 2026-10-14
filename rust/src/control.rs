@@ -275,7 +275,13 @@ pub trait Remote: Send + Sync {
 pub struct LiveRemote {
     pub bot: Arc<OneBot>,
     pub provider: Arc<Provider>,
+    pub model_port: Option<Arc<crate::engine::io::adapters::model_http::HttpModel>>,
     pub config: Config,
+}
+impl LiveRemote {
+    fn selected_model(&self) -> Result<&crate::engine::io::adapters::model_http::HttpModel> {
+        self.model_port.as_deref().ok_or_else(|| anyhow::anyhow!("missing_model_port"))
+    }
 }
 impl Remote for LiveRemote {
     fn state(&self) -> crate::transport::State {
@@ -284,20 +290,32 @@ impl Remote for LiveRemote {
     fn request<'a>(&'a self, method: &'a str) -> BoxFuture<'a, Result<Value>> {
         Box::pin(async move {
             match method {
-                "models.list" => Ok(json!({"models":self.provider.list_models().await?})),
+                "models.list" => {
+                    if self.config.provider.io_port == "legacy" { Ok(json!({"models":self.provider.list_models().await?})) }
+                    else {
+                        use crate::engine::io::ModelPort;
+                        Ok(json!({"models":self.selected_model()?.list_models().await.into_result()?}))
+                    }
+                },
                 "test.model" => {
                     ensure!(
-                        self.config.api_key.is_truthy && self.config.provider.model.is_truthy,
+                        (self.config.api_key.is_truthy || self.config.provider.io_port == "ollama") && self.config.provider.model.is_truthy,
                         "waiting_for_setup"
                     );
                     let start = Instant::now();
-                    let response = self
-                        .provider
-                        .json(
+                    let response = if self.config.provider.io_port == "legacy" {
+                        self.provider.json(
                             "只返回 JSON：{\"ok\":true}。",
                             &json!({"test":"仅测试 API 连通性，不包含 QQ 聊天内容"}),
-                        )
-                        .await?;
+                        ).await?
+                    } else {
+                        self.selected_model()?.complete_engine_json(
+                            &self.config.provider.model.text,
+                            "只返回 JSON：{\"ok\":true}。",
+                            json!({"test":"仅测试 API 连通性，不包含 QQ 聊天内容"}),
+                            self.config.provider.max_tokens.round() as u32,
+                        ).await?
+                    };
                     ensure!(response["ok"] == true, "unexpected_model_response");
                     Ok(
                         json!({"ok":true,"latencyMs":start.elapsed().as_millis(),"model":self.config.provider.model.text}),

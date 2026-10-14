@@ -33,6 +33,7 @@ impl AmemorixPort {
                     PortDependency { role: "embedding_provider".into(), needed_for: "semantic_retrieval".into(), required: false },
                     PortDependency { role: "language_model".into(), needed_for: "relation_extraction".into(), required: false },
                 ],
+                config_fields: vec![],
             },
             channel: endpoint.connect_lazy(), token,
             capabilities: Mutex::new(MemoryCapabilities::default()),

@@ -175,19 +175,23 @@ pub struct Capabilities {
 ```rust
 pub trait ModelPort: Send + Sync {
     fn manifest(&self) -> &PortManifest;
-    fn capabilities(&self) -> ModelCapabilities;   // json_mode / thinking_field / truncation_signal / list_models
+    fn capabilities(&self) -> ModelCapabilities;   // 含 context_window_tokens: Option<u32>
     fn complete<'a>(&'a self, req: ModelRequest<'a>) -> BoxFuture<'a, PortReply<ModelReply>>;
+    fn stream<'a>(&'a self, req: ModelRequest<'a>) -> BoxFuture<'a, PortReply<ModelStream>>;
     fn list_models<'a>(&'a self) -> BoxFuture<'a, PortReply<Vec<String>>>;
 }
 
 pub struct ModelRequest<'a> {
+    pub instance: &'a str,
     pub system: &'a str,
     pub payload: &'a Value,
     pub format: OutputFormat,        // Json | Text
     pub max_tokens: u32,
 }
-pub struct ModelReply { pub text: String }
+pub struct ModelReply { pub text: String, pub tool_calls: Vec<ModelToolCall> }
 ```
+
+**X3 增量契约**：`complete()` 签名与一次性返回语义不变；`stream()` 独立返回 `ModelDelta` 通道，包含文本、工具调用开始/参数片段/结束与完成事件，晚到错误以 `PortReply::Failed` 显式发送。`ModelRequest.payload` 允许消息数组，或 `{messages, tools}` 对象；`tools` 为中立的 `{name, description, input_schema}`，`assistant.tool_calls` 为 `{id?, name, arguments}`，`role=tool` 消息含 `{tool_call_id?, name?, content, is_error}`。可选 ID 表达 Ollama 没有协议工具调用 ID 的事实；Claude / OpenAI 必须使用真实 ID。只有文本和工具调用都为空时才是空回复错误。`context_window_tokens=None` 表示未知，不凭模型名猜测。`PortManifest.dependencies` 表示语义依赖，`config_fields` 为表单字段及 `secret` 标记；两者均不能替代 `host_permissions` 的宿主授权。三家模型声明位于 `rust/src/engine/io/adapters/model_config.json`，WebUI 与适配器读取同一份数据。
 
 **必须修掉的契约缺陷（与任何具体后端无关）**：
 

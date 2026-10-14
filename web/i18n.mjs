@@ -274,6 +274,20 @@ optional replacement; never displayed|可选替换，已保存令牌不回显
 Leave blank to keep current token|留空保留当前令牌
 01 / CONNECTION|01 / 模型连接
 Model & API|模型与 API
+Model path|模型路径
+Existing compatible path (default)|现有兼容路径（默认）
+Ollama plugin|Ollama 插件
+OpenAI plugin|OpenAI 插件
+Claude plugin|Claude 插件
+Context window tokens (0 = unknown)|上下文窗口 token 数（0 表示未知）
+Required service|依赖服务
+required|必填
+Secrets are never displayed.|密钥不会回显。
+The existing compatible provider path remains active.|当前使用现有兼容模型路径。
+local_model_service|本地模型服务
+remote_model_api|远程模型 API
+Ollama URL|Ollama 地址
+Model ID|模型 ID
 API format|API 格式
 OpenAI-compatible|OpenAI 兼容
 Anthropic-compatible|Anthropic 兼容

@@ -30,6 +30,7 @@ impl OneBotAdapter {
                 core_api_version: VersionReq { major: 1, min_minor: 0, max_minor: None },
                 host_permissions: vec![],
                 dependencies: vec![],
+                config_fields: vec![],
             },
             action,
             connection,

@@ -36,6 +36,15 @@ test('scalar and nested patches preserve every other byte, order, escapes and CR
   assert.equal(fs.readFileSync(path.join(root, 'secrets.json'), 'utf8'), '{ "apiKey": "old-key", "onebotToken": "old-token" }\n');
 });
 
+test('model port selection uses one incremental patch and never echoes the key', t => {
+  const root = fixture(t), before = read(root), base = publicSettings(root);
+  const saved = save(root, base, { 'provider.ioPort': 'ollama' });
+  assert.equal(saved.config.provider.ioPort, 'ollama');
+  assert.equal(read(root), before.replace('"ioPort": "legacy"', '"ioPort": "ollama"'));
+  assert.equal(saved.hasApiKey, true);
+  assert.ok(!JSON.stringify(saved).includes('old-key'));
+});
+
 test('missing defaults append without reordering existing keys; subsequent scalar save changes one line', t => {
   const root = fixture(t, { agent: { sending: { settleSeconds: 15 }, name: 'Custom' }, provider: { model: 'custom' } });
   save(root, publicSettings(root), { 'agent.sending.settleSeconds': 1 });

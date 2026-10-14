@@ -4,6 +4,8 @@
   },
   "provider": {
     "kind": "openai",
+    "ioPort": "legacy",
+    "contextWindowTokens": 0,
     "baseUrl": "https://api.openai.com/v1",
     "model": "",
     "maxTokens": 1600,

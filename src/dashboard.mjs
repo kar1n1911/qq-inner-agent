@@ -163,9 +163,12 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
       if (!session || session.expires < Date.now()) { if (id) sessions.delete(id); throw fail(401, 'Sign in required'); }
       if (req.method !== 'GET' && !equal(req.headers['x-csrf-token'] || '', session.csrf)) throw fail(403, 'Session verification failed; sign in again.');
       if (url.pathname === '/api/session' && req.method === 'GET') { json(res, 200, { csrf: session.csrf }); return; }
+      if (url.pathname === '/api/model-plugins' && req.method === 'GET') {
+        json(res, 200, JSON.parse(fs.readFileSync(path.join(root, 'rust/src/engine/io/adapters/model_config.json'), 'utf8'))); return;
+      }
       if (url.pathname === '/api/models' && req.method === 'POST') {
-        try { const c = loadConfig(root); json(res, 200, { models: control.available ? (await control.request('models.list', {}, { timeoutMs: 30000 })).models : await listModels(c.provider, c.apiKey) }); }
-        catch (e) { json(res, 502, { error: e instanceof Error && e.code ? e.code : 'model_list_unavailable_use_manual_entry' }); }
+        try { const c = loadConfig(root); if (c.provider.ioPort !== 'legacy' && !control.available) throw fail(503, 'Core control socket unavailable for selected model plugin'); json(res, 200, { models: control.available ? (await control.request('models.list', {}, { timeoutMs: 30000 })).models : await listModels(c.provider, c.apiKey) }); }
+        catch (e) { json(res, e.status || 502, { error: e.status ? e.message : e instanceof Error && e.code ? e.code : 'model_list_unavailable_use_manual_entry' }); }
         return;
       }
       if (url.pathname === '/api/debug/receive' && req.method === 'GET') { json(res, 200, await receiveStatus()); return; }
@@ -225,7 +228,8 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
         if (testing) throw fail(409, 'A connection test is in progress');
         testing = true;
         try {
-          const c = loadConfig(root); if (!c.apiKey || !c.provider.model) throw fail(400, 'Save an API key and model first');
+          const c = loadConfig(root); if ((!c.apiKey && c.provider.ioPort !== 'ollama') || !c.provider.model) throw fail(400, 'Save an API key and model first');
+          if (c.provider.ioPort !== 'legacy' && !control.available) throw fail(503, 'Core control socket unavailable for selected model plugin');
           if (control.available) {
             await control.request('test.model', {}, { timeoutMs: 120000 });
             json(res, 200, { ok: true, message: 'API authentication and JSON response verified. No QQ message sent.' }); return;
