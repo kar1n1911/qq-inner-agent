@@ -2,6 +2,7 @@
 
 pub mod adapters;
 pub mod ports;
+pub mod plugin_list;
 pub mod registry;
 pub mod router;
 pub mod types;

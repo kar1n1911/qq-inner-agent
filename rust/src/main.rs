@@ -78,6 +78,15 @@ enum Command {
     ConfigDefaults,
     /// Authenticate with the OneBot bridge and report online status.
     Check,
+    /// Inspect and reconcile the configured plugin list.
+    Plugins {
+        #[arg(value_parser = ["reconcile"])]
+        action: String,
+        #[arg(long)]
+        config: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn resolve_root(explicit: Option<PathBuf>) -> Result<PathBuf> {
@@ -93,12 +102,72 @@ fn resolve_root(explicit: Option<PathBuf>) -> Result<PathBuf> {
     Ok(cwd)
 }
 
+fn plugin_status(root: &std::path::Path, list: &Value) -> Value {
+    let resolved = qq_inner_core::engine::io::plugin_list::resolve(root, list, &mut |_id| {
+        Err("plugin_factory_unavailable".to_owned())
+    });
+    let entries: Vec<Value> = resolved["plugins"]
+        .as_object()
+        .into_iter()
+        .flat_map(|items| items.iter())
+        .map(|(id, item)| {
+            json!({"id": id, "directory": item["directory"],
+                "requested_enabled": list["plugins"].as_array().and_then(|entries| entries.iter().find(|entry| entry["id"].as_str() == Some(id))).is_some_and(|entry| entry["enabled"] == true),
+                "effective_state": if item["reason"] == "disabled_by_user" { "disabled" } else if item["effective"] == true { "active" } else { "inactive" },
+                "reason": item["reason"], "installed": item["installed"]})
+        })
+        .collect();
+    let discovery: Vec<Value> = entries.iter().filter(|entry| entry["id"] == entry["directory"]).map(|entry| {
+        json!({"directory": entry["directory"],
+            "state": if entry["reason"] == "missing_manifest" { "unrecognized" } else if entry["installed"] == true { "discovered" } else { "unrecognized" },
+            "reason": if entry["reason"] == "missing_manifest" { "manifest_missing" } else { entry["reason"].as_str().unwrap_or("unknown") }})
+    }).collect();
+    json!({"schema_version":1,"mode":resolved["mode"],"generation":0,
+        "plugins":entries,"discovery":discovery,"registered":resolved["registered"],
+        "activation_order":[]})
+}
+
+fn plugin_configuration_error(status: &Value, list: &Value) -> Option<Value> {
+    if !matches!(list.get("schema_version").or_else(|| list.get("version")).and_then(Value::as_u64), Some(1))
+        || !matches!(list["mode"].as_str(), Some("auto" | "manual"))
+        || !list["plugins"].is_array() || status["reason"] == "invalid_plugin_list" {
+        return Some(json!({"code":"invalid_plugin_list"}));
+    }
+    status["plugins"].as_array()?.iter().find_map(|entry| {
+        let selected = list["plugins"].as_array().is_some_and(|items| items.iter().any(|item| {
+            item["id"] == entry["id"] || item["directory"] == entry["directory"]
+        }));
+        if !selected { return None; }
+        let code = match entry["reason"].as_str()? {
+            "missing_directory" => "plugin_directory_missing",
+            "missing_manifest" => "plugin_manifest_missing",
+            "invalid_manifest" => "plugin_manifest_invalid",
+            "load_failed" => "plugin_load_failed",
+            "invalid_entry" => "plugin_entry_invalid",
+            "invalid_config" => "plugin_config_invalid",
+            "invalid_order" => "plugin_order_invalid",
+            "preflight_failed" => "plugin_preflight_failed",
+            _ => return None,
+        };
+        Some(json!({"code":code,"id":entry["id"],"directory":entry["directory"]}))
+    })
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     let root = resolve_root(cli.root)?;
 
     match cli.command {
+        Command::Plugins { action: _, config, json: _ } => {
+            let list: Value = serde_json::from_slice(&fs::read(&config)?)?;
+            let status = plugin_status(&root, &list);
+            if let Some(error) = plugin_configuration_error(&status, &list) {
+                eprintln!("{error}");
+                std::process::exit(2);
+            }
+            println!("{status}");
+        }
         Command::BuildRevision => println!("{}", qq_inner_core::update::REVISION),
         Command::Update { action } => {
             if action == "full" {
@@ -133,6 +202,15 @@ async fn main() -> Result<()> {
             if root.join(".settings-write").exists() || config::load_config(&root).is_err() {
                 eprintln!("Invalid configuration. Run ./agent setup to correct it.");
                 std::process::exit(2);
+            }
+            let plugin_config = root.join("mod/plugins.json");
+            if plugin_config.is_file() {
+                let list: Value = serde_json::from_slice(&fs::read(&plugin_config)?)?;
+                let status = plugin_status(&root.join("mod"), &list);
+                if let Some(error) = plugin_configuration_error(&status, &list) {
+                    eprintln!("{error}");
+                    std::process::exit(2);
+                }
             }
             run(root).await?;
         }
