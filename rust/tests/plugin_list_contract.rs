@@ -17,9 +17,9 @@ impl Fixture {
     fn plugin(&self, id:&str, claimed:&[&str]) {
         let dir=self.0.join(id);
         fs::create_dir_all(&dir).unwrap();
-        let manifest=json!({"name":id,"kind":"Model","transport":"InProcess",
-            "core_api_version":{"major":1,"min_minor":0,"max_minor":null},
-            "host_permissions":[],"capabilities":claimed});
+        let manifest=json!({"name":id,"version":"0.1.0","kind":"Model","transport":"InProcess",
+                "core_api_version":{"major":1,"min_minor":0,"max_minor":null},
+                "host_permissions":[],"dependencies":[],"config_schema":{},"capabilities":claimed});
         fs::write(dir.join("manifest.json"),serde_json::to_vec(&manifest).unwrap()).unwrap();
     }
     fn directory_without_manifest(&self, id:&str) {
@@ -82,9 +82,14 @@ fn missing_manual_directory_reports_error_without_losing_valid_plugin() {
     let mut loads=vec![];
     let status=resolve(&fixture.0,&config,&mut loads,json!({"capabilities":[]}));
     assert_eq!(status["plugins"]["gone"]["reason"],"missing_directory");
-    assert_eq!(status["plugins"]["good"]["effective"],true,
-        "one stale entry must not destroy an independently valid choice");
-    assert_eq!(loads,vec!["good"]);
+        // 语义裁决(外层 2026-10-14):预检失败时**原子地不加载任何插件** ——
+        // 一个坏配置不得让系统"半启动";但状态报告仍须逐插件完整可见。
+        assert_eq!(status["plugins"]["good"]["installed"],true,
+            "a valid entry must still be visible even when preflight fails");
+        assert_eq!(status["plugins"]["good"]["effective"],false,
+            "preflight failure must not produce a partial start");
+        assert_eq!(loads,Vec::<String>::new(),
+            "a failed preflight must produce no loading side effects");
 }
 
 #[test]
