@@ -743,6 +743,27 @@ relevance ≥ 4、originality ≥ 4，正向标签含 `urgency`（时效需求�
 第 2 层正确引用（包括非法/缺失 replyTo 和合法模型优先）、第 3 层不发/带引用发出，
 并检查实际发送日志中的 reply 段。
 
+### 入站引用关系（R）
+
+OneBot 数组 `reply.data.id` 和 CQ `[CQ:reply,id=…]` 都表示被引用消息的**协议消息 ID**，
+不是发言人 QQ 号。引擎在不改变原有正文占位文本的前提下，把每条新入站消息的引用观察
+写入 `inbound_reply_relations`：仅同聊天、唯一协议 ID 命中时填目标 `message_key`；缺失、
+无效、未找到和歧义分别留原因。`inbound_reply_status` 视图也列出无引用记录的旧消息，
+其状态为 `unknown`，不会从旧正文猜测引用。是否引用了机器人须再看目标消息的
+`sender` / `self`。
+
+这张表是 schema 变更。旧库缺表时 `Store::open` 拒绝启动并提示 `./agent update full`；
+现有完整更新路径的 `StoreMigration::required` 经消息身份迁移钩子发现缺表，备份、排空后
+在事务内创建表、视图和清理触发器，重复迁移幂等。`update apply` 仍拒绝这次 schema 变更。
+可只读查询：
+
+```sql
+SELECT r.source_message_key,r.raw_target_id,r.target_message_key,r.status,r.reason,
+       target.sender,target.self
+FROM inbound_reply_status r
+LEFT JOIN messages target ON target.message_key=r.target_message_key;
+```
+
 ### 出站确认与对账
 
 发送 ACK 带 `message_id` 后先记录 `deliveries.status=sent_unconfirmed`、

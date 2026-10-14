@@ -64,6 +64,36 @@ impl Store {
         tx.commit()?;
         Ok(result)
     }
+    /// Store the new inbound message and its observed reply state atomically.
+    /// Direct/legacy Store writes have no segment evidence and remain `unknown`.
+    pub fn record_inbound_message(&self, m: &Value, reply: ReplyInput) -> Result<(bool, String)> {
+        let tx = self.immediate()?;
+        let (inserted, key) = self.record_message_in_transaction(m, true)?;
+        if inserted {
+            let (raw, target, status, reason) = match reply {
+                ReplyInput::Target(id) => {
+                    let matches = self.rows(
+                        "SELECT message_key FROM messages WHERE chat=? AND id=? AND message_key<>? LIMIT 2",
+                        params![m["chat"].as_str(), id, key],
+                    )?;
+                    match matches.as_slice() {
+                        [one] => (Some(id), one["message_key"].as_str().map(str::to_owned), "resolved", "matched"),
+                        [] => (Some(id), None, "unresolved", "target_not_found"),
+                        _ => (Some(id), None, "unresolved", "ambiguous"),
+                    }
+                }
+                ReplyInput::MissingId => (None, None, "unresolved", "missing_id"),
+                ReplyInput::InvalidId => (None, None, "unresolved", "invalid_id"),
+                ReplyInput::NoReply => (None, None, "unresolved", "no_reply_segment"),
+            };
+            self.execute(
+                "INSERT INTO inbound_reply_relations(source_message_key,raw_target_id,target_message_key,status,reason) VALUES(?,?,?,?,?)",
+                params![key, raw, target, status, reason],
+            )?;
+        }
+        tx.commit()?;
+        Ok((inserted, key))
+    }
     pub fn message(&self, m: &Value) -> Result<bool> {
         Ok(self.record_message(m)?.0)
     }

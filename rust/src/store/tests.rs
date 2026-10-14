@@ -28,7 +28,7 @@ fn schema_migration_and_constraints() -> Result<()> {
         .execute("INSERT INTO activity_rhythm(id) VALUES(1)", [])
         .is_err());
     let again = Store::initialize(s.db)?;
-    assert_eq!(again.schema()?["tables"].as_object().unwrap().len(), 22);
+    assert_eq!(again.schema()?["tables"].as_object().unwrap().len(), 23);
     Ok(())
 }
 
@@ -67,6 +67,25 @@ fn received_at_migration_is_idempotent_and_marks_unknown_history() -> Result<()>
         store.rows("SELECT count(*) AS n FROM migration_received_at_v1", [])?[0]["n"],
         1
     );
+    drop(store);
+    fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
+fn reply_relation_migration_requires_full_and_does_not_invent_old_edges() -> Result<()> {
+    let path = std::env::temp_dir().join(format!("qq-reply-relation-{}-{}.sqlite", std::process::id(), rand::random::<u64>()));
+    let store = Store::open(&path)?;
+    let (_, key) = store.record_message(&message("before-r", 100.))?;
+    store.db.execute_batch("DROP VIEW inbound_reply_status; DROP TRIGGER inbound_reply_cleanup; DROP TABLE inbound_reply_relations;")?;
+    drop(store);
+    assert!(Store::requires_message_key_migration(&path)?);
+    assert!(Store::open(&path).err().is_some_and(|error| error.to_string().contains("update full")));
+    Store::migrate_message_keys(&path)?;
+    Store::migrate_message_keys(&path)?;
+    let store = Store::open(&path)?;
+    assert_eq!(store.rows("SELECT source_message_key,status,target_message_key FROM inbound_reply_status WHERE source_message_key=?", [&key])?,
+        vec![json!({"source_message_key":key,"status":"unknown","target_message_key":null})]);
     drop(store);
     fs::remove_file(path)?;
     Ok(())

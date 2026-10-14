@@ -19,7 +19,8 @@ impl Store {
     }
 
     pub(crate) fn requires_message_key_migration(path: impl AsRef<Path>) -> Result<bool> {
-        Self::message_key_migration_required_on(&Connection::open(path)?)
+        let db = Connection::open(path)?;
+        Ok(Self::message_key_migration_required_on(&db)? || Self::reply_migration_required_on(&db)?)
     }
 
     /// All message references change in one transaction. Missing targets remain as
@@ -28,6 +29,8 @@ impl Store {
         let mut db = Connection::open(path)?;
         let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         if !Self::message_key_migration_required_on(&tx)? {
+            Self::install_reply_schema(&tx)?;
+            tx.commit()?;
             return Ok(());
         }
         tx.execute_batch(
@@ -77,6 +80,7 @@ impl Store {
         }
         migrate_source_json(&tx)?;
         tx.execute("INSERT OR IGNORE INTO migration_message_key_v1 VALUES(1)", [])?;
+        Self::install_reply_schema(&tx)?;
         tx.commit()?;
         Ok(())
     }

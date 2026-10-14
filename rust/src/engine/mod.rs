@@ -595,13 +595,19 @@ impl Engine {
         };
         let mut value = serde_json::to_value(&m)?;
         value["received_at"] = json!(incoming.received_at);
+        let reply = incoming.raw.as_ref().map(policy::inbound_reply).unwrap_or_else(|| {
+            incoming.segments.iter().find_map(|segment| match segment {
+                Segment::Reply { id } => Some(crate::store::ReplyInput::Target(id.clone())),
+                _ => None,
+            }).unwrap_or(crate::store::ReplyInput::NoReply)
+        });
         let mut core = self.core();
         let state = if now - m.ts > a.active_window_seconds {
             None
         } else {
             core.state(&chat, a.max_active_chats)
         };
-        let (inserted, key) = self.db()?.record_message(&value)?;
+        let (inserted, key) = self.db()?.record_inbound_message(&value, reply)?;
         if !inserted { return Ok(()); }
         value["message_key"] = json!(key);
         if a.identity.enabled && incoming.chat.kind == ChatKind::Group {
@@ -708,6 +714,7 @@ impl Engine {
         }
         let mut value = serde_json::to_value(&m)?;
         value["received_at"] = json!(now);
+        let reply = policy::inbound_reply(event);
         // 指令先去重再执行；命中后不 capture、不触发普通回复或常规学习。
         let raw = if let Some(s) = event["message"].as_str() {
             s.to_owned()
@@ -730,7 +737,7 @@ impl Engine {
             && raw.trim() == "/还原"
         {
             let db = self.db()?;
-            let (inserted, key) = db.record_message(&value)?;
+            let (inserted, key) = db.record_inbound_message(&value, reply.clone())?;
             if !inserted {
                 (self.options.log)("message_dropped", json!({"chat":m.chat,"message_key":key,"raw_id":m.id,"reason":"duplicate_message","path":"identity_command"}));
                 return Ok(());
@@ -752,7 +759,7 @@ impl Engine {
                 .any(|c| raw.trim().starts_with(c))
         {
             let db = self.db()?;
-            let (inserted, key) = db.record_message(&value)?;
+            let (inserted, key) = db.record_inbound_message(&value, reply.clone())?;
             if !inserted {
                 (self.options.log)("message_dropped", json!({"chat":m.chat,"message_key":key,"raw_id":m.id,"reason":"duplicate_message","path":"teaching_command"}));
                 return Ok(());
@@ -774,7 +781,7 @@ impl Engine {
             };
             Some(s)
         };
-        let (inserted, key) = self.db()?.record_message(&value)?;
+        let (inserted, key) = self.db()?.record_inbound_message(&value, reply)?;
         if !inserted {
             (self.options.log)("message_dropped", json!({"chat":m.chat,"message_key":key,"raw_id":m.id,"reason":"duplicate_message","path":"ordinary"}));
             return Ok(());

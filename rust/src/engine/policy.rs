@@ -452,6 +452,74 @@ pub(crate) fn replace_cq(s: &str, mut replace: impl FnMut(&str) -> Option<String
     out
 }
 
+/// Extract OneBot reply metadata without changing the existing text projection.
+/// `id` is the quoted message's protocol ID, never a QQ user ID.
+pub(crate) fn inbound_reply(event: &serde_json::Value) -> crate::store::ReplyInput {
+    use crate::store::ReplyInput;
+    use serde_json::Value;
+    let valid = |id: &str| !id.is_empty() && id.len() <= 256
+        && id.trim() == id && !id.chars().any(char::is_control);
+    let segments: Vec<Option<&Value>> = if let Some(parts) = event["message"].as_array() {
+        parts.iter().filter(|part| part["type"] == "reply")
+            .map(|part| part["data"].get("id")).collect()
+    } else if let Some(message) = event["message"].as_str() {
+        let mut found = Vec::new();
+        let mut rest = message;
+        while let Some(start) = rest.find("[CQ:") {
+            rest = &rest[start + 4..];
+            let Some(end) = rest.find(']') else { break; };
+            let body = &rest[..end];
+            if body.split(',').next() == Some("reply") {
+                let ids: Vec<_> = body.split(',').skip(1)
+                    .filter_map(|field| field.split_once('='))
+                    .filter(|(name, _)| *name == "id")
+                    .map(|(_, id)| id).collect();
+                found.push(match ids.as_slice() {
+                    [] => ReplyInput::MissingId,
+                    [id] => {
+                        let id = id.replace("&#44;", ",").replace("&#91;", "[")
+                            .replace("&#93;", "]").replace("&amp;", "&");
+                        if valid(&id) { ReplyInput::Target(id) } else { ReplyInput::InvalidId }
+                    }
+                    _ => ReplyInput::InvalidId,
+                });
+            }
+            rest = &rest[end + 1..];
+        }
+        return match found.as_slice() {
+            [] => ReplyInput::NoReply,
+            [one] => one.clone(),
+            _ => ReplyInput::InvalidId,
+        };
+    } else { return ReplyInput::NoReply; };
+    match segments.as_slice() {
+        [] => ReplyInput::NoReply,
+        [None] | [Some(Value::Null)] => ReplyInput::MissingId,
+        [Some(Value::String(id))] if valid(id) => ReplyInput::Target(id.clone()),
+        _ => ReplyInput::InvalidId,
+    }
+}
+
+#[cfg(test)]
+mod inbound_reply_tests {
+    use super::inbound_reply;
+    use crate::store::ReplyInput;
+    use serde_json::json;
+
+    #[test]
+    fn parses_both_wire_shapes_without_stringifying_invalid_ids() {
+        assert_eq!(inbound_reply(&json!({"message":[{"type":"reply","data":{"id":"1313390833"}}]})),
+            ReplyInput::Target("1313390833".into()));
+        assert_eq!(inbound_reply(&json!({"message":"[CQ:reply,id=1313390833] text"})),
+            ReplyInput::Target("1313390833".into()));
+        assert_eq!(inbound_reply(&json!({"message":[{"type":"reply","data":{"id":{}}}]})),
+            ReplyInput::InvalidId);
+        assert_eq!(inbound_reply(&json!({"message":[{"type":"reply","data":{}}]})),
+            ReplyInput::MissingId);
+        assert_eq!(inbound_reply(&json!({"message":"ordinary text"})), ReplyInput::NoReply);
+    }
+}
+
 /// 异步解析转发后再进入同步引擎；关闭开关或拉取失败时完整保留原事件。
 /// 安全闸门比“感兴趣”更靠前：先复用来源/时间校验，不递归读取附件或嵌套转发。
 pub async fn resolve_forwards(
