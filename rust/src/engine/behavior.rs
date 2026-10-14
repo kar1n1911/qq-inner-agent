@@ -86,6 +86,54 @@ pub struct SwitchState {
 
 pub type CompiledGraph = GraphDocument;
 
+/// Observations from the unchanged built-in executor. A trace is diagnostic:
+/// it never authorizes a transition or substitutes for a graph node executor.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct NodeVisit {
+    pub node: String,
+    pub outcome: String,
+}
+
+pub(super) struct CycleTrace<'a> {
+    engine: &'a Engine,
+    chat: &'a str,
+    visits: Vec<NodeVisit>,
+    terminal: Option<String>,
+}
+
+impl<'a> CycleTrace<'a> {
+    pub(super) fn new(engine: &'a Engine, chat: &'a str) -> Self {
+        Self { engine, chat, visits: Vec::new(), terminal: None }
+    }
+
+    pub(super) fn visit(&mut self, node: &str, outcome: &str) {
+        if self.engine.behavior_graph.is_some() {
+            self.visits.push(NodeVisit { node: node.into(), outcome: outcome.into() });
+        }
+    }
+
+    pub(super) fn stop(&mut self, reason: &str) {
+        self.terminal = Some(reason.into());
+    }
+
+    pub(super) fn is_stopped(&self) -> bool {
+        self.terminal.is_some()
+    }
+}
+
+impl Drop for CycleTrace<'_> {
+    fn drop(&mut self) {
+        if let Some(graph) = &self.engine.behavior_graph {
+            (self.engine.options.log)("behavior_path", json!({
+                "chat": self.chat,
+                "graph_hash": graph.graph_hash,
+                "visits": self.visits,
+                "terminal": self.terminal.as_deref().unwrap_or("unclassified"),
+            }));
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error, Eq, PartialEq)]
 pub enum GraphError {
     #[error("duplicate_node:{0}")]
