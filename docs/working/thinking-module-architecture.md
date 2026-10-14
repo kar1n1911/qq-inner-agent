@@ -82,7 +82,7 @@
 
 ## 6. 现有文档核对
 
-- `docs/ARCHITECTURE.md:39-57,62-69` 的输入图漏了 P2 中立入口、命令分支、expectation 观察、回填仅感知与 `tick` 中①/②初筛；并把 `normalize` 说成“未过期”过滤，而代码保留旧消息入库，活动窗口只决定是否建活跃会话。`policy.rs:671-679,723-883`；`mod.rs:710-749`。其中 `tick` 的 `mod.rs:659` 行号已过期（现为 `:912`）。
-- `docs/DEVELOPMENT.md:127` 的“候选→评估→表达→预测→发送”顺序与代码不符：FORECAST/assessment 在 ARTICULATION 前。`mod.rs:1949-2081,2175`。同页 `:137` 说 `@` 被 `available()` 吞掉也不符合当前 `tick` 的点名唤醒和 `cycle` 条件分支。`mod.rs:979-986,1453-1457`。
-- `docs/working/audit-io.md:39-82` 是过期审计：当前已校验多气泡长度/内容与场景，首条也延迟，失败即停且逐片段复核静默；勿据其旧行号设计 X4。`mod.rs:2145-2150,2183-2231,2355-2440`；`persona/humanize.rs:168-200`。
+- **已修正** `docs/ARCHITECTURE.md` 的输入图、入口与过期行号，并按 `Engine::ingest`/`ingest_incoming`、`Engine::tick` 引用现有路径；依据 `main.rs::Runtime::notice`、`policy.rs::normalize`、`mod.rs::ingest_with_source`/`tick`。
+- **已修正** `docs/DEVELOPMENT.md` 的主链顺序与点名可唤醒描述；FORECAST/assessment 在 ARTICULATION 前，关闭 `sending` 时则不执行预测/assessment。依据 `mod.rs:2043-2123,2217-2224` 与 `tick`/`cycle` 的 `Hint::SelfChat` 分支。
+- **已修正** `docs/working/audit-io.md` 中 IO-01 至 IO-06 的多气泡旧结论；当前有长度/内容/场景门控、逐条账本、首条延迟、失败即停及逐片段静默复核。Q 的同轮重复结论语义校验仍待处理。依据 `mod.rs:2187-2274,2390-2482`；`persona/humanize.rs:168-201`。
 - 现有总览没有明确写出 `decision.rs:1` 的①消息回复、②群状态话题、③共用流水线的“三层”含义，也未完整盘点媒体支线/旧 pause 与共享调度的关系；这是文档缺口，不应把三层等同三条独立入口。

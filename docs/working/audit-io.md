@@ -26,60 +26,43 @@
 | 其他 | 出站 | `topic/mod.rs`（RSS/GitHub）、`media/mod.rs::read_image` | 请求 10s / 响应 ≤256 KiB；素材单文件 2 MiB、超时 15s、总量 100 MiB |
 | 其他 | 双向 | `control.rs`（Unix socket NDJSON） | 单行 ≤1 MiB、响应 redact 密钥 |
 
-**偏差计数**：high 6 · medium-high 4 · medium 5 · low/观察 5（另有「无文档依据但可疑」4 条、已确认一致 20 项、对既有结论的更正 2 条、被推翻的并行审计结论 2 条）。
+**原审计偏差计数（2026-10-10 快照，非当前待修数）**：high 6 · medium-high 4 · medium 5 · low/观察 5（另有「无文档依据但可疑」4 条、已确认一致 20 项、对既有结论的更正 2 条、被推翻的并行审计结论 2 条）。下列 IO-01 至 IO-06 已按当前代码重新核对，不能再计为待修。
 
 ---
 
 ## 二、按根因归类
 
-### 根因 ① 出站校验只作用于一个字段，真正发出去的是另一个字段
+### 根因 ① 多气泡出站问题的当前状态（原 IO-01 至 IO-06 已修）
 
-这是本轮最集中的一处：`ARTICULATE` 的**内容闸门**全部读 `response["text"]`，而**实际发送**在多气泡开启时用的是 `response["bubbles"]`。
+原结论是 2026-10-10 的代码快照；以下逐项记录当前行为，勿再按原条目修复。
 
-#### IO-01 `bubbles` 绕过 `maxOutputChars` 与全部内容闸门 ✅ high
+#### IO-01 `bubbles` 绕过长度与内容闸门：已过时
 
-- **设计**：`docs/working/prompt-and-learning-design.md:537` ——「传输层存在硬上限：`maxOutputChars` 与 OneBot 的字段长度限制，超了根本发不出去」；
-  `docs/working/human-like-replies.md:175` ——「任一片段仍受 `maxOutputChars` 与总长度约束」。
-- **代码**：
-  - 闸门只作用于 `raw = response["text"]`：`engine/mod.rs:1903`、`1907-1917`（`content_allowed`、`<think>` 标签拒绝、空正文判定）；
-  - 截断只发生在 `decorate(&response, …, max_output_chars)`，而它只读 `response["text"]`：`persona/expression.rs:253-257`；
-  - 真正发送的序列是 `response["bubbles"]`，未经任何长度或内容处理：`engine/mod.rs:1999-2013`、`2052-2055`。
-- **后果**：模型把超长或违规内容放进 `bubbles`、`text` 填一句无关的合规话，即可完整绕过 `maxOutputChars`、情绪内容闸门与 `<think>` 泄漏检查，直接发给群。
-  `bubbles` 只在 `a.multi_bubble=true` 时被读取，但该开关是远端可配置项。
-- **备注**：`audit-design-vs-implementation.md` 的 C2 已报「绕过 `maxOutputChars`」，本文补上它与内容闸门同源的证据。
+当前只有配置与场景门控通过才读取 `bubbles`；2–3 条时逐条检查非空、每条不超过 `maxOutputChars`、合计不超过 `min(maxOutputChars,90)`，失败即拒绝；发送前逐条检查情绪内容与 `<think>`/`<analysis>` 标签。`engine/mod.rs:2187-2192,2225-2234,2253-2274`；`persona/humanize.rs:179-193`。原来“任意超长/违规气泡可直接发送”的结论不再成立。
 
-#### IO-02 落库的自身消息与真正发出的内容不一致 ✅ medium-high
+#### IO-02 多气泡仅落库原始 `text`：已过时
 
-- **设计**：`docs/ARCHITECTURE.md:114` ——「发送后落库 `deliveries(message_id)` + `messages(self=1)`」（落库对象是**发出的那条**）。
-- **代码**：`content = text(&decorated,"text")`（`engine/mod.rs:1996`）→ 发送 `seq = bubbles`（`2009-2013`）→ 但落库的是 `content`（`engine/mod.rs:2106`）。
-- **后果**：多气泡时 `messages` 只留一行、且正文是**未被拆分的原始 text**，与群里实际看到的 `bubbles` 不符。
-  下一轮的历史/`own` 重复检测（`engine/mod.rs:1935-1940`）读的是这段错正文，模型会以为自己说过别的话。
+实际发送序列取已校验的 `bubbles`；每条有独立 delivery，收到有效 ACK 后以**该气泡正文**写入自身消息。`engine/mod.rs:2390-2397,2429-2431,2463-2475`。须区分 `ExpressionMemory::used` 仍记录 `decorated.text`（`:2498-2503`），它不是 `messages(self=1)` 的实发记录；原“自身消息只留一行”的结论不成立。
 
-#### IO-03 气泡失败不中断后续发送 ✅ high
+#### IO-03 气泡失败后仍继续发送：已过时
 
-- **设计**：`docs/working/human-like-replies.md:178` ——「**任一片段失败即停止后续发送**，并沿用现有『不确定则不重发』的策略」。
-- **代码**：循环体 `sent = Some(result);` 之后**不 break**，只有 `available()` 为假才 break：`engine/mod.rs:2017-2066`（`2065` 为赋值，`2032-2040` 为唯一的 break 分支）。
-- **后果**：首条失败后仍会继续发第 2、3 条；且 `sent` 只保留**最后一条**结果，首条失败被末条成功掩盖，整轮记为 `sent`（`2070-2120`）。这与「已见前审计 C1」同源，本文确认其在当前 `main` 仍然成立。
+发送或 ACK 失败即 `break`，不确定结果也不自动重发；先前成功气泡的 delivery 保持已成功，失败气泡单独记状态。`engine/mod.rs:2463-2482,2537-2545`。
 
-#### IO-04 气泡无条数上限、无档位门控、无场景门控 ✅ high（已见前审计 C3，补充依据）
+#### IO-04 无条数、档位和场景门控：已过时
 
-- **设计**：`docs/working/human-like-replies.md:172` 「1–3 条」；`:176` 「只有 `short`/`medium` 档才允许拆分」；`:179` 「拆分只在低风险场景启用（求助/技术回答保持单条）」。
-- **代码**：`engine/mod.rs:1999-2008` 只判断 `a.multi_bubble`，对条数、`length_target`、`hint`、是否为求助**全无门控**。
-  讽刺的是同一段代码在 `1826-1827` 为 face-only 正确地用上了 `length_target != "long"`，说明档位变量当时就在手边。
-- **后果**：`long` 档与求助回答也会被切碎，且条数由模型决定（可远超 3 条），直接违背「便于阅读」的设计意图。
+仅 `medium` 档，且自上次自身发言后的本轮人类消息均命中“纯附和/笑声”白名单时可拆；否则走单条正文。空数组或单元素也回退单条，真正拆分限定 2–3 条。此场景门控依据人类消息，并不解析模型生成的每条气泡的语义。`engine/mod.rs:2187-2192`；`persona/humanize.rs:168-193`。
 
-#### IO-05 首条消息没有打字延迟，且延迟公式与文档不符 ✅ high（已见前审计 C4，补充数值依据）
+#### IO-05 首条无延迟、公式错误：已过时
 
-- **设计**：`docs/working/human-like-replies.md:185` —— 发送前 `min(2.5s, 0.4s + 字符数 × 0.02s)` + 抖动；`:186` —— 气泡之间**再**加 0.3–0.8s。
-- **代码**：`engine/mod.rs:2018-2029`，延迟写在 `if i > 0` 内 → **首条（也是绝大多数回复的唯一一条）零延迟**；
-  且数值是 `700ms + 字数 × 15ms + 抖动(≤300×(1+|mood|))`，既非「发送前」公式，也没有 `min(2.5s, …)` 上限。
-- **后果**：「改动 8」对主力路径完全没实现；抖动还与文档的固定 0.3–0.8s 语义不同（随心情无上限放大）。
+每条发送前（含首条）都等待 `min(2500ms,400ms+20ms×字符数)+0–100ms`；后续条再加 `300–800ms`，等待期间不持发送用的 Core/Store 锁。`engine/mod.rs:2397-2402`；`persona/humanize.rs:196-201`。
 
-#### IO-06 气泡之间不重查静默时段 ✅ medium-high（已见前审计 C5，补充依据）
+#### IO-06 气泡间不重查静默：已过时
 
-- **设计**：`docs/working/human-like-replies.md:188` ——「延迟必须计入现有的活跃窗口/静默时段判定，且**静默时段开始时不得把已排队的消息发出**」。
-- **代码**：`engine/mod.rs:2032` 只重查 `self.available(self.now())`（作息 × 节律）；`policy::quiet(...)` 只在 `1941`（发送前）判过一次。
-- **后果**：静默时段在气泡间隔中开始后，已排队的第 2、3 条仍会发出。
+每条延迟后重新检查版本/活动窗口、活跃状态、静默、在线与配额；关闭闸门则停止后续发送。`engine/mod.rs:2403-2427`。
+
+**Q 的剩余问题**：提示词要求各气泡是独立短句、合起来与 `text` 意思一致（`prompts.rs:81-87`）；代码只做结构、长度与安全检查，历史重复抑制读的是 `decorated.text`，没有逐气泡比较，也没有“同一结论不得换词重复”的语义校验（`engine/mod.rs:2257-2274,2300-2311`）。因此 Q 应聚焦**同一轮各气泡的结论重复**，保留“同一主题从不同侧面补充评价”的合法空间；不要再重做 IO-01 至 IO-06 已有的发送闸门。
+
+原审计中**仍成立的事实**是：多气泡时实际发的是 `bubbles` 而非 `decorated.text`，且功能受配置开关控制（`engine/mod.rs:2187-2189,2388-2391`）。原审计由此推导出的“安全闸门完全旁路、只落库原文、失败继续发”等结论已不成立。
 
 ### 根因 ② 入站路径上的网络 I/O 无预算约束，且阻塞主循环
 
@@ -291,10 +274,10 @@
 
 ## 五、建议修复顺序
 
-1. **IO-01 / IO-02 / IO-03**（同一段代码）：把 `bubbles` 纳入 `decorate` 与内容闸门、落库实发序列、失败即停止。这是当前唯一「模型可控、可绕过安全闸门」的通道。
+1. **IO-01 / IO-02 / IO-03：已修**。多气泡逐条校验、落库实发序列、失败即停；不再作为修复项。Q 的同轮重复结论问题见根因①末段。
 2. **IO-10 / IO-11**：两条红线。IO-10 只差合并 `forward-identity` 的 `e25c126`；IO-11 需要把 `/记住` 接回 `apply_learning_review` 并删掉 `owner_teaching.rs:69` 的假注释。
 3. **IO-08 / IO-09**：把媒体下载移出事务与 `core` 锁（照 OCR 的写法），并给 `enable_media` 加记忆化。二者叠加是入站热路径上最重的锁持有。
-4. **IO-04 / IO-05 / IO-06**：多气泡的条数/档位/场景门控与延迟公式，按 `human-like-replies.md` 逐条对齐。
+4. **IO-04 / IO-05 / IO-06：已修**。条数/档位/场景门控、首条和条间延迟、逐片段静默复核均已接入；不再作为修复项。
 5. **IO-07**：给 `resolve_forwards` 加每次事件的展开次数上限，并把入站处理移出主循环的 await 路径（或以有界并发 + 独立任务消费 `notices`）。
 6. **IO-12 / IO-13 / IO-14**：补 cleanup 触发器或让 `prune()` 覆盖这八张表；删除 `notes` 死表；给 `media_stages` 定一个消费者或停写。
 7. **IO-15 / IO-16 / IO-17 / IO-18**：契约缺口与低危观察项，随相关模块维护时一并处理。
@@ -306,7 +289,7 @@
 
 - 本轮的 oracle 来自 12 份文档的**逐句抽取**（362 条可判定要求 + 数值常量表），而非印象式阅读；每条偏差都能指回一句明文。
 - 两处需要明确区分：`docs/ARCHITECTURE.md` 与 `docs/DEVELOPMENT.md` 自述为**现状快照**而非规范（`ARCHITECTURE.md:3`、`DEVELOPMENT.md:5-6`），
-  因此它们与代码不符时是「文档过期」而不是「实现违规」——例如 `ARCHITECTURE.md:111` 仍写多气泡契约、而 `DEVELOPMENT.md:48` 已承认它从未生效。
+  因此它们与代码不符时是「文档过期」而不是「实现违规」；`ARCHITECTURE.md` 与 `DEVELOPMENT.md` 的多气泡现状描述已按当前代码修正。
 - **未覆盖**：`docs/PLUGIN-PORTS.md` 的中立端口模型（P1–P6）属**设计目标**，当前实现未接线，故未纳入本次偏差统计；
   一次性的性能数字（如每条消息的 DDL 开销）未做实测，只报结构性问题。
 - **本工作区无线上 `data/`**（无 `control.sock`、无 `agent.sqlite`、无 `agent.log`），也没有构建好的 release 二进制；

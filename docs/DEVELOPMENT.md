@@ -11,13 +11,13 @@
 
 | 系统 | 职责 | 核心文件 | 现状 |
 | --- | --- | --- | --- |
-| [人格系统](#1-人格系统) | persona / 身份自治 / 过往情景 / 人类化 | `config.rs` `persona/*` | ⚠️ 身份自治被 traits 卡住;多气泡契约缺字段 |
+| [人格系统](#1-人格系统) | persona / 身份自治 / 过往情景 / 人类化 | `config.rs` `persona/*` | ⚠️ 身份自治被 traits 卡住;多气泡契约已接线 |
 | [记忆系统](#2-记忆系统) | 三层记忆 / 召回排序 / 学习 / 词元 | `memory/*` `store/learning.rs` | ⚠️ `short_term` 正常;`traits`/`long_term` 近乎空 |
 | [情绪系统](#3-情绪系统) | 心情/认同/好感 + 二维 disposition | `persona/affect.rs` | ✅ 在跑;disposition 落到 `Withdrawn`(动机 ×0.2) |
 | [记忆召回](#4-记忆召回) | recall 下钻 | `persona/recall.rs` | ✅ |
-| [决策系统](#5-决策系统) | cycle / 三层决策 / 策略 / 发送 / 活跃 / 观察 | `engine/*` | ✅;`@` 会被可用性闸门吞掉 |
+| [决策系统](#5-决策系统) | cycle / 三层决策 / 策略 / 发送 / 活跃 / 观察 | `engine/*` | ✅;点名 pending 回复可唤醒 |
 | [素材系统](#6-素材系统) | 素材语料 + 图片 OCR | `media/*` | ⚪ 语料未启用;✅ OCR 在用 |
-| [话题来源](#7-话题来源-21) | 外部内容抓取 + 群间转发 | `topic/*` | ❌ relay 死代码;⚠️ topicSource 无来源 |
+| [话题来源](#7-话题来源-21) | 外部内容抓取 + 群间转发 | `topic/*` | ✅ 低风险 relay 有条件接线;来源为空时无内容可抓取 |
 | [传输系统](#8-传输系统) | OneBot v11 + LLM provider | `transport/*` | ✅ |
 | [存储与配置](#9-存储与配置) | SQLite / 配置协议 / 文件协议 | `store*` `config.rs` `settings.rs` | ✅ |
 | [控制与运行时](#10-控制与运行时) | 控制套接字 / 主循环 / 主人教学 | `control.rs` `main.rs` | ✅ |
@@ -44,10 +44,10 @@ agent "是谁、怎么说话"这一整条链。
 | **模型自拟昵称**(贴吧式) | `persona/mod.rs` — `NAME_PROMPT`/`member_names`/`model_nickname`;引擎 tick 里调模型生成 |
 | **过往情景**(§23:不可变虚构自身过往) | `persona/backstory.rs` — `create`(只 INSERT)/`add_detail`(只追加)/`recall` |
 | 人类化运行时片段(只发表情 / 多气泡指令) | `persona/humanize.rs` — `FACE_ONLY_INSTRUCTIONS`/`MULTI_BUBBLE_INSTRUCTIONS` |
-| 多气泡 + 打字延迟发送 | `engine/mod.rs` — articulation 后的发送循环(解析 `bubbles`、条间延迟随心情抖动) |
+| 多气泡 + 打字延迟发送 | `engine/mod.rs` — articulation 后校验 `bubbles`、逐条延迟/复核/发送；延迟公式在 `persona/humanize.rs::bubble_delay_ms` |
 
 **现状**:身份自治开关全开但**从未尝试**——`enough()` 要求 `traits ≥ minTraits(3)`,而 `traits` 层只有 1 条;
-多气泡开关为真但**从未发出过**——`ARTICULATION` 的输出契约里没有 `bubbles` 字段(见 `TODO.md` A2 / B4)。
+多气泡已接入 `ARTICULATION` 输出契约；配置允许且通过场景、数量、长度和内容校验时逐条发送（见 `engine/mod.rs::cycle`、`persona/humanize.rs::multi_bubbles`）。
 
 **本系统用到的对外接口**:`set_group_card` / `set_qq_profile` / `set_qq_avatar` / `set_self_longnick`(见[传输系统](#8-传输系统))。
 
@@ -124,7 +124,7 @@ JSON 逐项包含 `IDENTITY`、`OUTPUT_CONTRACT`、`FORMATION`、`EVALUATION`、
 
 | 功能 | 实现位置 |
 | --- | --- |
-| 引擎 cycle(候选→评估→表达→预测→发送) | `engine/mod.rs` — `cycle()`/`media_cycle()`/`tick()`/`ingest()` |
+| 引擎 cycle(候选→评估→选择→预测/发送评估→表达→发送；关闭 `sending` 时跳过预测/评估) | `engine/mod.rs` — `cycle()`/`media_cycle()`/`tick()`/`ingest()` |
 | X4 第一步：内建文本行为图 | `engine/behavior.rs` — artifact schema、slot/固定 K 节点、DAG 编译与可序列化图；`engine/mod.rs` 的 `Options.behavior_graph` 显式启用。默认 `false`，继续走旧 `cycle`；启用时编图后由 `BuiltinText` 调用原 `cycle`，媒体链不走此图。`behavior_graph_status()` 可查询所选路径与图。此阶段图是经过校验的执行契约，尚不逐节点执行或接受进程外行为插件。行为类型放 `engine/behavior.rs`，六类进出端口类型仍只在 `engine/io/`（X1）。 |
 | 三层决策(①②拆分 + 零模型初筛) | `engine/decision.rs`;门控 `agent.threeLayerDecision` |
 | 逐消息策略(allowed/normalize/quiet/select/repeated/长度档位) | `engine/policy.rs` |
@@ -135,7 +135,7 @@ JSON 逐项包含 `IDENTITY`、`OUTPUT_CONTRACT`、`FORMATION`、`EVALUATION`、
 | 入群观察闸门 | `engine/orientation.rs`(纯逻辑);持久化在 `store/orientation.rs` |
 | forward 段收发(接收侧拉取合并聊天记录 + 标注"外部信息") | `engine/policy.rs` — `resolve_forwards`/`resolve_forwards_backfill` |
 
-**现状**:✅ 主链路正常;三处待修——`@` 被 `available()` 吞掉、发送概率偏低、长度档位偏短(见 `TODO.md` B1/B2/A3)。
+**现状**:✅ 主链路正常；被点名（含私聊）的 pending 消息可越过可用性闸门；发送概率与长度档位仍按现有配置和策略计算（见 `engine/mod.rs::tick`/`cycle`）。
 
 **本系统用到的对外接口**:`get_group_info` / `_get_group_notice` / `get_group_msg_history` / `get_forward_msg` / `get_group_member_list`(见[传输系统](#8-传输系统))。
 
@@ -162,15 +162,13 @@ JSON 逐项包含 `IDENTITY`、`OUTPUT_CONTRACT`、`FORMATION`、`EVALUATION`、
 | 功能 | 实现位置 |
 | --- | --- |
 | 外部新鲜内容(GitHub/RSS 抓取 + 相关度 + 节流/预算/缓存) | `topic/mod.rs` — `fetch`/`parse`/`relevance`/`collect`;配置 `agent.topicSource` |
-| 群间转发(低风险转手 / 高风险门控 + 去重 + 责任线/自审) | `topic/relay.rs` — `classify`/`is_duplicate`/`safety_gate`/`decide`;配置 `agent.relay` |
+| 群间转发(低风险候选链接 / 高风险合并转发) | `topic/relay/links.rs` — 低风险收集/审核；`topic/relay.rs` — 高风险纯决策；配置 `agent.relay` |
 
 **现状**:
-- `topicSource.enabled = true` 但 `github` / `feeds` **均为空**,`Settings::enabled()` 要求来源非空 → **实际不抓取**;
-- **`relay` 是死代码** —— 上述四个决策函数在**全仓 0 处引用**,文件头自述"纯决策模块,**调用方**负责抓取/审核/发送",
-  而那个调用方**从未实现**;`agent.relay.enabled = true` 等于空转。
-- ⚠️ 本文件与设计文档此前把 §21 标为「✅ 已实现」,**与代码不符**,已按实际状态改写(见 `TODO.md` E1/E2)。
+- `topicSource` 的启用由显式 `enabled` 决定；若 `github` / `feeds` 为空，收集阶段没有该类来源（`topic/mod.rs::Settings::enabled`/`Sources::collect`）。
+- **低风险 relay 已接线**：主动话题且群活动合格、`agent.relay.enabled=true` 时收集、审核候选链接，再作为不可信资料进入形成上下文（`engine/mod.rs::cycle`）；高风险合并转发路径仍未见生产调用方。
 
-**本系统用到的对外接口**:无(抓取走 HTTP,未接入)。
+**本系统用到的对外接口**:话题来源抓取走 HTTP；relay 审核走模型端口。
 
 ---
 
@@ -219,7 +217,7 @@ P2 过渡开关为进程环境变量 `QQ_INNER_ONEBOT_IO=1`；未设置时通知
 - **模型列表**:`GET {baseUrl}/models` —— 现在只被仪表盘的"选模型"用(`control.rs` 的 `models.list`)。
 - **现在用它做什么**:唯一入口 `provider_transport.rs::json(system, payload)` —— 把 payload 序列化成 user 内容,
   要求模型**只输出一个 JSON 对象**;校验失败即拒绝、不修补。六个任务共用这条路:
-  `ORIENTATION`(入群定风格)、`FORMATION`(出候选)、`EVALUATION`(评分)、`ARTICULATION`(成文)、`FORECAST`(发不发)、`LEARNING_REVIEW`(复核学习项)。
+  `ORIENTATION`(入群定风格)、`FORMATION`(出候选)、`EVALUATION`(评分)、`FORECAST`(发不发)、`ARTICULATION`(成文)、`LEARNING_REVIEW`(复核学习项)。
 
 ---
 
