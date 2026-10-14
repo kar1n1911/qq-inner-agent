@@ -1,0 +1,205 @@
+syntax = "proto3";
+
+package a_memorix.api.v1;
+
+import "a_memorix/api/v1/common.proto";
+import "google/api/annotations.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+enum SearchMode {
+  SEARCH_MODE_UNSPECIFIED = 0;
+  SEARCH_MODE_SEARCH = 1;
+  SEARCH_MODE_TIME = 2;
+  SEARCH_MODE_HYBRID = 3;
+  SEARCH_MODE_EPISODE = 4;
+  SEARCH_MODE_AGGREGATE = 5;
+}
+
+enum RelationExtractionMode {
+  RELATION_EXTRACTION_MODE_UNSPECIFIED = 0;
+  RELATION_EXTRACTION_MODE_ENABLED = 1;
+  RELATION_EXTRACTION_MODE_DISABLED = 2;
+}
+
+message RelationInput {
+  string subject = 1;
+  string predicate = 2;
+  string object = 3;
+  optional double confidence = 4;
+  google.protobuf.Struct metadata = 5;
+}
+
+message IngestTextRequest {
+  RequestContext context = 1;
+  string external_id = 2;
+  string source_type = 3;
+  string text = 4;
+  repeated string person_ids = 5;
+  repeated string participants = 6;
+  google.protobuf.Timestamp observed_at = 7;
+  google.protobuf.Timestamp valid_from = 8;
+  google.protobuf.Timestamp valid_to = 9;
+  repeated string tags = 10;
+  google.protobuf.Struct metadata = 11;
+  repeated string entities = 12;
+  repeated RelationInput relations = 13;
+  optional bool respect_filter = 14;
+  RelationExtractionMode relation_extraction = 15;
+}
+
+message IngestTextResponse {
+  repeated string stored_ids = 1;
+  repeated string skipped_ids = 2;
+  repeated string fact_claim_ids = 3;
+  repeated string warnings = 4;
+  string detail = 5;
+  string relation_extraction_job_id = 6;
+}
+
+message IngestTextInput {
+  string external_id = 1;
+  string source_type = 2;
+  string text = 3;
+  repeated string person_ids = 4;
+  repeated string participants = 5;
+  google.protobuf.Timestamp observed_at = 6;
+  google.protobuf.Timestamp valid_from = 7;
+  google.protobuf.Timestamp valid_to = 8;
+  repeated string tags = 9;
+  google.protobuf.Struct metadata = 10;
+  repeated string entities = 11;
+  repeated RelationInput relations = 12;
+  optional bool respect_filter = 13;
+  RelationExtractionMode relation_extraction = 14;
+}
+
+message BatchIngestTextRequest {
+  RequestContext context = 1;
+  repeated IngestTextInput items = 2;
+}
+
+message BatchIngestItemResult {
+  uint32 index = 1;
+  oneof result {
+    IngestTextResponse response = 2;
+    ErrorDetail error = 3;
+  }
+}
+
+message BatchIngestTextResponse {
+  repeated BatchIngestItemResult results = 1;
+  uint32 succeeded = 2;
+  uint32 failed = 3;
+}
+
+message GetMemoryRequest {
+  RequestContext context = 1;
+  oneof selector {
+    string memory_id = 2;
+    string external_id = 3;
+  }
+}
+
+message MemoryRecord {
+  string memory_id = 1;
+  string external_id = 2;
+  string source_type = 3;
+  string source = 4;
+  string content = 5;
+  google.protobuf.Struct metadata = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+  google.protobuf.Timestamp observed_at = 9;
+  google.protobuf.Timestamp valid_from = 10;
+  google.protobuf.Timestamp valid_to = 11;
+}
+
+message GetMemoryResponse {
+  MemoryRecord memory = 1;
+}
+
+message DeleteMemoryRequest {
+  RequestContext context = 1;
+  oneof selector {
+    string memory_id = 2;
+    string external_id = 3;
+  }
+  string reason = 4;
+}
+
+message DeleteMemoryResponse {
+  string operation_id = 1;
+  uint32 deleted_count = 2;
+  repeated string deleted_memory_ids = 3;
+}
+
+message SearchMemoryRequest {
+  RequestContext context = 1;
+  string query = 2;
+  optional uint32 limit = 3;
+  SearchMode mode = 4;
+  repeated string shared_conversation_ids = 5;
+  string person_id = 6;
+  google.protobuf.Timestamp time_start = 7;
+  google.protobuf.Timestamp time_end = 8;
+  optional bool respect_filter = 9;
+}
+
+message MemoryHit {
+  string memory_id = 1;
+  string kind = 2;
+  string title = 3;
+  string content = 4;
+  double score = 5;
+  string source = 6;
+  google.protobuf.Struct metadata = 7;
+}
+
+message SearchMemoryResponse {
+  string summary = 1;
+  repeated MemoryHit hits = 2;
+  bool filtered = 3;
+  bool degraded = 4;
+  bool retrieval_ready = 5;
+  string retrieval_mode = 6;
+  repeated string available_channels = 7;
+  repeated string unavailable_channels = 8;
+}
+
+service MemoryService {
+  rpc IngestText(IngestTextRequest) returns (IngestTextResponse) {
+    option (google.api.http) = {
+      post: "/v1/namespaces/{context.namespace_id}/memories:ingest"
+      body: "*"
+    };
+  }
+
+  rpc BatchIngestText(BatchIngestTextRequest) returns (BatchIngestTextResponse) {
+    option (google.api.http) = {
+      post: "/v1/namespaces/{context.namespace_id}/memories:batchIngest"
+      body: "*"
+    };
+  }
+
+  rpc GetMemory(GetMemoryRequest) returns (GetMemoryResponse) {
+    option (google.api.http) = {
+      post: "/v1/namespaces/{context.namespace_id}/memories:get"
+      body: "*"
+    };
+  }
+
+  rpc DeleteMemory(DeleteMemoryRequest) returns (DeleteMemoryResponse) {
+    option (google.api.http) = {
+      post: "/v1/namespaces/{context.namespace_id}/memories:delete"
+      body: "*"
+    };
+  }
+
+  rpc SearchMemory(SearchMemoryRequest) returns (SearchMemoryResponse) {
+    option (google.api.http) = {
+      post: "/v1/namespaces/{context.namespace_id}/memories:search"
+      body: "*"
+    };
+  }
+}

@@ -33,4 +33,9 @@ fn main() {
             .unwrap_or_else(|| "unknown".into())
     });
     println!("cargo:rustc-env=QQ_BUILD_REVISION={revision}");
+    std::env::set_var("PROTOC", protoc_bin_vendored::protoc_bin_path().expect("bundled protoc"));
+    tonic_build::configure().build_server(false).compile_protos(
+        &["proto/a_memorix/api/v1/namespace.proto", "proto/a_memorix/api/v1/memory.proto"],
+        &["proto"],
+    ).expect("A_memorix v2.0.0a4 protocol");
 }

@@ -17,6 +17,7 @@ fn manifest(name: &str, kind: PortKind) -> PortManifest {
             max_minor: None,
         },
         host_permissions: Vec::new(),
+        dependencies: Vec::new(),
     }
 }
 
@@ -104,6 +105,7 @@ impl MemoryPort for NullMemory {
     fn manifest(&self) -> &PortManifest {
         &self.manifest
     }
+    fn capabilities(&self) -> MemoryCapabilities { MemoryCapabilities::default() }
     fn upsert<'a>(&'a self, _: MemoryEntry) -> BoxFuture<'a, PortReply<()>> {
         Box::pin(async { unavailable("memory_port_unavailable") })
     }

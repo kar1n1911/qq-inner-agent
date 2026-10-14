@@ -30,6 +30,7 @@ pub trait DbPort: Send + Sync {
 
 pub trait MemoryPort: Send + Sync {
     fn manifest(&self) -> &PortManifest;
+    fn capabilities(&self) -> MemoryCapabilities;
     fn upsert<'a>(&'a self, entry: MemoryEntry) -> BoxFuture<'a, PortReply<()>>;
     fn forget<'a>(&'a self, key: &'a MemoryKey) -> BoxFuture<'a, PortReply<()>>;
     fn retrieve<'a>(&'a self, query: RetrievalQuery) -> BoxFuture<'a, PortReply<Vec<MemoryHit>>>;

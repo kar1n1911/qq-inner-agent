@@ -29,6 +29,7 @@ impl OneBotAdapter {
                 transport: TransportKind::InProcess,
                 core_api_version: VersionReq { major: 1, min_minor: 0, max_minor: None },
                 host_permissions: vec![],
+                dependencies: vec![],
             },
             action,
             connection,

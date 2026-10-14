@@ -334,6 +334,16 @@ pub struct PortManifest {
     pub core_api_version: VersionReq,
     /// Empty means no host capabilities are granted.
     pub host_permissions: Vec<HostPermission>,
+    /// Declarative runtime services used by an optional capability.
+    #[serde(default)]
+    pub dependencies: Vec<PortDependency>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PortDependency {
+    pub role: String,
+    pub needed_for: String,
+    pub required: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -390,6 +400,13 @@ pub struct ModelCapabilities {
     pub thinking_field: bool,
     pub truncation_signal: bool,
     pub list_models: bool,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct MemoryCapabilities {
+    pub text_retrieval: bool,
+    pub embeddings: bool,
+    pub relation_extraction: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -497,6 +514,8 @@ pub struct RetrievalQuery {
     pub subject: MemorySubject,
     pub layers: Vec<MemoryLayer>,
     pub limit: usize,
+    /// Optional semantic/text query; `None` requests scope-only recall.
+    pub text: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -38,6 +38,7 @@ impl TestChat {
                     max_minor: None,
                 },
                 host_permissions: vec![],
+                dependencies: vec![],
             },
             deliveries: AtomicUsize::new(0),
         }
@@ -242,6 +243,7 @@ async fn null_io_is_complete_and_real_calls_fail_explicitly() {
                 subject: MemorySubject::Group,
                 layers: vec![MemoryLayer::ShortTerm],
                 limit: 1,
+                text: None,
             })
             .await,
         PortReply::Failed {

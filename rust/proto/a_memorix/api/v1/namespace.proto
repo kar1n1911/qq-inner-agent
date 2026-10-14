@@ -1,0 +1,260 @@
+syntax = "proto3";
+
+package a_memorix.api.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+
+enum NamespaceStatus {
+  NAMESPACE_STATUS_UNSPECIFIED = 0;
+  NAMESPACE_STATUS_CREATING = 1;
+  NAMESPACE_STATUS_ACTIVE = 2;
+  NAMESPACE_STATUS_INACTIVE = 3;
+  NAMESPACE_STATUS_QUARANTINED = 4;
+  NAMESPACE_STATUS_PURGING = 5;
+}
+
+enum NamespaceRuntimeState {
+  NAMESPACE_RUNTIME_STATE_UNSPECIFIED = 0;
+  NAMESPACE_RUNTIME_STATE_CLOSED = 1;
+  NAMESPACE_RUNTIME_STATE_LOADING = 2;
+  NAMESPACE_RUNTIME_STATE_READY = 3;
+  NAMESPACE_RUNTIME_STATE_DEGRADED = 4;
+  NAMESPACE_RUNTIME_STATE_FAILED = 5;
+}
+
+message NamespaceQuota {
+  optional uint32 max_concurrent_requests = 1;
+  optional uint64 max_storage_bytes = 2;
+}
+
+message ProviderReference {
+  string provider_id = 1;
+  string model_id = 2;
+  string secret_ref = 3;
+}
+
+message NamespaceFeatureConfig {
+  optional bool episodes = 1;
+  optional bool person_profiles = 2;
+  optional bool sparse_retrieval = 3;
+  optional bool relation_vectors = 4;
+  optional bool allow_metadata_only_write = 5;
+}
+
+message RelationExtractionConfig {
+  optional bool enabled = 1;
+  optional bool default_enabled = 2;
+  string profile = 3;
+  repeated string entity_types = 4;
+  repeated string predicates = 5;
+  optional uint32 max_entities = 6;
+  optional uint32 max_relations = 7;
+  optional uint32 max_chunk_chars = 8;
+  optional uint32 chunk_overlap_chars = 9;
+}
+
+message NamespaceConfig {
+  ProviderReference embedding = 1;
+  ProviderReference llm = 2;
+  ProviderReference identity_resolver = 3;
+  ProviderReference message_source = 4;
+  NamespaceFeatureConfig features = 5;
+  RelationExtractionConfig relation_extraction = 6;
+}
+
+message NamespaceInfo {
+  string namespace_id = 1;
+  NamespaceStatus status = 2;
+  google.protobuf.Timestamp created_at = 3;
+  google.protobuf.Timestamp updated_at = 4;
+  google.protobuf.Timestamp last_active_at = 5;
+  uint64 version = 6;
+  NamespaceQuota quota = 7;
+  google.protobuf.Timestamp purge_after = 8;
+  uint64 config_version = 9;
+  NamespaceConfig config = 10;
+}
+
+message NamespaceResourceUsage {
+  uint32 active_requests = 1;
+  uint64 storage_bytes = 2;
+}
+
+message ProviderRuntimeStatus {
+  bool configured = 1;
+  bool available = 2;
+  string provider = 3;
+  string model = 4;
+  optional uint32 dimension = 5;
+  string fingerprint = 6;
+  string last_error = 7;
+}
+
+message NamespaceHealth {
+  NamespaceInfo namespace = 1;
+  NamespaceRuntimeState runtime_state = 2;
+  bool healthy = 3;
+  NamespaceResourceUsage resource_usage = 4;
+  string last_error = 5;
+  bool degraded = 6;
+  repeated string degraded_reasons = 7;
+  ProviderRuntimeStatus embedding = 8;
+  ProviderRuntimeStatus llm = 9;
+  bool paragraph_vector_pool_ready = 10;
+  bool relation_vector_pool_ready = 11;
+}
+
+message CreateNamespaceRequest {
+  string namespace_id = 1;
+  NamespaceQuota quota = 2;
+  NamespaceConfig config = 3;
+}
+
+message CreateNamespaceResponse {
+  NamespaceInfo namespace = 1;
+}
+
+message GetNamespaceRequest {
+  string namespace_id = 1;
+}
+
+message GetNamespaceResponse {
+  NamespaceInfo namespace = 1;
+}
+
+message ListNamespacesRequest {
+  optional uint32 page_size = 1;
+  string page_token = 2;
+}
+
+message ListNamespacesResponse {
+  repeated NamespaceInfo namespaces = 1;
+  string next_page_token = 2;
+}
+
+message UpdateNamespaceConfigRequest {
+  string namespace_id = 1;
+  NamespaceConfig config = 2;
+  optional uint64 expected_config_version = 3;
+}
+
+message UpdateNamespaceConfigResponse {
+  NamespaceInfo namespace = 1;
+}
+
+message GetNamespaceCapabilitiesRequest {
+  string namespace_id = 1;
+}
+
+message NamespaceCapabilities {
+  string namespace_id = 1;
+  uint64 config_version = 2;
+  map<string, bool> capabilities = 3;
+  repeated string operations = 4;
+  repeated string search_modes = 5;
+  bool degraded = 6;
+  repeated string unavailable = 7;
+}
+
+message GetNamespaceCapabilitiesResponse {
+  NamespaceCapabilities capabilities = 1;
+}
+
+message DisableNamespaceRequest {
+  string namespace_id = 1;
+}
+
+message DisableNamespaceResponse {
+  NamespaceInfo namespace = 1;
+}
+
+message EnableNamespaceRequest {
+  string namespace_id = 1;
+}
+
+message EnableNamespaceResponse {
+  NamespaceInfo namespace = 1;
+}
+
+message DeleteNamespaceRequest {
+  string namespace_id = 1;
+}
+
+message DeleteNamespaceResponse {
+  NamespaceInfo namespace = 1;
+}
+
+message RestoreNamespaceRequest {
+  string namespace_id = 1;
+}
+
+message RestoreNamespaceResponse {
+  NamespaceInfo namespace = 1;
+}
+
+message PurgeNamespaceRequest {
+  string namespace_id = 1;
+}
+
+message PurgeNamespaceResponse {}
+
+message GetNamespaceHealthRequest {
+  string namespace_id = 1;
+}
+
+message GetNamespaceHealthResponse {
+  NamespaceHealth health = 1;
+}
+
+service NamespaceService {
+  rpc CreateNamespace(CreateNamespaceRequest) returns (CreateNamespaceResponse) {
+    option (google.api.http) = {
+      post: "/v1/namespaces"
+      body: "*"
+    };
+  }
+
+  rpc GetNamespace(GetNamespaceRequest) returns (GetNamespaceResponse) {
+    option (google.api.http) = {get: "/v1/namespaces/{namespace_id}"};
+  }
+
+  rpc ListNamespaces(ListNamespacesRequest) returns (ListNamespacesResponse) {
+    option (google.api.http) = {get: "/v1/namespaces"};
+  }
+
+  rpc UpdateNamespaceConfig(UpdateNamespaceConfigRequest) returns (UpdateNamespaceConfigResponse) {
+    option (google.api.http) = {
+      patch: "/v1/namespaces/{namespace_id}/config"
+      body: "*"
+    };
+  }
+
+  rpc GetNamespaceCapabilities(GetNamespaceCapabilitiesRequest) returns (GetNamespaceCapabilitiesResponse) {
+    option (google.api.http) = {get: "/v1/namespaces/{namespace_id}/capabilities"};
+  }
+
+  rpc DisableNamespace(DisableNamespaceRequest) returns (DisableNamespaceResponse) {
+    option (google.api.http) = {post: "/v1/namespaces/{namespace_id}:disable"};
+  }
+
+  rpc EnableNamespace(EnableNamespaceRequest) returns (EnableNamespaceResponse) {
+    option (google.api.http) = {post: "/v1/namespaces/{namespace_id}:enable"};
+  }
+
+  rpc DeleteNamespace(DeleteNamespaceRequest) returns (DeleteNamespaceResponse) {
+    option (google.api.http) = {delete: "/v1/namespaces/{namespace_id}"};
+  }
+
+  rpc RestoreNamespace(RestoreNamespaceRequest) returns (RestoreNamespaceResponse) {
+    option (google.api.http) = {post: "/v1/namespaces/{namespace_id}:restore"};
+  }
+
+  rpc PurgeNamespace(PurgeNamespaceRequest) returns (PurgeNamespaceResponse) {
+    option (google.api.http) = {delete: "/v1/namespaces/{namespace_id}:purge"};
+  }
+
+  rpc GetNamespaceHealth(GetNamespaceHealthRequest) returns (GetNamespaceHealthResponse) {
+    option (google.api.http) = {get: "/v1/namespaces/{namespace_id}/health"};
+  }
+}

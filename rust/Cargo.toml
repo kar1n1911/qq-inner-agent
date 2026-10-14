@@ -35,6 +35,14 @@ chrono-tz = "0.10"
 clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1"
 thiserror = "2"
+tonic = { version = "0.12", features = ["transport"] }
+prost = "0.13"
+prost-types = "0.13"
+sha2 = "0.10"
+
+[build-dependencies]
+tonic-build = "0.12"
+protoc-bin-vendored = "3"
 
 [profile.release]
 opt-level = 3
@@ -47,3 +55,9 @@ strip = true
 # 生产始终走 release（strip = true），不影响运行。
 [profile.dev]
 debug = "line-tables-only"
+
+# tonic 生成的 gRPC 存根返回 Result<_, tonic::Status>,而 Status 较大,
+# 会触发 clippy::result_large_err —— 这是生成代码的固有形态,不是我们的代码风格,
+# 因此在 lint 配置层面抑制,而不是去改生成的代码。
+[lints.clippy]
+result_large_err = "allow"
