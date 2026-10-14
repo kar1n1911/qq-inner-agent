@@ -21,28 +21,38 @@ dashboard-ca.srl
 # IDE
 .idea/
 
-# 依赖与构建产物
+# 依赖与构建产物（可重建，不入库）
 node_modules/
-dist/
-web/dist/
+/dist/
+/web/dist/
 
-# 数据库与备份（不得入库：可能含真实聊天记录与用户隐私）
+# 数据库与 sidecar（可能含真实聊天记录；WAL/SHM 单独也要挡）
 *.sqlite
-*.sqlite3
+*.sqlite-*
 *.db
+*.db-*
 *.db-journal
-*.db-wal
 
-# agent 工具的运行产物（不应进入仓库）
-.codex/
-.claude/
-.cursor/
-.aider*
+# 本机 agent 工具状态与缓存（避免会话外泄）
+# ⚠️ 不要连 AGENTS.md / CLAUDE.md 一起忽略 —— 那些是共享指令，应当入库
+/.codex/
+/.claude/
+/.cursor/
+/.aider*
+
+# 合并残片与编辑器交换文件
 *.orig
 *.rej
 *.bak
+*.swo
 *.swp
 
-# 本地环境变量
-.env
-.env.*
+# 本地环境变量（保留可分享的示例模板）
+/.env
+/.env.*
+!/.env.example
+!/.env.template
+
+# 一次性 agent 产物的约定暂存处（不入库）
+# 注意：正式报告应放 docs/working/ 并审阅内容，不要用 *.md / *audit* 这类宽泛规则代替
+/.agent-work/
