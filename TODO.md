@@ -1395,6 +1395,45 @@ X10 的"手动清单"是**权威**；这个按钮只是**帮你生成一份起�
 ### 与 X8（蓝图式可视化）的关系
 它是"**用界面操作配置**"的早期形态 —— 与 X8 的图编辑器**同属一条路**。
 
+## AA2. ⚠️ 缺陷：人工参与状态不跨重启（2026-10-14 实测）⏸ 未开工
+
+### 现象
+`./agent stop-participation` 之后执行 `systemctl --user restart qq-inner-agent`：
+
+```
+重启前: participation = { effective: "stopped", manual: "stopped" }
+重启后: participation = { effective: "normal",  manual: "normal"  }   ← 人工状态丢失
+```
+
+### 根因（已核实）
+```rust
+pub enum ManualMode { Normal, Paused, Stopped }
+struct Participation { manual: ManualMode, lost_onebot: bool }
+fn default() -> Self { Self { manual: ManualMode::Normal, lost_onebot: false } }
+// engine/mod.rs:409
+participation: Mutex::new(Participation::default()),   // 启动时恒为 Normal
+```
+
+它**只存在内存**（`Mutex`），而 `main.rs:704-705` 的"接回人工状态"**只覆盖热重载**，
+**完整重启走的是 `default()`**。
+
+### 危害
+```
+用户设「停止参与」 → 重启 agent → agent 自动恢复发言
+```
+**如果用户设它是为了"别让它乱说话"，重启就把这道保险撤了，而且没有任何提示。**
+
+### 修法（建议，动手前需评估）
+1. 把 `manual` **落盘**（与其它配置一致的持久化路径）；
+2. 启动时**读取并恢复**，而不是用 `default()`；
+3. 恢复时**必须留痕**（"已恢复人工状态：stopped"），**不得静默**；
+4. 与 **X7** 一致：**关闭状态必须可观测且不静默**。
+
+### 关联
+- 与本条同源的还有 **`lost_onebot`** —— 它是**自动**降级状态，
+  重启后重新探测即可恢复，**不需要持久化**；
+- **只有 `manual` 需要跨重启** —— 两者的持久化需求不同，不要一起处理。
+
 ## H. 流程备忘(重要)
 
 - **每个模块的验收标准(必须遵守):先测"输入/输出本身是否正常",再确认"两者是否真的接入了程序总线"。**
