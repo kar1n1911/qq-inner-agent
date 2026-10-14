@@ -68,7 +68,7 @@ trait BehaviorHost: Send + Sync {
 | 2 版本、失效与原子调度 | `B.pending → K.reserve_chat(version,due,busy,concurrency) → B.async_* → K.revalidate(turn_token) → K.commit_*`；每次异步之后、每次持久写/发送前插入新 revalidate；校验是**支配节点**，不能被旁路。 | 异步结果直接写学习/发言，或同 chat 两轮同时占位。 |
 | 3 回复优先、主动边界、积压 | `B.reply_gate` 与 `B.topic_gate` 独立产资格，`K.route_reply_first` 决定唯一触发；topic 还需 `K.handled_match`；`K.intent_classify` 固定 reply/proactive 用于配额；`B.backlog_digest` 只产生 `PromptHistory`，不能覆盖 `EvidenceHistory`。 | 把 pending 回复改成主动计数；未处理消息时启动话题；简读片段作为学习证据。 |
 | 4 观察/外部审核 | `B.orientation_ready → K.speak_admission`；`B.external_fetch → K.untrusted_audit → B.context_inject`，且注入结果不能具有 system trust。 | 未观察完发言、未审核外部资料进入 FORMATION。 |
-| 5 模型主链和 assessment | `B.formation → K.validate_candidates → B.evaluation → K.validate_ratings → B.selection → B.forecast? → K.assess_once → B.articulation`。关闭 forecast 时由**显式** `K.no_forecast_policy` 供给 assessment 输入；`K.assess_once` 仍支配表达。 | 无候选评价、重复 assessment、关闭预测后直接绕过表达前准入。 |
+| 5 模型主链和 assessment | 两支均先经 `B.formation → K.validate_candidates → B.evaluation → K.validate_ratings → B.selection`。`sending.enabled=true` 固定走 `B.forecast → K.assess_once → B.articulation`，`K.assess_once` 支配该支表达；`sending.enabled=false` 固定走显式 `K.no_assessment_route → B.articulation`，不经 forecast、抽签或 `K.assess_once`，对应现有代码的无 assessment 分支。两支互斥，且都继续进入表达后安全校验。 | 无候选评价、开启发送时重复或绕过 assessment；关闭发送时把无 assessment 路由藏成隐式旁路。 |
 | 6 表达后安全与目标 | `B.articulation → B.text_revision* → K.canonicalize_segments → K.validate_final_output → B.repetition/topic_lifecycle/targeting → K.final_admission`；所有会改变待发内容的节点必须位于最终校验前，或使 `ValidatedOutput` 失效并重走校验。`topic_lifecycle` 消费已选候选与实际表达。 | 在安全校验后润色并发送旧校验结果；用新想法时间代替相关话题时间。 |
 | 7 投递账本 | `K.final_admission → K.reserve_delivery(pending) → K.delay → K.revalidate_segment → K.deliver → K.classify_ack → K.record_outbound`，按气泡逐次执行；不确定态无重放边。 | 先网络发送后建账；延迟后不复核；未确认便记自身消息。 |
 | 8 并发和锁 | 对同 chat 的 `K.reserve_chat` / `K.commit_*` 标原子阶段，唯一锁序 `Core→Store`；`B.*`、IO、模型全部只能在 `NoLockAsync` 阶段。编图器拒绝 `EffectClass` 与 slot 阶段不匹配；宿主实现不把锁传给插件。 | 插件在 Core/Store guard 内 `await`，或反序拿锁。 |
@@ -139,10 +139,13 @@ trait BehaviorHost: Send + Sync {
 
 落地批次：①定义 artifact/slot/schema、固定 DAG 与编图器，先封装现有文本链为内建 Behavior，验证默认图逐分支与现状一致；②实现无锁快照/返回后 revalidate 和协议 runner；③接入 X5 的内建版本，再用进程外不同语言的最小实现验证协议；④接 AB2 依赖配置与 X7 状态查询；⑤通过输入/输出契约检查及**真实 `tick→ARTICULATION→X5→校验→投递` 接线验收**，包含禁用、模型缺失、超时、恶意超长/禁用标签、气泡及在途新消息。此处列的是将来实施验收，不表示本次运行测试。
 
+批次①须分开验收：**结果等价**比较旧路径与显式新路径的决策、持久状态、投递与错误；**模型保真**逐分支对照实际触发、模型阶段与账本记录，确认对应图中有明确路由节点和边，且关闭的阶段不出现在该分支。两者不能互相替代；仅比较最终输出，不能证明图准确描述执行路径。
+
 ## 8. 最易出错处与待确认
 
 1. **“重排”若只改线性列表会漏安全依赖。** 必须使用固定核心边、artifact 类型、支配关系及每分支验图；关闭组件后重新编图，不许静默跳节点。
 2. **X5 会改变实际待发内容。** 校验必须针对修改后的最终 segments，而非旧 `response.text`；目标、话题与投递前时效也要重算。
 3. **跨语言与锁/权限容易形成旁路。** 不给进程外插件原始 Store/ChatPort/密钥；调用时不持 Core/Store 锁，返回后做 freshness 和宿主提交；sidecar 必须有 OS 级隔离或等价部署边界。
+4. **关闭组件会产生新分支。** X7 开关的每种有效组合都要有显式路由节点和固定边，并按分支检查安全覆盖；不能把被关闭节点从图上删掉后留下隐式旁路。`sending.enabled=false` 的无 assessment 路由就是这一约束的现有实例。
 
 **待确认**：①共同 manifest 在 `PortManifest` 上加类别还是另设 `BehaviorManifest` 共享基字段；② sidecar 包签名/隔离的具体发行和部署机制，以及远程行为插件允许的数据范围；③ V 的一次性迁移在多插件状态升级后的长期机制；④基线图对各部署现有配置的转换与固定 `baseline_graph_hash` 的生成/存档位置；⑤ X5 对多气泡、引用/提及、来源标注的首版支持范围（本稿采取文本优先，其他能力显式 `Unsupported`）。这些不影响先实现固定 DAG、宿主最终校验与 v1 协议。

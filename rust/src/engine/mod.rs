@@ -2,6 +2,7 @@
 //! 同步段持有 core -> store 锁，等价 JS 两个 await 之间不可插入 ingest；网络等待不持锁。
 pub mod activity;
 pub mod backlog;
+pub mod behavior;
 mod backfill;
 pub mod decision;
 pub mod io;
@@ -133,6 +134,8 @@ pub type Clock = Arc<dyn Fn() -> f64 + Send + Sync>;
 pub type Random = Arc<dyn Fn() -> f64 + Send + Sync>;
 pub type Logger = Arc<dyn Fn(&str, Value) + Send + Sync>;
 pub struct Options {
+    /// Opt in to the validated built-in text behavior graph. The legacy path remains default.
+    pub behavior_graph: bool,
     pub prompts: Arc<crate::prompt_overlay::Snapshot>,
     pub now: Clock,
     pub random: Random,
@@ -146,6 +149,7 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            behavior_graph: false,
             now: Arc::new(|| {
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -247,6 +251,7 @@ pub struct Engine {
     transport: Arc<dyn EngineTransport>,
     io_chats: Mutex<HashMap<String, Arc<dyn io::ChatPort>>>,
     options: Options,
+    behavior_graph: Option<behavior::CompiledGraph>,
     media_config: media_select::Config,
     collector: Option<crate::media::Collector>,
     ocr: Option<crate::media::ocr::Worker>,
@@ -290,6 +295,12 @@ struct Turn {
     payload: Value,
 }
 impl Engine {
+    pub fn behavior_graph_status(&self) -> Value {
+        match &self.behavior_graph {
+            Some(graph) => json!({"requestedEnabled":true,"effective":true,"reason":"active","graph":graph}),
+            None => json!({"requestedEnabled":false,"effective":false,"reason":"legacy_path","graph":null}),
+        }
+    }
     pub fn prompt_status(&self) -> Value {
         self.options.prompts.status()
     }
@@ -320,6 +331,12 @@ impl Engine {
         media_config: media_select::Config,
         collection: crate::media::Config,
     ) -> Result<Arc<Self>> {
+        let behavior_graph = options.behavior_graph.then(|| {
+            behavior::compile(behavior::Profile {
+                three_layer: config.agent.three_layer_decision,
+                sending: config.agent.sending.enabled,
+            }, &[], &[], &[])
+        }).transpose()?;
         media_config.validate()?;
         config.agent.topic_source.validate()?;
         if config.agent.affect.enabled {
@@ -377,6 +394,7 @@ impl Engine {
             transport,
             io_chats: Mutex::new(HashMap::new()),
             options,
+            behavior_graph,
             media_config,
             collector,
             ocr,
@@ -1236,6 +1254,8 @@ impl Engine {
             core.tasks.push(tokio::spawn(async move {
                 let result = if trigger == "media" {
                     engine.media_cycle(&chat, start).await
+                } else if let Some(graph) = &engine.behavior_graph {
+                    behavior::TextBehavior::run(&behavior::BuiltinText, &engine, graph, &chat, trigger, start).await
                 } else {
                     engine.cycle(&chat, trigger, start).await
                 };

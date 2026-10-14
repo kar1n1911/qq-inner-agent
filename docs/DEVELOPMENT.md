@@ -125,6 +125,7 @@ JSON 逐项包含 `IDENTITY`、`OUTPUT_CONTRACT`、`FORMATION`、`EVALUATION`、
 | 功能 | 实现位置 |
 | --- | --- |
 | 引擎 cycle(候选→评估→表达→预测→发送) | `engine/mod.rs` — `cycle()`/`media_cycle()`/`tick()`/`ingest()` |
+| X4 第一步：内建文本行为图 | `engine/behavior.rs` — artifact schema、slot/固定 K 节点、DAG 编译与可序列化图；`engine/mod.rs` 的 `Options.behavior_graph` 显式启用。默认 `false`，继续走旧 `cycle`；启用时编图后由 `BuiltinText` 调用原 `cycle`，媒体链不走此图。`behavior_graph_status()` 可查询所选路径与图。此阶段图是经过校验的执行契约，尚不逐节点执行或接受进程外行为插件。行为类型放 `engine/behavior.rs`，六类进出端口类型仍只在 `engine/io/`（X1）。 |
 | 三层决策(①②拆分 + 零模型初筛) | `engine/decision.rs`;门控 `agent.threeLayerDecision` |
 | 逐消息策略(allowed/normalize/quiet/select/repeated/长度档位) | `engine/policy.rs` |
 | 回填(断连后补录历史) | `engine/backfill.rs`;门控 `agent.backfill` |

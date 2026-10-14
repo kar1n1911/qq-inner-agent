@@ -4,6 +4,7 @@ use anyhow::Result;
 use futures_util::future::BoxFuture;
 use qq_inner_core::{
     config::{defaults, merge, Config},
+    engine::behavior::{compile, Profile},
     engine::orientation::{OrientationProvider, OrientationTransport},
     engine::io::{adapters::onebot::OneBotAdapter, PortReply},
     engine::{Engine, EngineTransport, Options},
@@ -366,6 +367,7 @@ fn setup(case: &Value) -> (Arc<Engine>, Arc<Harness>) {
             .into_iter(),
     );
     let options = Options {
+        behavior_graph: case["behaviorGraph"] == true,
         prompts: case["promptRoot"].as_str().map(|root| Arc::new(qq_inner_core::prompt_overlay::Snapshot::load(std::path::Path::new(root)))).unwrap_or_default(),
         now: Arc::new(move || clock.now()),
         random: Arc::new(move || {
@@ -804,6 +806,66 @@ async fn script(case: &Value) -> Value {
     let output = json!({"label":case["label"],"trace":h.trace.lock().unwrap().clone(),"decisions":decisions,"deliveries":h.rows("SELECT chat,proactive,status FROM deliveries ORDER BY rowid"),"assessments":h.rows("SELECT chat,human_id,status FROM send_assessments ORDER BY rowid"),"thoughts":h.rows("SELECT chat,text,kind,used,score,subject FROM thoughts ORDER BY rowid"),"handled":h.rows("SELECT * FROM handled ORDER BY chat"),"chats":e.chats(),"calls":h.rows("SELECT count(*) n FROM calls")[0]["n"],"lastError":e.last_error()});
     e.stop().await;
     output
+}
+
+#[tokio::test]
+async fn builtin_behavior_graph_matches_legacy_text_branches() {
+    let mut cases:Vec<Value>=scenarios().into_iter().filter(|c|matches!(c["label"].as_str(),
+        Some("addressed"|"quiet_open"|"forecast_withhold"|"sending_disabled"|"empty"))).collect();
+    cases.push(base("three_layer_message",json!({"threeLayerDecision":true}),
+        vec![ingest("m1","[CQ:at,qq=99]怎么浇水？"),run()]));
+    cases.push(base("legacy_pause",json!({"threeLayerDecision":false,"pauseSeconds":10}),
+        vec![model(json!({"empty":true})),ingest("m1","[CQ:at,qq=99]怎么浇水？"),run(),
+             advance(61.),model(json!({"empty":false})),run()]));
+    for case in cases {
+        let mut old=script(&case).await;
+        let mut graph_case=case.clone();
+        graph_case["behaviorGraph"]=json!(true);
+        let mut graph=script(&graph_case).await;
+        if let Some((three_layer,trigger))=match case["label"].as_str() {
+            Some("three_layer_message")=>Some((true,"message")),
+            Some("legacy_pause")=>Some((false,"pause")),
+            _=>None,
+        } {
+            let compiled=compile(Profile{three_layer,sending:true},&[],&[],&[]).unwrap();
+            assert!(compiled.routes.iter().any(|r|r.trigger==trigger),"{trigger} route missing");
+            assert!(graph["trace"].as_array().unwrap().iter().any(|r|
+                r[0]=="model" && r[3]==trigger),"{trigger} route not observed");
+        }
+        // Model payloads contain fresh UUID thought IDs; compare all persisted
+        // semantic state, send decisions and errors, not those opaque IDs.
+        old.as_object_mut().unwrap().remove("trace");
+        graph.as_object_mut().unwrap().remove("trace");
+        assert_eq!(old,graph,"{}",case["label"]);
+    }
+}
+
+#[tokio::test]
+async fn builtin_graph_sending_routes_match_observed_stages_and_assessments() {
+    for (label, sending) in [("addressed", true), ("sending_disabled", false)] {
+        let mut case=scenarios().into_iter().find(|c|c["label"]==label).unwrap();
+        case["behaviorGraph"]=json!(true);
+        let out=script(&case).await;
+        let graph=compile(Profile{three_layer:false,sending},&[],&[],&[]).unwrap();
+        let has=|id:&str|graph.nodes.iter().any(|n|n.id==id);
+        let graph_stages:Vec<_>=[("B.formation","FORM"),("B.evaluation","EVALUATE"),
+            ("B.forecast","FORECAST"),("B.articulation","ARTICULATE")].into_iter()
+            .filter_map(|(id,stage)|has(id).then_some(stage)).collect();
+        assert_eq!(stages(&out),graph_stages,"{label}: graph/model stages differ");
+        assert_eq!(has("K.assess_once"),sending);
+        assert_eq!(has("K.no_assessment_route"),!sending);
+        assert_eq!(!out["assessments"].as_array().unwrap().is_empty(),sending,
+            "{label}: graph/assessment ledger differ");
+        let path:Vec<_>=if sending {
+            vec!["B.selection","B.forecast","K.assess_once","B.articulation"]
+        } else {
+            vec!["B.selection","K.no_assessment_route","B.articulation"]
+        };
+        for pair in path.windows(2) {
+            assert!(graph.edges.iter().any(|e|e.from==pair[0] && e.to==pair[1]),
+                "{label}: missing branch edge {} -> {}",pair[0],pair[1]);
+        }
+    }
 }
 fn actions(v: &Value) -> Vec<&str> {
     v["decisions"]
@@ -1820,6 +1882,10 @@ fn topic_setup(extra: Value) -> (Arc<Engine>, Arc<Harness>) {
 }
 
 fn topic_setup_with_media(extra: Value, media: Value) -> (Arc<Engine>, Arc<Harness>) {
+    topic_setup_with_graph(extra, media, false)
+}
+
+fn topic_setup_with_graph(extra: Value, media: Value, behavior_graph: bool) -> (Arc<Engine>, Arc<Harness>) {
     let mut case = base(
         "topic",
         merge(
@@ -1829,6 +1895,7 @@ fn topic_setup_with_media(extra: Value, media: Value) -> (Arc<Engine>, Arc<Harne
         vec![],
     );
     case["mediaSelect"] = media;
+    case["behaviorGraph"] = json!(behavior_graph);
     let (e, h) = setup(&case);
     *h.now.lock().unwrap() = 5. * 86400. + 43200.;
     {
@@ -1847,6 +1914,31 @@ fn topic_setup_with_media(extra: Value, media: Value) -> (Arc<Engine>, Arc<Harne
     }
     e.restore().unwrap();
     (e, h)
+}
+
+#[tokio::test]
+async fn builtin_behavior_graph_matches_existing_topic_branch() {
+    let mut results=Vec::new();
+    for use_graph in [false,true] {
+        let (e,h)=topic_setup_with_graph(json!({}),json!({}),use_graph);
+        if use_graph {
+            let status=e.behavior_graph_status();
+            assert!(status["graph"]["routes"].as_array().unwrap().iter().any(|r|
+                r["trigger"]=="topic" && r["gate"]=="B.topic_gate"));
+            assert!(status["graph"]["edges"].as_array().unwrap().iter().any(|edge|
+                edge["from"]=="K.handled_match" && edge["to"]=="B.topic_gate"));
+        }
+        h.model.lock().unwrap()["decisionDraw"]=json!(0.);
+        e.tick().unwrap();
+        e.wait_idle().await;
+        let stages:Vec<_>=h.trace.lock().unwrap().iter().filter(|v|v[0]=="model")
+            .map(|v|json!([v[1],v[3]])).collect();
+        let deliveries=h.rows("SELECT chat,proactive,status FROM deliveries ORDER BY rowid");
+        results.push((stages,deliveries,e.chats()[0].1.pending,e.last_error(),*h.sends.lock().unwrap()));
+        e.stop().await;
+    }
+    assert_eq!(results[0],results[1]);
+    assert!(results[0].0.iter().any(|v|v[1]=="topic"));
 }
 
 #[tokio::test]
