@@ -107,6 +107,33 @@ impl Store {
         tx.commit()?;
         Ok(changed)
     }
+    /// Confirm only one unambiguous ACK whose protocol ID, chat, sender and
+    /// content all agree with independent OneBot evidence. The message_key is
+    /// used for the update; the protocol ID is only a matching field.
+    pub fn reconcile_outbound(&self, chat: &str, protocol_id: &str, sender: &str, text: &str, server_ts: f64, received_at: f64) -> Result<bool> {
+        ensure!(server_ts.is_finite() && server_ts > 0. && received_at.is_finite() && received_at > 0., "invalid_outbound_evidence_time");
+        let tx = self.immediate()?;
+        let matches = self.rows(
+            "SELECT m.message_key FROM messages m JOIN outbound_message_facts f ON f.chat=m.chat AND f.id=m.message_key JOIN deliveries d ON d.id=f.delivery_id WHERE d.chat=? AND d.message_id=? AND m.id=? AND m.sender=? AND m.text=? AND m.self=1 AND d.status='sent_unconfirmed' AND f.time_source='local_estimate' LIMIT 2",
+            params![chat, protocol_id, protocol_id, sender, text],
+        )?;
+        if matches.len() != 1 {
+            tx.commit()?;
+            return Ok(false);
+        }
+        let key = matches[0]["message_key"].as_str().unwrap();
+        self.execute("UPDATE messages SET ts=?,received_at=? WHERE message_key=?", params![server_ts,received_at,key])?;
+        self.execute("UPDATE deliveries SET status='confirmed' WHERE id=(SELECT delivery_id FROM outbound_message_facts WHERE id=?)", [key])?;
+        self.execute("UPDATE outbound_message_facts SET time_source='server' WHERE id=?", [key])?;
+        tx.commit()?;
+        Ok(true)
+    }
+    pub fn recent_unconfirmed_outbound(&self, now: f64) -> Result<Vec<Value>> {
+        self.rows(
+            "SELECT m.message_key,d.chat,d.message_id FROM deliveries d JOIN outbound_message_facts f ON f.delivery_id=d.id JOIN messages m ON m.message_key=f.id WHERE d.status='sent_unconfirmed' AND f.time_source='local_estimate' AND m.ts<=? AND m.ts>? ORDER BY m.ts ASC LIMIT 32",
+            params![now - 5., now - 600.],
+        )
+    }
     /// 同一批入站消息一个事务；返回值逐条对应是否新增，出错整批回滚。
     pub fn messages(&self, messages: &[Value]) -> Result<Vec<bool>> {
         let tx = self.immediate()?;

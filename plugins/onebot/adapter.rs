@@ -41,16 +41,20 @@ impl OneBotAdapter {
     /// Heartbeats are deliberately ignored; other non-message events lack a
     /// P0 `Incoming` representation and fail visibly on the opt-in path.
     pub fn map_event(&self, event: &Value, received_at: f64) -> Result<Option<Incoming>, IoError> {
-        if event["post_type"] != "message" {
+        if event["post_type"] != "message" && event["post_type"] != "message_sent" {
             return if event["post_type"] == "meta_event" { Ok(None) }
                 else { Err(IoError::new("incoming_event_unimplemented")) };
         }
-        let kind = match event["message_type"].as_str() {
+        let kind = match event["message_type"].as_str().or_else(|| {
+            (event["post_type"] == "message_sent").then(|| {
+                if !event["group_id"].is_null() { "group" } else { "private" }
+            })
+        }) {
             Some("group") => ChatKind::Group,
             Some("private") => ChatKind::Private,
             _ => return Err(IoError::new("unsupported_message_type")),
         };
-        let id = wire_string(&event[if kind == ChatKind::Group { "group_id" } else { "user_id" }])
+        let id = wire_string(&event[if kind == ChatKind::Group { "group_id" } else if event["post_type"] == "message_sent" { "target_id" } else { "user_id" }])
             .ok_or_else(|| IoError::new("missing_chat_id"))?;
         let message_id = wire_string(&event["message_id"])
             .ok_or_else(|| IoError::new("missing_message_id"))?;
@@ -58,13 +62,19 @@ impl OneBotAdapter {
             .ok_or_else(|| IoError::new("missing_self_id"))?;
         let sender_id = wire_string(&event["user_id"])
             .ok_or_else(|| IoError::new("missing_sender_id"))?;
+        if event["post_type"] == "message_sent" && sender_id != self_id {
+            return Err(IoError::new("invalid_self_echo_sender"));
+        }
         let ts = event["time"].as_f64().or_else(|| event["time"].as_str().and_then(|s| s.parse::<f64>().ok()))
             .filter(|n| n.is_finite() && *n > 0.0)
             .ok_or_else(|| IoError::new("invalid_server_time"))?;
         if !received_at.is_finite() || received_at <= 0.0 {
             return Err(IoError::new("invalid_received_at"));
         }
-        let segments = match &event["message"] {
+        let payload = if event["post_type"] == "message_sent" && event["message"].is_null() {
+            &event["raw_message"]
+        } else { &event["message"] };
+        let segments = match payload {
             Value::String(text) => parse_cq_text(text),
             Value::Array(parts) => parts.iter().map(map_segment).collect(),
             _ => return Err(IoError::new("invalid_message_segments")),
@@ -158,6 +168,41 @@ impl OneBotAdapter {
             _ => failed("onebot_command_unimplemented", false),
         }
     }
+}
+
+/// QQ-specific secondary evidence. A readback has no post_type; an event must
+/// explicitly be message_sent. Missing fields are never inferred from ACKs.
+pub(crate) fn outbound_evidence(event: &Value, self_id: &str, readback: bool) -> Option<OutboundEvidence> {
+    if (!readback && event["post_type"] != "message_sent")
+        || (readback && !event["post_type"].is_null()) {
+        return None;
+    }
+    if !readback && wire_string(&event["self_id"])? != self_id { return None; }
+    let sender = wire_string(&event["sender"]["user_id"])
+        .or_else(|| wire_string(&event["user_id"]))?;
+    if sender != self_id { return None; }
+    let kind = event["message_type"].as_str().unwrap_or_else(|| {
+        if event["group_id"].is_null() { "private" } else { "group" }
+    });
+    let chat = match kind {
+        "group" => format!("group:{}", wire_string(&event["group_id"])?),
+        "private" => format!("private:{}", wire_string(&event["target_id"])?),
+        _ => return None,
+    };
+    let message_id = wire_string(&event["message_id"])?;
+    let text = event["raw_message"].as_str()
+        .or_else(|| event["message"].as_str())?.to_owned();
+    let server_ts = event["time"].as_f64()
+        .or_else(|| event["time"].as_str().and_then(|s| s.parse().ok()))
+        .filter(|ts| ts.is_finite() && *ts > 0. && *ts < 100_000_000_000.)?;
+    Some(OutboundEvidence { chat, message_id, text, server_ts })
+}
+
+pub(crate) struct OutboundEvidence {
+    pub chat: String,
+    pub message_id: String,
+    pub text: String,
+    pub server_ts: f64,
 }
 
 impl ChatPort for OneBotAdapter {

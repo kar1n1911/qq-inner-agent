@@ -743,6 +743,25 @@ relevance ≥ 4、originality ≥ 4，正向标签含 `urgency`（时效需求�
 第 2 层正确引用（包括非法/缺失 replyTo 和合法模型优先）、第 3 层不发/带引用发出，
 并检查实际发送日志中的 reply 段。
 
+### 出站确认与对账
+
+发送 ACK 带 `message_id` 后先记录 `deliveries.status=sent_unconfirmed`、
+`outbound_message_facts.time_source=local_estimate`。OneBot `message_sent` 的群/私聊目标、
+协议 ID、发送者和正文都匹配时，才用其服务器 `time` 确认；接收时刻单独写入
+`messages.received_at`。若 5 秒仍无回显，引擎只对最近 10 分钟的未确认消息调用一次
+`get_msg`（单次最多等 8 秒）；读回不匹配、失败或超时均保持未确认，绝不自动重发。
+私聊证据若缺少 `target_id`，无法独立核实目标，保持未确认。日志事件
+`outbound_confirmed`、`outbound_reconciliation_failed`、`outbound_reconciliation_timeout`
+分别记录证据来源或失败原因。
+
+可用以下只读查询查看状态及时间证据（`id` 为协议消息 ID，`message_key` 为内部证据键）：
+
+```sql
+SELECT d.chat,d.message_id,m.message_key,d.status,f.time_source,m.ts,m.received_at
+FROM deliveries d JOIN outbound_message_facts f ON f.delivery_id=d.id
+JOIN messages m ON m.message_key=f.id ORDER BY d.ts DESC LIMIT 50;
+```
+
 ### X3 模型端口与选择
 
 `provider.ioPort` 默认 `legacy`，仍走原有 OpenAI/Anthropic 兼容传输。显式选 `ollama`、`openai`、`claude` 才由 `plugins/` 中的适配器接管模型调用；`provider.kind` 保留给旧路径。Ollama URL 通常为 `http://127.0.0.1:11434`，无需密钥；OpenAI、Claude 分别使用兼容 API 基础 URL 与保存于 `secrets.json` 的密钥。`provider.contextWindowTokens=0` 表示未知，不猜模型窗口。新路径在适配器实例内按 `requestsPerHour` 限流，120 秒超时且不自动重试（断线时服务端是否已处理无法确定）；旧路径的 SQLite 预算与重试行为不变。新路径引擎没有工具执行循环，若模型返回工具调用会显式报 `model_tool_call_unhandled`，不会当成空文本成功。

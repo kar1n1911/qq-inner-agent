@@ -36,6 +36,20 @@ fn incoming_keeps_protocol_id_and_both_clocks_separate() {
         "incoming_event_unimplemented");
 }
 
+#[test]
+fn self_echo_without_message_type_or_message_array_maps_without_becoming_human_input() {
+    let adapter = adapter(Arc::new(Mutex::new(vec![])), PortReply::Ok(json!({})));
+    let incoming = adapter.map_event(&json!({
+        "post_type":"message_sent","message_sent_type":"self","self_id":99,
+        "user_id":99,"group_id":10,"message_id":42,"time":100.,
+        "raw_message":"sent","sender":{"user_id":99}
+    }), 105.).unwrap().unwrap();
+    assert!(incoming.self_message);
+    assert_eq!(incoming.chat.to_string(), "group:onebot:10");
+    assert_eq!((incoming.ts, incoming.received_at), (100., 105.));
+    assert_eq!(incoming.segments, vec![Segment::Text("sent".into())]);
+}
+
 #[tokio::test]
 async fn send_and_recall_require_confirmed_action_ack() {
     let calls = Arc::new(Mutex::new(vec![]));

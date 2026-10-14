@@ -173,6 +173,20 @@ fn outbound_time_source_can_be_confirmed_without_changing_inbound_time() -> Resu
     assert_eq!(s.rows("SELECT ts,received_at FROM messages WHERE id='in'", [])?[0], json!({"ts":100.,"received_at":110.}));
     Ok(())
 }
+
+#[test]
+fn outbound_evidence_requires_exact_ack_and_preserves_first_confirmation() -> Result<()> {
+    let s = Store::in_memory()?;
+    let delivery = s.delivery("group:10", false, 200.)?;
+    s.finish_delivery(&delivery, "sent_unconfirmed", Some(&json!(42)))?;
+    s.outbound_message(&json!({"chat":"group:10","id":"42","sender":"99","text":"sent","ts":201.,"self":true}), &delivery)?;
+    assert!(!s.reconcile_outbound("group:10", "42", "99", "different", 202., 203.)?);
+    assert!(s.reconcile_outbound("group:10", "42", "99", "sent", 204., 205.)?);
+    assert!(!s.reconcile_outbound("group:10", "42", "99", "sent", 999., 1000.)?);
+    assert_eq!(s.rows("SELECT m.ts,m.received_at,d.status,f.time_source FROM messages m JOIN outbound_message_facts f ON f.id=m.message_key JOIN deliveries d ON d.id=f.delivery_id", [])?[0],
+        json!({"ts":204.,"received_at":205.,"status":"confirmed","time_source":"server"}));
+    Ok(())
+}
 #[test]
 fn messages_history_batch_and_active_chats() -> Result<()> {
     let s = Store::in_memory()?;

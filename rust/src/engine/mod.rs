@@ -212,6 +212,7 @@ struct Core {
     // Vec 保持 JS Map 的插入顺序；不能用 HashMap 随机顺序决定并发名额。
     chats: Vec<(String, ChatState)>,
     tasks: Vec<JoinHandle<()>>,
+    outbound_readbacks: HashMap<String, f64>,
     teaching_replies: Vec<(String, String)>,
     teaching_commands: Vec<(String, String, String)>,
     teaching_busy: bool,
@@ -516,11 +517,40 @@ impl Engine {
     pub fn ingest(&self, event: &Value) -> Result<()> {
         self.ingest_with_source(event, false)
     }
+    fn reconcile_outbound_event(&self, event: &Value, received_at: f64) -> Result<()> {
+        let Some(evidence) = io::adapters::onebot::outbound_evidence(event, &self.transport.self_id(), false) else {
+            (self.options.log)("outbound_reconciliation_failed", json!({"source":"message_sent","reason":"invalid_evidence"}));
+            return Ok(());
+        };
+        self.confirm_outbound_evidence(evidence, received_at, "message_sent")?;
+        Ok(())
+    }
+    fn reconcile_outbound_readback(&self, event: &Value, chat: &str, message_id: &str) -> Result<()> {
+        let evidence = io::adapters::onebot::outbound_evidence(event, &self.transport.self_id(), true)
+            .ok_or_else(|| anyhow::anyhow!("invalid_get_msg_evidence"))?;
+        ensure!(evidence.chat == chat && evidence.message_id == message_id, "get_msg_identity_mismatch");
+        ensure!(self.confirm_outbound_evidence(evidence, self.now(), "get_msg")?, "get_msg_content_mismatch");
+        Ok(())
+    }
+    fn confirm_outbound_evidence(&self, evidence: io::adapters::onebot::OutboundEvidence, received_at: f64, source: &str) -> Result<bool> {
+        let confirmed = self.db()?.reconcile_outbound(
+            &evidence.chat, &evidence.message_id, &self.transport.self_id(),
+            &evidence.text, evidence.server_ts, received_at,
+        )?;
+        (self.options.log)(if confirmed { "outbound_confirmed" } else { "outbound_reconciliation_failed" },
+            json!({"chat":evidence.chat,"message_id":evidence.message_id,"source":source,
+                "reason":if confirmed { "matched" } else { "no_matching_unconfirmed_ack" }}));
+        Ok(confirmed)
+    }
     /// Opt-in P2 ingress. Protocol JSON remains inside the adapter; the same
     /// pending-chat cycle and send gates used by `ingest` handle the reply.
     pub fn ingest_incoming(&self, incoming: &io::types::Incoming, port: Arc<dyn io::ChatPort>) -> Result<()> {
         use io::types::{ChatKind, Segment};
-        if !self.participates() || incoming.self_message { return Ok(()); }
+        if !self.participates() { return Ok(()); }
+        if incoming.self_message {
+            if let Some(raw) = &incoming.raw { self.reconcile_outbound_event(raw, incoming.received_at)?; }
+            return Ok(());
+        }
         ensure!(incoming.chat.port == incoming.port, "wrong_incoming_port");
         ensure!(incoming.ts.is_finite() && incoming.ts > 0. && incoming.received_at.is_finite() && incoming.received_at > 0., "invalid_incoming_time");
         ensure!(incoming.self_id == self.transport.self_id(), "wrong_self_id");
@@ -631,6 +661,9 @@ impl Engine {
     }
     fn ingest_with_source(&self, event: &Value, backfill: bool) -> Result<()> {
         if !self.participates() { return Ok(()); }
+        if !backfill && event["post_type"] == "message_sent" {
+            return self.reconcile_outbound_event(event, self.now());
+        }
         let mut core = self.core();
         let a = &self.config.agent;
         let now = self.now();
@@ -941,6 +974,36 @@ impl Engine {
         let now = self.now();
         let a = &self.config.agent;
         let state = self.transport.state();
+        // The echo is normally ~2s behind the ACK. Read back only recent
+        // unconfirmed sends after a short grace period; never resend on failure.
+        core.outbound_readbacks.retain(|_, started| now - *started < 600.);
+        if state.connected && state.online && !*self.aborted.borrow() {
+            for row in self.db()?.recent_unconfirmed_outbound(now)? {
+                let key = row["message_key"].as_str().unwrap().to_owned();
+                if core.outbound_readbacks.contains_key(&key) { continue; }
+                let chat = row["chat"].as_str().unwrap().to_owned();
+                let message_id = row["message_id"].as_str().unwrap().to_owned();
+                core.outbound_readbacks.insert(key, now);
+                let engine = self.clone();
+                let mut abort = self.aborted.subscribe();
+                core.tasks.push(tokio::spawn(async move {
+                    let result = tokio::select! { biased;
+                        _ = abort.changed() => return,
+                        result = tokio::time::timeout(std::time::Duration::from_secs(8),
+                            engine.transport.call("get_msg", json!({"message_id":message_id}))) => result,
+                    };
+                    match result {
+                        Ok(Ok(event)) => {
+                            if let Err(error) = engine.reconcile_outbound_readback(&event, &chat, &message_id) {
+                                (engine.options.log)("outbound_reconciliation_failed", json!({"chat":chat,"message_id":message_id,"reason":error.to_string()}));
+                            }
+                        }
+                        Ok(Err(error)) => (engine.options.log)("outbound_reconciliation_failed", json!({"chat":chat,"message_id":message_id,"reason":error.to_string()})),
+                        Err(_) => (engine.options.log)("outbound_reconciliation_timeout", json!({"chat":chat,"message_id":message_id,"reason":"get_msg_timeout"})),
+                    }
+                }));
+            }
+        }
         if state.connected
             && state.online
             && !*self.aborted.borrow()
