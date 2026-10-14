@@ -1,0 +1,28 @@
+{
+  "ollama": {
+    "dependencies": [{"role":"local_model_service","needed_for":"completion","required":true}],
+    "config_fields": [
+      {"key":"base_url","label":"Ollama URL","required":true,"secret":false},
+      {"key":"model","label":"Model ID","required":true,"secret":false},
+      {"key":"context_window_tokens","label":"Context window tokens (0 = unknown)","required":false,"secret":false}
+    ]
+  },
+  "openai": {
+    "dependencies": [{"role":"remote_model_api","needed_for":"completion","required":true}],
+    "config_fields": [
+      {"key":"base_url","label":"API base URL","required":true,"secret":false},
+      {"key":"model","label":"Model ID","required":true,"secret":false},
+      {"key":"api_key","label":"API key","required":true,"secret":true},
+      {"key":"context_window_tokens","label":"Context window tokens (0 = unknown)","required":false,"secret":false}
+    ]
+  },
+  "claude": {
+    "dependencies": [{"role":"remote_model_api","needed_for":"completion","required":true}],
+    "config_fields": [
+      {"key":"base_url","label":"API base URL","required":true,"secret":false},
+      {"key":"model","label":"Model ID","required":true,"secret":false},
+      {"key":"api_key","label":"API key","required":true,"secret":true},
+      {"key":"context_window_tokens","label":"Context window tokens (0 = unknown)","required":false,"secret":false}
+    ]
+  }
+}

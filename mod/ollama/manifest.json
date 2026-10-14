@@ -1,0 +1,78 @@
+{
+  "name": "ollama",
+  "version": "TBD",
+  "core_api_version": {
+    "major": 1,
+    "min_minor": 0,
+    "max_minor": null
+  },
+  "protocol": {
+    "name": "HTTP JSON",
+    "schema_version": "TBD",
+    "schema": "TBD",
+    "completion_path": "/api/chat",
+    "models_path": "/api/tags"
+  },
+  "entry": "TBD",
+  "status": "placeholder",
+  "kind": "Model",
+  "transport": "Sidecar",
+  "capabilities": {
+    "supported": [
+      "truncation_signal",
+      "list_models",
+      "streaming",
+      "text_completion",
+      "json_mode"
+    ],
+    "unsupported": [
+      "thinking_field"
+    ],
+    "unknown": [
+      "context_window_tokens"
+    ]
+  },
+  "dependencies": [
+    {
+      "role": "local_model_service",
+      "needed_for": "completion",
+      "required": true
+    }
+  ],
+  "config_schema": [
+    {
+      "key": "base_url",
+      "label": "Ollama URL",
+      "type": "string",
+      "required": true,
+      "secret": false
+    },
+    {
+      "key": "model",
+      "label": "Model ID",
+      "type": "string",
+      "required": true,
+      "secret": false
+    },
+    {
+      "key": "context_window_tokens",
+      "label": "Context window tokens (0 = unknown)",
+      "type": "integer",
+      "required": false,
+      "secret": false
+    }
+  ],
+  "host_permissions": [
+    {
+      "type": "http",
+      "origin": "TBD"
+    }
+  ],
+  "tbd": [
+    "version",
+    "protocol and package entry",
+    "configured HTTP origin; runtime origin depends on base_url",
+    "context_window_tokens is user supplied or unknown",
+    "whether Ollama is a host-managed Sidecar; current Rust adapter only calls local HTTP"
+  ]
+}

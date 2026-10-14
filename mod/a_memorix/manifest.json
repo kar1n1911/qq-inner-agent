@@ -1,0 +1,77 @@
+{
+  "name": "a_memorix",
+  "version": "TBD",
+  "core_api_version": {
+    "major": 1,
+    "min_minor": 0,
+    "max_minor": null
+  },
+  "protocol": {
+    "name": "gRPC",
+    "schema_version": "TBD",
+    "schema": [
+      "rust/proto/a_memorix/api/v1/namespace.proto",
+      "rust/proto/a_memorix/api/v1/memory.proto"
+    ]
+  },
+  "entry": "TBD",
+  "status": "placeholder",
+  "kind": "Memory",
+  "transport": "Remote",
+  "capabilities": {
+    "supported": [
+      "upsert",
+      "forget",
+      "retrieve"
+    ],
+    "unsupported": [
+      "reset_scope"
+    ],
+    "unknown": [
+      "text_retrieval",
+      "embeddings",
+      "relation_extraction"
+    ]
+  },
+  "dependencies": [
+    {
+      "role": "grpc_service",
+      "needed_for": "memory_access",
+      "required": true
+    },
+    {
+      "role": "embedding_provider",
+      "needed_for": "semantic_retrieval",
+      "required": false
+    },
+    {
+      "role": "language_model",
+      "needed_for": "relation_extraction",
+      "required": false
+    }
+  ],
+  "config_schema": [
+    {
+      "key": "endpoint",
+      "label": "gRPC endpoint",
+      "type": "string",
+      "required": true,
+      "secret": false
+    },
+    {
+      "key": "token",
+      "label": "gRPC token",
+      "type": "string",
+      "required": false,
+      "secret": true
+    }
+  ],
+  "host_permissions": [],
+  "tbd": [
+    "version",
+    "protocol schema version and standalone plugin packaging; Rust currently compiles A_memorix 2.0.0a4 proto sources",
+    "current Rust PortManifest requests no host permission, while the gRPC client dials directly; a host-enforced network permission and target policy are not yet defined",
+    "dynamic capabilities after refresh",
+    "Sidecar launch/packaging; current transport remains Remote"
+  ]
+}
