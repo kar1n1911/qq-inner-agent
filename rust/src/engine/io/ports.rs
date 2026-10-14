@@ -49,5 +49,6 @@ pub trait ExternalPort: Send + Sync {
 
 pub trait PersonaPort: Send + Sync {
     fn manifest(&self) -> &PortManifest;
+    fn capabilities(&self) -> PersonaCapabilities { PersonaCapabilities::default() }
     fn load<'a>(&'a self, chat: &'a ChatAddress) -> BoxFuture<'a, PortReply<PersonaSource>>;
 }

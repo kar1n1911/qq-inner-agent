@@ -612,9 +612,18 @@ pub struct FeedItem {
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct PersonaSource {
+    /// Only a human-confirmed import may set this initial persona; it is never
+    /// part of the kernel's non-overridable base prompt.
+    pub initial_persona: Option<String>,
     pub name: Option<String>,
     pub description: Option<String>,
     pub personality: Option<String>,
     pub scenario: Option<String>,
     pub examples: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PersonaCapabilities {
+    pub supported: Vec<String>,
+    pub unsupported: Vec<String>,
 }
