@@ -243,6 +243,7 @@ impl Core {
         self.get_mut(chat)
     }
 }
+type PersonaBinding = (io::ChatAddress, Arc<dyn io::PersonaPort>);
 pub struct Engine {
     pub config: Config,
     pub store: Arc<Mutex<Store>>,
@@ -250,6 +251,7 @@ pub struct Engine {
     provider: Arc<dyn OrientationProvider>,
     transport: Arc<dyn EngineTransport>,
     io_chats: Mutex<HashMap<String, Arc<dyn io::ChatPort>>>,
+    persona_bindings: Mutex<HashMap<String, PersonaBinding>>,
     options: Options,
     behavior_graph: Option<behavior::CompiledGraph>,
     media_config: media_select::Config,
@@ -393,6 +395,7 @@ impl Engine {
             provider,
             transport,
             io_chats: Mutex::new(HashMap::new()),
+            persona_bindings: Mutex::new(HashMap::new()),
             options,
             behavior_graph,
             media_config,
@@ -409,6 +412,10 @@ impl Engine {
     }
     fn core(&self) -> MutexGuard<'_, Core> {
         self.core.lock().expect("engine core poisoned")
+    }
+    /// Explicit opt-in binding; the default engine keeps its existing persona path.
+    pub fn bind_persona_port(&self, chat: String, address: io::ChatAddress, port: Arc<dyn io::PersonaPort>) {
+        self.persona_bindings.lock().unwrap().insert(chat, (address, port));
     }
     fn db(&self) -> Result<MutexGuard<'_, Store>> {
         self.store
@@ -1507,6 +1514,15 @@ impl Engine {
             _ = signal.changed() => return Ok(()),
             _ = self.self_identity.refresh(self) => {},
         }
+        let persona_binding = self.persona_bindings.lock().unwrap().get(chat).cloned();
+        let persona_source = if oriented {
+            if let Some((address, port)) = persona_binding {
+                Some(tokio::select! { biased;
+                    _ = signal.changed() => return Ok(()),
+                    result = port.load(&address) => result.into_result()?,
+                })
+            } else { None }
+        } else { None };
         let mut t = {
             let mut core = self.core();
             if !oriented {
@@ -1625,6 +1641,12 @@ impl Engine {
                     entry
                 }).collect::<Vec<_>>(),
                 "retainedIdeas":self.reservoir(&db,&t)?,"priorExpectation":db.expectation(chat,now)?});
+            if let Some(source) = &persona_source {
+                payload["personaSource"] = json!({"name":source.name,"description":source.description,"personality":source.personality,"examples":source.examples});
+                if let Some(scenario) = &source.scenario {
+                    payload["personaReference"] = json!({"scenario":scenario});
+                }
+            }
             if let Some(digest) = digest {
                 payload["backlogDigest"] = digest.context;
             }

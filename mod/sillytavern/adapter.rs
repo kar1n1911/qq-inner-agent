@@ -1,6 +1,6 @@
 //! SillyTavern character-card reader. No prompt assembly or runtime wiring lives here.
 use futures_util::future::BoxFuture;
-use qq_inner_core::engine::io::{ChatAddress, HostPermission, IoError, PersonaCapabilities, PersonaPort, PersonaSource, PortKind, PortManifest, PortReply, TransportKind, VersionReq};
+use super::{ports::PersonaPort, types::{ChatAddress, HostPermission, IoError, PersonaCapabilities, PersonaSource, PortKind, PortManifest, PortReply, TransportKind, VersionReq}};
 use serde_json::{json, Map, Value};
 use std::{collections::HashMap, fs, path::{Path, PathBuf}};
 

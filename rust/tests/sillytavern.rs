@@ -1,10 +1,7 @@
 //! Plugin-boundary checks for io-port-plan §7.3.1; runtime prompt wiring is separate.
-#[path = "../../mod/sillytavern/adapter.rs"]
-mod sillytavern;
-
 use qq_inner_core::engine::io::{ChatAddress, ChatKind, PersonaPort, PortReply};
+use qq_inner_core::engine::io::adapters::sillytavern::{parse_card, SillyTavernPersona};
 use serde_json::{json, Value};
-use sillytavern::{parse_card, SillyTavernPersona};
 use std::{collections::HashMap, fs};
 
 fn card() -> Value {

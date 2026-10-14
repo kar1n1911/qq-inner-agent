@@ -21,6 +21,6 @@
   "tbd": [
     "plugin version and package entry/discovery format",
     "host-approved card root and chat binding persistence",
-    "runtime prompt assembly belongs to the kernel and is not wired here"
+    "runtime use requires explicit Engine::bind_persona_port; automatic discovery and binding are not wired"
   ]
 }

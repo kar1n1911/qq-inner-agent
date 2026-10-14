@@ -1,6 +1,12 @@
 # mod/ 插件目录与 manifest 规范（草案）
 
-本目录是拟议的插件安装单元。当前文件仅为规范和空骨架；宿主尚未从这里自动发现、授权或加载插件。不要把占位 manifest 当作可运行声明。
+本目录保存插件的唯一实现源码。当前 Rust 内置适配器由 `rust/src/engine/io/adapters/mod.rs` 的 `#[path]` 声明直接编译这里的文件；宿主尚未从 manifest 自动发现、授权或动态加载插件。不要把占位 manifest 当作可运行声明。
+
+这种静态接线保持 `engine/io/` 为唯一契约位置，也避免核心 crate 与依赖其 trait 的插件 crate 形成循环依赖。相对路径集中在一个模块文件中，移动目录时必须同步更新并以 `cargo build` 验证。独立 crate/进程加载仍是后续架构议题；当前不声称已有运行时插件发现。
+
+方案 B 的边界前提是 **P-5 只放行 `adapters/mod.rs` 中列明的八条固定 `mod/` 路径，并递归扫描 `mod/` 的 Rust 源码依赖**；新增或变更路径必须同步更新断言，不能借 `#[path]` 绕过内核边界。X10 引入 JSON 清单时应重新评估这套静态路径与扫描规则。
+
+`rust/src/engine/io/adapters/model_config.json` 是指向 `mod/model_config.json` 的兼容符号链接，供现有 Node 配置读取路径使用；它没有第二份内容。
 
 ## 1. 边界与目录
 
@@ -13,10 +19,10 @@ mod/
     manifest.json            # 每个可安装单元一份
     ...                      # 日后实现、协议资源和平台产物
     sidecar/                 # 进程外本机服务的源文件/入口，按需使用
-  onebot/ a_memorix/ ollama/ openai/ claude/ null/
+  onebot/ a_memorix/ ollama/ openai/ claude/ null/ sillytavern/
 ```
 
-目录名是稳定的插件 ID；`name` 应与之匹配。一个 manifest 对应一个端口面。现有 `null.rs` 同时实现多个面，因此本骨架的 `null/manifest.json` 仅是未定方案，未来应拆为多个安装单元或明确一目录多 manifest 的规则。
+目录名是稳定的插件 ID；`name` 应与之匹配。一个 manifest 对应一个端口面。现有 `null/adapter.rs` 同时实现多个面，因此 `null/manifest.json` 仅是未定方案，未来应拆为多个安装单元或明确一目录多 manifest 的规则。
 
 ## 2. 如何写与如何发现
 
@@ -98,6 +104,6 @@ A_memorix 本体是 Python 服务，走 gRPC；现有 Rust 代码是 `MemoryPort
 
 ## 5. 当前占位文件与待确认
 
-六份 `manifest.json` 只依据当前适配器显式声明的 kind、transport 和能力填写；未知的版本、能力或权限目标标 `TBD`。特别是 `ollama` 当前 Rust `HttpModel` 的 transport 声明为 `Sidecar`，但它连接的是本机 Ollama HTTP 服务，尚未有宿主启动该进程的实现；这个命名语义需要落地前统一。A_memorix 当前为 `Remote`，其现有 Rust manifest 的 `host_permissions` 为空，而 gRPC 客户端直接拨号；这暴露了宿主级网络授权尚未接线，不能把空数组解释成已完成隔离。模型三家当前共用 `model_http.rs` 和 `model_config.json`，拆目录不意味着已拆实现。
+七份 `manifest.json` 只依据当前适配器显式声明的 kind、transport 和能力填写；未知的版本、能力或权限目标标 `TBD`。特别是 `ollama` 当前 Rust `HttpModel` 的 transport 声明为 `Sidecar`，但它连接的是本机 Ollama HTTP 服务，尚未有宿主启动该进程的实现；这个命名语义需要落地前统一。A_memorix 当前为 `Remote`，其现有 Rust manifest 的 `host_permissions` 为空，而 gRPC 客户端直接拨号；这暴露了宿主级网络授权尚未接线，不能把空数组解释成已完成隔离。模型三家当前共用 `model_http.rs` 和 `model_config.json`，拆目录不意味着已拆实现。
 
 待确认：①真实扫描根、安装包格式、签名/摘要、入口/资源限制和启用事务；②进程外线协议与 schema 的文件格式、版本和发布位置；③ `null` 多面如何拆分；④ `ollama` 的 Sidecar 与本地服务连接如何区分；⑤ A_memorix 何时从 Remote 切换为宿主管理的 Python Sidecar，以及凭据/端点配置；⑥ manifest 中插件 ID 与运行实例名的关系、能力动态刷新和正式启用开关的持久化位置。这些未决项不得用猜测填成可加载值。

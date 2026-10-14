@@ -6,13 +6,13 @@ use qq_inner_core::{
     config::{defaults, merge, Config},
     engine::behavior::{compile, Profile},
     engine::orientation::{OrientationProvider, OrientationTransport},
-    engine::io::{adapters::onebot::OneBotAdapter, PortReply},
+    engine::io::{adapters::{onebot::OneBotAdapter, sillytavern::{parse_card, SillyTavernPersona}}, ChatAddress, ChatKind, PortReply},
     engine::{Engine, EngineTransport, Options},
     transport::{OneBotError, State},
     store::Store,
 };
 use serde_json::{json, Value};
-use std::sync::{Arc, Mutex, Weak};
+use std::{collections::HashMap, fs, sync::{Arc, Mutex, Weak}};
 use tokio::sync::{Notify, Semaphore};
 
 struct Harness {
@@ -2267,6 +2267,73 @@ async fn grown_persona_reaches_form_and_articulate_without_replacing_seed() {
         .as_str()
         .unwrap()
         .contains("责任边界"));
+}
+
+#[tokio::test]
+async fn foreign_card_import_and_runtime_keep_final_prompt_layers_separate() {
+    // §7.3.1: the actual Engine model call is observed, not a test-only prompt projection.
+    let card = json!({"spec":"chara_card_v2","spec_version":"2.0","data":{
+        "name":"Foreign card", "description":"CARD DESCRIPTION", "personality":"CARD STYLE",
+        "scenario":"CARD SCENARIO", "mes_example":"CARD EXAMPLE",
+        "system_prompt":"CARD SYSTEM OVERRIDE", "post_history_instructions":"CARD LATE OVERRIDE",
+        "character_book":{"entries":[{"keys":["secret"],"content":"CARD BOOK SECRET"}]}
+    }});
+    let bytes = serde_json::to_vec(&card).unwrap();
+    let parsed = parse_card(&bytes).unwrap();
+    assert_eq!(parsed.character_book, card["data"].get("character_book").cloned());
+    let approved = parsed.import_preview().confirm(true).unwrap();
+    let imported = approved.initial_persona.unwrap();
+    let (engine, h) = setup(&base("card-import", json!({"persona":imported}), vec![]));
+    engine.ingest(&h.event(&json!({"text":"[CQ:at,qq=99]你好"}))).unwrap();
+    engine.tick().unwrap(); engine.wait_idle().await;
+    let systems = h.model_systems.lock().unwrap().clone();
+    let inputs = h.model_inputs.lock().unwrap().clone();
+    assert!(inputs.iter().any(|(stage, _)| stage == "FORM"));
+    for (stage, system) in &systems {
+        if matches!(stage.as_str(), "FORM" | "ARTICULATE") {
+            assert!(system.starts_with(qq_inner_core::prompts::IDENTITY));
+            assert!(system.contains(qq_inner_core::prompts::OUTPUT_CONTRACT));
+        }
+        for forbidden in ["CARD SYSTEM OVERRIDE", "CARD DESCRIPTION", "CARD STYLE", "CARD BOOK SECRET", "CARD LATE OVERRIDE"] {
+            assert!(!system.contains(forbidden), "card content reached base in {stage}");
+        }
+    }
+    for (stage, payload) in &inputs {
+        if matches!(stage.as_str(), "FORM" | "ARTICULATE") {
+            assert!(payload["persona"].as_str().unwrap().contains("CARD SYSTEM OVERRIDE"));
+            assert_eq!(payload["personality"]["identity"], "CARD SYSTEM OVERRIDE");
+            let mut outside_persona = payload.clone();
+            outside_persona.as_object_mut().unwrap().remove("persona");
+            outside_persona["personality"].as_object_mut().unwrap().remove("identity");
+            assert!(!outside_persona.to_string().contains("CARD SYSTEM OVERRIDE"));
+        }
+        assert!(!payload.to_string().contains("CARD BOOK SECRET"));
+        assert!(!payload.to_string().contains("CARD LATE OVERRIDE"));
+    }
+
+    let root = std::env::temp_dir().join(format!("qq-inner-card-e2e-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    fs::create_dir(&root).unwrap();
+    let path = root.join("card.json"); fs::write(&path, &bytes).unwrap();
+    let address = ChatAddress::new(ChatKind::Group, "onebot", "10").unwrap();
+    let port = Arc::new(SillyTavernPersona::new("sillytavern", root.clone(), HashMap::from([(address.clone(), path)])).unwrap());
+    let (runtime, h) = setup(&base("card-runtime", json!({}), vec![]));
+    runtime.bind_persona_port("group:10".into(), address, port);
+    runtime.ingest(&h.event(&json!({"text":"[CQ:at,qq=99]你好"}))).unwrap();
+    runtime.tick().unwrap(); runtime.wait_idle().await;
+    let runtime_systems = h.model_systems.lock().unwrap().clone();
+    let runtime_inputs = h.model_inputs.lock().unwrap().clone();
+    assert!(runtime_inputs.iter().any(|(stage, payload)| stage == "FORM" && payload["personaSource"]["description"] == "CARD DESCRIPTION"));
+    for (_, system) in &runtime_systems {
+        assert!(!system.contains("CARD SYSTEM OVERRIDE"));
+        assert!(!system.contains("CARD BOOK SECRET"));
+    }
+    for (_, payload) in &runtime_inputs {
+        let final_payload = payload.to_string();
+        assert!(!final_payload.contains("CARD SYSTEM OVERRIDE"));
+        assert!(!final_payload.contains("CARD BOOK SECRET"));
+        assert!(!final_payload.contains("CARD LATE OVERRIDE"));
+    }
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[tokio::test]

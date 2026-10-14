@@ -174,15 +174,28 @@ fn io_source_has_no_dependency_on_kernel_implementation() {
                 "hidden source in {}",
                 path.display()
             );
-            assert!(
-                !source.contains("#[path"),
-                "hidden module in {}",
-                path.display()
-            );
+            if path == root.join("adapters/mod.rs") {
+                let paths: Vec<_> = source.lines().filter(|line| line.starts_with("#[path = ")).collect();
+                assert_eq!(paths, [
+                    "#[path = \"../../../../../mod/null/adapter.rs\"]",
+                    "#[path = \"../../../../../mod/onebot/adapter.rs\"]",
+                    "#[path = \"../../../../../mod/a_memorix/adapter.rs\"]",
+                    "#[path = \"../../../../../mod/claude/adapter.rs\"]",
+                    "#[path = \"../../../../../mod/model_http.rs\"]",
+                    "#[path = \"../../../../../mod/ollama/adapter.rs\"]",
+                    "#[path = \"../../../../../mod/openai/adapter.rs\"]",
+                    "#[path = \"../../../../../mod/sillytavern/adapter.rs\"]",
+                ]);
+                assert_eq!(source.matches("#[path").count(), paths.len(), "unexpected hidden module");
+            } else {
+                assert!(!source.contains("#[path"), "hidden module in {}", path.display());
+            }
         }
     }
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/engine/io");
     inspect(&root, &root);
+    let plugins = Path::new(env!("CARGO_MANIFEST_DIR")).join("../mod");
+    inspect(&plugins, &root);
 }
 
 #[tokio::test]
