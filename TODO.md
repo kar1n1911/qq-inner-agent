@@ -914,6 +914,46 @@ ProviderReference(provider_id="host-llm", model_id="memory-model")
    "A_memorix 需要 embedding" —— 否则**每接一个插件都要改内核**，
    那正是端口化要消灭的东西。
 
+## X3. LLM 适配插件（第四个插件，验证 `ModelPort`）⏸ 未开工（用户 2026-10-12 指定）
+
+**需求**：一个专门测试 **LLM API 适配**的插件，能通过 **Ollama（本地）/ OpenAI API /
+Claude API** 等方式连接。
+
+### 为什么它是有价值的验证对象
+
+| 提供方 | 形态 | 对 `ModelPort` 的考验 |
+| --- | --- | --- |
+| **Ollama** | 本地进程；OpenAI 兼容接口 + 自有的 `/api/chat`、`/api/tags` | **本地、无鉴权**的路径 |
+| **OpenAI** | `POST /v1/chat/completions`，system 作为 messages 里的一条 | 我们**当前的既有形态** |
+| **Claude** | `POST /v1/messages`，**system 是顶层参数而不是消息**；`max_tokens` 必填；工具调用是 content block | **形状真正不同** |
+
+### Claude 那条是最关键的证伪点
+
+我们的提示词组装是"**system + 若干消息**"，而 Claude 的 API **不把 system 当消息**。
+
+> **如果 `ModelPort` 的契约把 system 硬编码成一条 message，
+> 那么接 Claude 时就必须改内核 —— 那就是端口化失败的证据。**
+
+这与 OneBot 插件的作用**是同一个逻辑**：用形状不同的真实后端，查出"抽象里偷藏的假设"。
+区别是 OneBot 查的是"是不是偷藏了 QQ 的形状"，这里查的是"是不是偷藏了 OpenAI 的形状"。
+
+### 必须包含的能力
+- **生成**：含 **streaming 与 non-streaming**；
+- **模型列表**：各家形态不同（Ollama 的 `/api/tags` ≠ OpenAI 的 `/v1/models`）；
+- **能力查询如实**：哪些支持工具调用、哪些支持 JSON 强约束、上下文长度 —— **不得假装都支持**；
+- **失败必须显式**（沿用 P1 的约定）：**限流 / 鉴权失败 / 模型不存在 / 超时**都要能分辨；
+- **鉴权与端点配置走 AB2 的配置页**，**密钥不回显**。
+
+### 与现有代码的关系
+现状是直接使用 OpenAI 兼容接口（见 `models.list` 与生成路径）。
+本插件要做的**不是替换它**，而是**把它变成一个可替换的适配器** ——
+**默认路径不变，新路径可显式选择**（沿用 P2 的做法，便于对照验证）。
+
+### 任务边界
+与 A_memorix 插件相同的**中立性要求**：
+**不得把任何一家的专有概念**（Ollama 的 `keep_alive`、Claude 的 `max_tokens` 必填、
+OpenAI 的 `response_format` 等）**泄漏进 `engine/io/` 的中立类型**。
+
 ## H. 流程备忘(重要)
 
 - **每个模块的验收标准(必须遵守):先测"输入/输出本身是否正常",再确认"两者是否真的接入了程序总线"。**
