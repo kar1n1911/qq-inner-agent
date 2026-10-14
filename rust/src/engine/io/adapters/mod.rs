@@ -1,18 +1,18 @@
-#[path = "../../../../../mod/null/adapter.rs"]
+#[path = "../../../../../plugins/null/adapter.rs"]
 pub mod null;
-#[path = "../../../../../mod/onebot/adapter.rs"]
+#[path = "../../../../../plugins/onebot/adapter.rs"]
 pub mod onebot;
-#[path = "../../../../../mod/a_memorix/adapter.rs"]
+#[path = "../../../../../plugins/a_memorix/adapter.rs"]
 pub mod amemorix;
-#[path = "../../../../../mod/claude/adapter.rs"]
+#[path = "../../../../../plugins/claude/adapter.rs"]
 pub mod claude;
-#[path = "../../../../../mod/model_http.rs"]
+#[path = "../../../../../plugins/model_http.rs"]
 pub mod model_http;
-#[path = "../../../../../mod/ollama/adapter.rs"]
+#[path = "../../../../../plugins/ollama/adapter.rs"]
 pub mod ollama;
-#[path = "../../../../../mod/openai/adapter.rs"]
+#[path = "../../../../../plugins/openai/adapter.rs"]
 pub mod openai;
-#[path = "../../../../../mod/sillytavern/adapter.rs"]
+#[path = "../../../../../plugins/sillytavern/adapter.rs"]
 pub mod sillytavern;
 
 pub(super) use super::{ports, types};

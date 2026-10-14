@@ -177,14 +177,14 @@ fn io_source_has_no_dependency_on_kernel_implementation() {
             if path == root.join("adapters/mod.rs") {
                 let paths: Vec<_> = source.lines().filter(|line| line.starts_with("#[path = ")).collect();
                 assert_eq!(paths, [
-                    "#[path = \"../../../../../mod/null/adapter.rs\"]",
-                    "#[path = \"../../../../../mod/onebot/adapter.rs\"]",
-                    "#[path = \"../../../../../mod/a_memorix/adapter.rs\"]",
-                    "#[path = \"../../../../../mod/claude/adapter.rs\"]",
-                    "#[path = \"../../../../../mod/model_http.rs\"]",
-                    "#[path = \"../../../../../mod/ollama/adapter.rs\"]",
-                    "#[path = \"../../../../../mod/openai/adapter.rs\"]",
-                    "#[path = \"../../../../../mod/sillytavern/adapter.rs\"]",
+                    "#[path = \"../../../../../plugins/null/adapter.rs\"]",
+                    "#[path = \"../../../../../plugins/onebot/adapter.rs\"]",
+                    "#[path = \"../../../../../plugins/a_memorix/adapter.rs\"]",
+                    "#[path = \"../../../../../plugins/claude/adapter.rs\"]",
+                    "#[path = \"../../../../../plugins/model_http.rs\"]",
+                    "#[path = \"../../../../../plugins/ollama/adapter.rs\"]",
+                    "#[path = \"../../../../../plugins/openai/adapter.rs\"]",
+                    "#[path = \"../../../../../plugins/sillytavern/adapter.rs\"]",
                 ]);
                 assert_eq!(source.matches("#[path").count(), paths.len(), "unexpected hidden module");
             } else {
@@ -194,7 +194,7 @@ fn io_source_has_no_dependency_on_kernel_implementation() {
     }
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/engine/io");
     inspect(&root, &root);
-    let plugins = Path::new(env!("CARGO_MANIFEST_DIR")).join("../mod");
+    let plugins = Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugins");
     inspect(&plugins, &root);
 }
 

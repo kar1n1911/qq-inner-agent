@@ -181,7 +181,7 @@ JSON 逐项包含 `IDENTITY`、`OUTPUT_CONTRACT`、`FORMATION`、`EVALUATION`、
 
 **现状**:✅ 正常。`onebot.forwardEnabled` 已开,合并转发可解析。
 
-P2 过渡开关为进程环境变量 `QQ_INNER_ONEBOT_IO=1`；未设置时通知、入站及发送均继续走旧路径。开启后，普通 OneBot 消息由 `mod/onebot/adapter.rs` 映射为 `Incoming`，`Engine::ingest_incoming` 沿用原有决策和发送闸门，只有经该入口接纳的会话在最终文本发送时调用 `ChatPort::deliver`。协议 ID 仅作消息字段，Store 仍分配 `message_key`；服务器 `ts` 与本机 `received_at` 分别保存。此阶段新入口对媒体段和主人命令显式拒绝，非消息事件尚无中立 `Incoming` 契约；需要这些功能时保持默认旧路径。撤回 `Command::Recall` 只在 OneBot `delete_msg` 收到成功 ACK 后返回 `Ok`，超时或断线保留 uncertain 失败态。
+P2 过渡开关为进程环境变量 `QQ_INNER_ONEBOT_IO=1`；未设置时通知、入站及发送均继续走旧路径。开启后，普通 OneBot 消息由 `plugins/onebot/adapter.rs` 映射为 `Incoming`，`Engine::ingest_incoming` 沿用原有决策和发送闸门，只有经该入口接纳的会话在最终文本发送时调用 `ChatPort::deliver`。协议 ID 仅作消息字段，Store 仍分配 `message_key`；服务器 `ts` 与本机 `received_at` 分别保存。此阶段新入口对媒体段和主人命令显式拒绝，非消息事件尚无中立 `Incoming` 契约；需要这些功能时保持默认旧路径。撤回 `Command::Recall` 只在 OneBot `delete_msg` 收到成功 ACK 后返回 `Ok`，超时或断线保留 uncertain 失败态。
 
 ### 8.1 OneBot 接口(内核 ↔ NapCat)
 
@@ -703,6 +703,6 @@ relevance ≥ 4、originality ≥ 4，正向标签含 `urgency`（时效需求�
 
 ### X3 模型端口与选择
 
-`provider.ioPort` 默认 `legacy`，仍走原有 OpenAI/Anthropic 兼容传输。显式选 `ollama`、`openai`、`claude` 才由 `mod/` 中的适配器接管模型调用；`provider.kind` 保留给旧路径。Ollama URL 通常为 `http://127.0.0.1:11434`，无需密钥；OpenAI、Claude 分别使用兼容 API 基础 URL 与保存于 `secrets.json` 的密钥。`provider.contextWindowTokens=0` 表示未知，不猜模型窗口。新路径在适配器实例内按 `requestsPerHour` 限流，120 秒超时且不自动重试（断线时服务端是否已处理无法确定）；旧路径的 SQLite 预算与重试行为不变。新路径引擎没有工具执行循环，若模型返回工具调用会显式报 `model_tool_call_unhandled`，不会当成空文本成功。
+`provider.ioPort` 默认 `legacy`，仍走原有 OpenAI/Anthropic 兼容传输。显式选 `ollama`、`openai`、`claude` 才由 `plugins/` 中的适配器接管模型调用；`provider.kind` 保留给旧路径。Ollama URL 通常为 `http://127.0.0.1:11434`，无需密钥；OpenAI、Claude 分别使用兼容 API 基础 URL 与保存于 `secrets.json` 的密钥。`provider.contextWindowTokens=0` 表示未知，不猜模型窗口。新路径在适配器实例内按 `requestsPerHour` 限流，120 秒超时且不自动重试（断线时服务端是否已处理无法确定）；旧路径的 SQLite 预算与重试行为不变。新路径引擎没有工具执行循环，若模型返回工具调用会显式报 `model_tool_call_unhandled`，不会当成空文本成功。
 
-模型插件的依赖与配置字段统一声明在 `mod/model_config.json`；WebUI 的 `/api/model-plugins` 只返回字段定义，不返回密钥值。宿主 HTTP 权限仍由 `PortManifest.host_permissions` 独立声明，依赖声明本身不授予权限。设置保存仍使用 `/api/config` 的差异 patch；密钥沿用只写、仅展示“已配置/未配置”的路径。`ModelRequest.payload` 的工具定义、调用、结果形态见端口计划 §5.3。协议参考：[OpenAI Chat Completions](https://developers.openai.com/api/reference/resources/chat)、[Claude Messages](https://platform.claude.com/docs/en/api/messages/create)、[Ollama API](https://github.com/ollama/ollama/blob/main/docs/api.md)。
+模型插件的依赖与配置字段统一声明在 `plugins/model_config.json`；WebUI 的 `/api/model-plugins` 只返回字段定义，不返回密钥值。宿主 HTTP 权限仍由 `PortManifest.host_permissions` 独立声明，依赖声明本身不授予权限。设置保存仍使用 `/api/config` 的差异 patch；密钥沿用只写、仅展示“已配置/未配置”的路径。`ModelRequest.payload` 的工具定义、调用、结果形态见端口计划 §5.3。协议参考：[OpenAI Chat Completions](https://developers.openai.com/api/reference/resources/chat)、[Claude Messages](https://platform.claude.com/docs/en/api/messages/create)、[Ollama API](https://github.com/ollama/ollama/blob/main/docs/api.md)。

@@ -203,10 +203,10 @@ async fn main() -> Result<()> {
                 eprintln!("Invalid configuration. Run ./agent setup to correct it.");
                 std::process::exit(2);
             }
-            let plugin_config = root.join("mod/plugins.json");
+            let plugin_config = root.join("plugins/plugins.json");
             if plugin_config.is_file() {
                 let list: Value = serde_json::from_slice(&fs::read(&plugin_config)?)?;
-                let status = plugin_status(&root.join("mod"), &list);
+                let status = plugin_status(&root.join("plugins"), &list);
                 if let Some(error) = plugin_configuration_error(&status, &list) {
                     eprintln!("{error}");
                     std::process::exit(2);

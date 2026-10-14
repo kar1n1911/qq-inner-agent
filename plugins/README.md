@@ -1,19 +1,19 @@
-# mod/ 插件目录与 manifest 规范（草案）
+# plugins/ 插件目录与 manifest 规范（草案）
 
 本目录保存插件的唯一实现源码。当前 Rust 内置适配器由 `rust/src/engine/io/adapters/mod.rs` 的 `#[path]` 声明直接编译这里的文件；宿主尚未从 manifest 自动发现、授权或动态加载插件。不要把占位 manifest 当作可运行声明。
 
 这种静态接线保持 `engine/io/` 为唯一契约位置，也避免核心 crate 与依赖其 trait 的插件 crate 形成循环依赖。相对路径集中在一个模块文件中，移动目录时必须同步更新并以 `cargo build` 验证。独立 crate/进程加载仍是后续架构议题；当前不声称已有运行时插件发现。
 
-方案 B 的边界前提是 **P-5 只放行 `adapters/mod.rs` 中列明的八条固定 `mod/` 路径，并递归扫描 `mod/` 的 Rust 源码依赖**；新增或变更路径必须同步更新断言，不能借 `#[path]` 绕过内核边界。X10 引入 JSON 清单时应重新评估这套静态路径与扫描规则。
+方案 B 的边界前提是 **P-5 只放行 `adapters/mod.rs` 中列明的八条固定 `plugins/` 路径，并递归扫描 `plugins/` 的 Rust 源码依赖**；新增或变更路径必须同步更新断言，不能借 `#[path]` 绕过内核边界。X10 引入 JSON 清单时应重新评估这套静态路径与扫描规则。
 
-`rust/src/engine/io/adapters/model_config.json` 是指向 `mod/model_config.json` 的兼容符号链接，供现有 Node 配置读取路径使用；它没有第二份内容。
+`rust/src/engine/io/adapters/model_config.json` 是指向 `plugins/model_config.json` 的兼容符号链接，供现有 Node 配置读取路径使用；它没有第二份内容。
 
 ## 1. 边界与目录
 
-**契约在 `engine/io/`，实现在 `mod/`。** 精确位置为仓库的 `rust/src/engine/io/`：`types.rs` 定义六面中立类型、`PortReply` 和能力；`ports.rs` 定义六个端口 trait；`registry.rs`、`router.rs` 管注册与路由。插件只实现契约，不在 `mod/` 重定义端口、绕过注册表或直接依赖内核的业务实现。行为插件若未来也放在 `mod/`，须有独立类别与契约，不能伪装成第七个 I/O 端口。
+**契约在 `engine/io/`，实现在 `plugins/`。** 精确位置为仓库的 `rust/src/engine/io/`：`types.rs` 定义六面中立类型、`PortReply` 和能力；`ports.rs` 定义六个端口 trait；`registry.rs`、`router.rs` 管注册与路由。插件只实现契约，不在 `plugins/` 重定义端口、绕过注册表或直接依赖内核的业务实现。行为插件若未来也放在 `plugins/`，须有独立类别与契约，不能伪装成第七个 I/O 端口。
 
 ```text
-mod/
+plugins/
   README.md
   <plugin-id>/
     manifest.json            # 每个可安装单元一份
@@ -35,7 +35,7 @@ mod/
 ### 非 Rust 插件示意：A_memorix
 
 ```text
-mod/a_memorix/
+plugins/a_memorix/
   manifest.json              # 当前 Rust gRPC 桥接器的占位声明
   sidecar/                   # 预留 Python 启动器、依赖锁定和协议资源的位置
     README.md                # 本骨架唯一文件；没有可执行实现
@@ -110,7 +110,7 @@ A_memorix 本体是 Python 服务，走 gRPC；现有 Rust 代码是 `MemoryPort
 
 ## 6. X10 清单与探测
 
-X10 使用**每包一份** `<root>/<directory>/manifest.json` 描述包，另用可选的 **`mod/plugins.json`** 描述部署意图。`engine/io/plugin_list.rs` 提供发现、原子预检和注入加载器的解析入口；`plugins reconcile` 提供一次性状态查询。`docs/working/behavior-plugin-design.md` §4 示例称 `plugin.json`，但仓库现有七包均为 `manifest.json`；X10 只认后者。只有 `plugin.json` 的目录须以 `manifest_missing` 报告为未识别，不得悄悄忽略或猜测格式。将来若统一命名，要做显式版本迁移。
+X10 使用**每包一份** `<root>/<directory>/manifest.json` 描述包，另用可选的 **`plugins/plugins.json`** 描述部署意图。`engine/io/plugin_list.rs` 提供发现、原子预检和注入加载器的解析入口；`plugins reconcile` 提供一次性状态查询。`docs/working/behavior-plugin-design.md` §4 示例称 `plugin.json`，但仓库现有七包均为 `manifest.json`；X10 只认后者。只有 `plugin.json` 的目录须以 `manifest_missing` 报告为未识别，不得悄悄忽略或猜测格式。将来若统一命名，要做显式版本迁移。
 
 ### 部署清单 v1
 
@@ -147,7 +147,7 @@ X10 使用**每包一份** `<root>/<directory>/manifest.json` 描述包，另用
 
 冲突规则：显式 `enabled=false` 优先于自动发现，状态为 `disabled_by_user`，不得调用入口或注册实例；手动列出不存在目录（即使禁用）时启动前失败，错误含实例 ID、目录与 `plugin_directory_missing`，既有有效 generation 不变；目录存在但缺 manifest 时自动模式列 `unrecognized/manifest_missing`，手动引用则启动前失败并点名。重复实例 ID、重复包名、越根路径、非法顺序或启用的占位包均显式拒绝。数组顺序只决定没有语义依赖时的激活先后；行为 DAG 的固定边和依赖拓扑优先，冲突报 `invalid_order`，不能靠重排绕过校验。任何失败都不得静默退回其他插件或发言路径。
 
-一次性验收入口为 `qq-inner-core plugins reconcile --root <path> --config <plugins.json> --json`。成功时 JSON 至少含 `mode`、`generation`、按目录列出的 `discovery`、按实例列出的 `requested_enabled/effective_state/reason`、`activation_order`、实际注册实例 ID 与脱敏的依赖/权限/配置状态；配置错误时非零退出，结构化错误含 code/id/path。CLI 与 `start` 在 `mod/plugins.json` 存在时共用 `plugin_list::resolve` 的发现和预检逻辑；缺少该文件时旧运行路径不变。宿主须注入真实加载器并只在全部成功后发布新的 generation。现阶段二者均未绑定实际工厂，显式启用会报 `plugin_load_failed`，不会假装已注册。运行时状态查询、generation 切换和配置增量保存的接线仍待后续工作。
+一次性验收入口为 `qq-inner-core plugins reconcile --root <path> --config <plugins.json> --json`。成功时 JSON 至少含 `mode`、`generation`、按目录列出的 `discovery`、按实例列出的 `requested_enabled/effective_state/reason`、`activation_order`、实际注册实例 ID 与脱敏的依赖/权限/配置状态；配置错误时非零退出，结构化错误含 code/id/path。CLI 与 `start` 在 `plugins/plugins.json` 存在时共用 `plugin_list::resolve` 的发现和预检逻辑；缺少该文件时旧运行路径不变。宿主须注入真实加载器并只在全部成功后发布新的 generation。现阶段二者均未绑定实际工厂，显式启用会报 `plugin_load_failed`，不会假装已注册。运行时状态查询、generation 切换和配置增量保存的接线仍待后续工作。
 
 X6：静态声明只能给能力上限，实际 `Unsupported/Degraded` 和健康状态必须收窄 effective 能力；Sidecar/Remote 需版本化线协议、校验和宿主授权。AB2：`dependencies`、`host_permissions`、`config_schema` 三层独立；用户填的密钥不回显，清单不能直接含密钥。X7：`requested_enabled` 与 `effective_state/reason` 分开，禁用依赖实例时先拒绝或显式重绑，默认基线图不变。X8：清单版本、顺序、绑定、请求开关与脱敏状态可序列化，generation/图哈希可核对；无 schema 变更走 `apply`，涉及持久状态迁移走 `full`。安全校验和最终发送闸门不是可关闭插件。
 

@@ -16,9 +16,9 @@ fn missing_manual_plugin_rejects_real_start_before_runtime() {
         "qq-inner-plugin-start-{}-{nonce}",
         std::process::id()
     ));
-    fs::create_dir_all(root.join("mod")).unwrap();
+    fs::create_dir_all(root.join("plugins")).unwrap();
     fs::write(
-        root.join("mod/plugins.json"),
+        root.join("plugins/plugins.json"),
         json!({
             "schema_version":1,"mode":"manual",
             "plugins":[{"id":"gone","directory":"gone","enabled":true}]
