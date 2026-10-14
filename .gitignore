@@ -20,3 +20,29 @@ dashboard-ca.srl
 
 # IDE
 .idea/
+
+# 依赖与构建产物
+node_modules/
+dist/
+web/dist/
+
+# 数据库与备份（不得入库：可能含真实聊天记录与用户隐私）
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.db-wal
+
+# agent 工具的运行产物（不应进入仓库）
+.codex/
+.claude/
+.cursor/
+.aider*
+*.orig
+*.rej
+*.bak
+*.swp
+
+# 本地环境变量
+.env
+.env.*
