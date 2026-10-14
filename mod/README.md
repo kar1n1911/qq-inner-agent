@@ -107,3 +107,48 @@ A_memorix 本体是 Python 服务，走 gRPC；现有 Rust 代码是 `MemoryPort
 七份 `manifest.json` 只依据当前适配器显式声明的 kind、transport 和能力填写；未知的版本、能力或权限目标标 `TBD`。特别是 `ollama` 当前 Rust `HttpModel` 的 transport 声明为 `Sidecar`，但它连接的是本机 Ollama HTTP 服务，尚未有宿主启动该进程的实现；这个命名语义需要落地前统一。A_memorix 当前为 `Remote`，其现有 Rust manifest 的 `host_permissions` 为空，而 gRPC 客户端直接拨号；这暴露了宿主级网络授权尚未接线，不能把空数组解释成已完成隔离。模型三家当前共用 `model_http.rs` 和 `model_config.json`，拆目录不意味着已拆实现。
 
 待确认：①真实扫描根、安装包格式、签名/摘要、入口/资源限制和启用事务；②进程外线协议与 schema 的文件格式、版本和发布位置；③ `null` 多面如何拆分；④ `ollama` 的 Sidecar 与本地服务连接如何区分；⑤ A_memorix 何时从 Remote 切换为宿主管理的 Python Sidecar，以及凭据/端点配置；⑥ manifest 中插件 ID 与运行实例名的关系、能力动态刷新和正式启用开关的持久化位置。这些未决项不得用猜测填成可加载值。
+
+## 6. X10 清单与探测方案（规划，尚未实现）
+
+本节定义下一轮的验收接口，不表示当前二进制已有插件发现或 `plugins reconcile` 命令。X10 使用**每包一份** `<root>/<directory>/manifest.json` 描述包，另用可选的 **`mod/plugins.json`** 描述部署意图。`docs/working/behavior-plugin-design.md` §4 示例称 `plugin.json`，但仓库现有七包均为 `manifest.json`；X10 只认后者。只有 `plugin.json` 的目录须以 `manifest_missing` 报告为未识别，不得悄悄忽略或猜测格式。将来若统一命名，要做显式版本迁移。
+
+### 部署清单 v1
+
+```json
+{
+  "schema_version": 1,
+  "mode": "auto",
+  "plugins": [
+    {
+      "id": "qq-main",
+      "directory": "onebot",
+      "enabled": true,
+      "params": {"self_id": "12345"},
+      "bindings": {},
+      "secret_refs": {}
+    },
+    {
+      "id": "optional-style",
+      "directory": "language-tune",
+      "enabled": false,
+      "params": {"language": "zh-CN"},
+      "bindings": {"ModelPort": "main-model"},
+      "secret_refs": {"api_key": "secrets.language_tune_key"}
+    }
+  ]
+}
+```
+
+这是**结构示例，不是可启用配置**：`onebot` 现有 manifest 含 TBD，`language-tune` 尚不存在。`plugins` 数组顺序是用户请求的顺序；`id` 是实例 ID，`directory` 是包 ID，二者不可混用。`params` 只放可公开的实例参数，按包的 `config_schema` 验证；密钥只放受保护配置中的引用，状态输出只给 `configured: true/false`。`bindings` 以依赖角色指向实例 ID，不授权网络、文件或进程。根目录由宿主配置/CLI 传入并规范化，清单路径不能越出根目录；v1 只扫根目录的**一级真实子目录**，不跟随目录符号链接，也不扫描归档。
+
+`mode=auto`：只读扫描全部一级目录，把每个目录列入发现结果；缺 manifest、坏 JSON、名字与目录不符、版本不兼容、签名/授权/入口不满足或仍含 `TBD` 的包分别给出原因，绝不执行。有效包也只进入 `discovered`，**新包默认关闭**；已有静态基线路径不因扫描而改变。清单中的显式项可启用、禁用或配置某实例；启用须通过依赖/权限/能力预检后才激活。`mode=manual`：仍扫描并报告所有目录，但仅清单列出的实例有激活资格；未列目录记 `not_selected`。两种模式都不能把“发现”当成“已加载”。
+
+冲突规则：显式 `enabled=false` 优先于自动发现，状态为 `disabled_by_user`，不得调用入口或注册实例；手动列出不存在目录（即使禁用）时启动前失败，错误含实例 ID、目录与 `plugin_directory_missing`，既有有效 generation 不变；目录存在但缺 manifest 时自动模式列 `unrecognized/manifest_missing`，手动引用则启动前失败并点名。重复实例 ID、重复包名、越根路径、非法顺序或启用的占位包均显式拒绝。数组顺序只决定没有语义依赖时的激活先后；行为 DAG 的固定边和依赖拓扑优先，冲突报 `invalid_order`，不能靠重排绕过校验。任何失败都不得静默退回其他插件或发言路径。
+
+下一轮应提供同一解析/预检/激活通路的只运行一次的 `qq-inner-core plugins reconcile --root <path> --config <plugins.json> --json` 验收入口。成功时 JSON 至少含 `mode`、`generation`、按目录列出的 `discovery`、按实例列出的 `requested_enabled/effective_state/reason`、`activation_order`、实际注册实例 ID 与脱敏的依赖/权限/配置状态；配置错误时非零退出，结构化错误含 code/id/path。该入口与正式启动共用解析器及激活器，不能维护仅供测试的第二套结果。运行时状态查询读取当前 generation，健康/能力变化刷新 `effective_state`；配置保存先预检再原子切换，失败保留旧 generation。
+
+X6：静态声明只能给能力上限，实际 `Unsupported/Degraded` 和健康状态必须收窄 effective 能力；Sidecar/Remote 需版本化线协议、校验和宿主授权。AB2：`dependencies`、`host_permissions`、`config_schema` 三层独立；用户填的密钥不回显，清单不能直接含密钥。X7：`requested_enabled` 与 `effective_state/reason` 分开，禁用依赖实例时先拒绝或显式重绑，默认基线图不变。X8：清单版本、顺序、绑定、请求开关与脱敏状态可序列化，generation/图哈希可核对；无 schema 变更走 `apply`，涉及持久状态迁移走 `full`。安全校验和最终发送闸门不是可关闭插件。
+
+`plugins.json` **不能直接替代 `#[path]`**：JSON 只能选择已经编译进核心的受信任 Rust 工厂，无法在运行时声明新的 Rust 模块；删除静态路径须改为稳定动态 ABI、Sidecar/Remote，或拆出中立契约 crate 以避免核心↔插件循环依赖。收益是独立发布与运行时发现；代价是 ABI/协议版本、隔离、签名、权限和迁移机制。X10 保留固定八路径与 P-5 扫描，X10 完成后按真实插件装载需求再评估，不能把读取 JSON 称为动态加载。
+
+**验收**：无 manifest 目录出现在状态中并写明原因；自动模式能识别有效包但不默认执行新包；显式禁用不执行也不注册，且状态可查；手动引用缺目录/缺 manifest 在任何副作用前以可定位错误拒绝；有效启用实例按合法顺序、参数与绑定激活，状态与实际注册表一致；密钥和未授权权限不泄漏、不生效；保存失败保持旧 generation。上述状态须从正式启动所用通路观测，而非仅证明 JSON 可解析。本轮只写方案与先红的目标测试，不实现扫描器、激活器、UI、动态加载、协议 runner 或结构迁移。
