@@ -394,7 +394,7 @@ fn list(dir: &Directory, entries: Vec<Value>) -> Result<()> {
 fn reconcile(dir: &Directory) -> Result<(bool, Value)> {
     let output = Command::new(BIN)
         .arg("--root")
-        .arg(&dir.plugins())
+        .arg(dir.plugins())
         .args(["plugins", "reconcile", "--config"])
         .arg(dir.list())
         .arg("--json")
