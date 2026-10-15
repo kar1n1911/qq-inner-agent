@@ -14,7 +14,7 @@ use qq_inner_core::{
     transport::{OneBotError, State},
 };
 use serde_json::{json, Value};
-use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf, process::Command, sync::{Arc, Mutex}};
+use std::{fs, os::unix::fs::PermissionsExt, path::{Path, PathBuf}, process::Command, sync::{Arc, Mutex}};
 
 const TARGET_REVISION: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
@@ -273,7 +273,7 @@ chmod +x "$target/release/qq-inner-core"
     Ok(bin)
 }
 
-fn update_worker(dir: &Directory, bin: &PathBuf, worker: &str) -> Result<String> {
+fn update_worker(dir: &Directory, bin: &Path, worker: &str) -> Result<String> {
     let output = Command::new(std::env::current_exe()?)
         .args(["--exact", worker, "--nocapture"])
         .env("AA2_UPDATE_ROOT", &dir.0)
