@@ -216,6 +216,7 @@ fn migrated_database(path: &Path) {
     old_database(path);
     crate::store::Store::migrate_received_at(path).unwrap();
     crate::store::Store::migrate_message_keys(path).unwrap();
+    crate::store::Store::migrate_manual_participation(path).unwrap();
 }
 
 #[test]

@@ -5,6 +5,7 @@ use serde_json::{json, Map, Value};
 use std::path::Path;
 
 pub struct Store {
+    manual_participation_initialized: std::cell::Cell<bool>,
     pub(crate) group_sharing: std::cell::RefCell<crate::memory::sharing::Cache>,
     db: Connection,
     pub(crate) ocr_enabled: std::cell::Cell<bool>,
@@ -24,6 +25,7 @@ impl Store {
     }
     fn initialize(db: Connection) -> Result<Self> {
         db.set_prepared_statement_cache_capacity(64);
+        let manual_participation_initialized = !Self::manual_participation_table_exists(&db)?;
         ensure!(
             !Self::received_at_migration_required(&db)?,
             "database migration required; run ./agent update full"
@@ -40,8 +42,17 @@ impl Store {
             !Self::topic_revisit_migration_required_on(&db)?,
             "database migration required; run ./agent update full"
         );
+        ensure!(
+            !Self::manual_participation_migration_required_on(&db)?,
+            "database migration required; run ./agent update full"
+        );
+        if !manual_participation_initialized {
+            Self::read_manual_participation_on(&db)?;
+        }
         db.execute_batch(include_str!("store/schema.sql"))?;
+        Self::read_manual_participation_on(&db)?;
         let store = Self {
+            manual_participation_initialized: std::cell::Cell::new(manual_participation_initialized),
             db,
             group_sharing: Default::default(),
             ocr_enabled: Default::default(),
@@ -227,6 +238,7 @@ mod tests;
 mod operations;
 mod identity;
 mod reply;
+mod manual_participation;
 pub use reply::ReplyInput;
 mod topic_revisit;
 pub use topic_revisit::TopicClassification;

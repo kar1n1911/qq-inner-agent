@@ -1,6 +1,8 @@
 -- 集中保留 JS 五个模块的建表定义；所有 REAL 时间列均为秒。
 PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS message_sequence(id INTEGER PRIMARY KEY AUTOINCREMENT);
+      CREATE TABLE IF NOT EXISTS manual_participation(id INTEGER PRIMARY KEY CHECK(id=1),mode TEXT NOT NULL);
+      INSERT OR IGNORE INTO manual_participation(id,mode) VALUES(1,'normal');
       CREATE TABLE IF NOT EXISTS messages(message_key TEXT NOT NULL PRIMARY KEY, chat TEXT, id TEXT, sender TEXT, name TEXT, text TEXT, ts REAL, self INTEGER DEFAULT 0, received_at REAL NOT NULL DEFAULT -1);
       CREATE INDEX IF NOT EXISTS messages_chat_id ON messages(chat,id);
       CREATE TABLE IF NOT EXISTS inbound_reply_relations(source_message_key TEXT PRIMARY KEY,raw_target_id TEXT,target_message_key TEXT,status TEXT NOT NULL CHECK(status IN ('resolved','unresolved')),reason TEXT NOT NULL);

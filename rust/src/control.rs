@@ -490,11 +490,11 @@ impl Handler for Backend {
                 }
                 "agent.pause" | "agent.stop_participation" | "agent.resume" => {
                     let engine = self.engine.lock().unwrap().clone().ok_or_else(|| anyhow::anyhow!("agent_unavailable"))?;
-                    engine.set_manual_mode(match method {
+                    engine.set_manual_mode_persisted(match method {
                         "agent.pause" => crate::engine::ManualMode::Paused,
                         "agent.stop_participation" => crate::engine::ManualMode::Stopped,
                         _ => crate::engine::ManualMode::Normal,
-                    });
+                    })?;
                     Ok(engine.participation_state())
                 }
                 "agent.exit" => {

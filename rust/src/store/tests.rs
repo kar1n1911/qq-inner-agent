@@ -28,7 +28,7 @@ fn schema_migration_and_constraints() -> Result<()> {
         .execute("INSERT INTO activity_rhythm(id) VALUES(1)", [])
         .is_err());
     let again = Store::initialize(s.db)?;
-    assert_eq!(again.schema()?["tables"].as_object().unwrap().len(), 26);
+    assert_eq!(again.schema()?["tables"].as_object().unwrap().len(), 27);
     Ok(())
 }
 
@@ -56,6 +56,7 @@ fn received_at_migration_is_idempotent_and_marks_unknown_history() -> Result<()>
     Store::migrate_received_at(&path)?;
     Store::migrate_message_keys(&path)?;
     Store::migrate_message_keys(&path)?;
+    Store::migrate_manual_participation(&path)?;
     let store = Store::open(&path)?;
     let row = &store.rows(
         "SELECT ts,received_at FROM messages WHERE id='old'",
@@ -199,6 +200,7 @@ fn message_key_migration_is_atomic_idempotent_and_audits_orphans() -> Result<()>
     drop(db);
     Store::migrate_message_keys(&path)?;
     Store::migrate_message_keys(&path)?;
+    Store::migrate_manual_participation(&path)?;
     let s = Store::open(&path)?;
     let key = s.resolve_message_key("g", "old")?.unwrap();
     assert_eq!(s.rows("SELECT id,text,ts,received_at FROM messages", [])?,

@@ -790,8 +790,6 @@ async fn run(root: PathBuf) -> Result<()> {
             .mode(0o600)
             .open(c.data_dir.join("agent.sqlite"))?;
     }
-    let store = Arc::new(Mutex::new(Store::open(c.data_dir.join("agent.sqlite"))?));
-    store.lock().unwrap().recover_deliveries()?;
     let now = Options::default().now;
     let events = Events::default();
     let file_log = logger(c.data_dir.clone(), now.clone());
@@ -800,6 +798,15 @@ async fn run(root: PathBuf) -> Result<()> {
         event_log.publish(event, data.clone());
         file_log(event, data);
     });
+    let store = Arc::new(Mutex::new(Store::open(c.data_dir.join("agent.sqlite")).inspect_err(|error| {
+        let event = if error.to_string().contains("manual_participation") {
+            "manual_participation_restore_failed"
+        } else {
+            "store_open_failed"
+        };
+        log(event, json!({"error":error.to_string()}));
+    })?));
+    store.lock().unwrap().recover_deliveries()?;
     let mut rt = Runtime::new(loaded, store, runtime_revision(&root)?, now, log, None)?;
     rt.engine.restore()?;
     (rt.log)(
@@ -1018,6 +1025,7 @@ mod tests {
             .inherit_chats(vec![("private:1".into(), state.clone())]);
         state.version = 8;
         rt.engine.inherit_chats(vec![("private:2".into(), state)]);
+        rt.engine.set_manual_mode(qq_inner_core::engine::ManualMode::Paused);
         dir.config(json!({"agent":{"allowedUsers":["1"],"dryRun":true}}));
         let (_stop, mut shutdown) = watch::channel(false);
         let revision = runtime_revision(&dir.0).unwrap();
@@ -1028,6 +1036,8 @@ mod tests {
         assert!(!Arc::ptr_eq(&old_engine, &rt.engine));
         assert!(Arc::ptr_eq(&old_bot, &rt.bot));
         assert_eq!(rt.applied, revision);
+        assert_eq!(rt.engine.manual_mode(), qq_inner_core::engine::ManualMode::Paused);
+        assert_eq!(rt.store.lock().unwrap().manual_participation_mode().unwrap(), "normal");
         let chats = rt.engine.chats();
         assert_eq!(chats.len(), 1);
         assert_eq!(chats[0].1.version, 7);

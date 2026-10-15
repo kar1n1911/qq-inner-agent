@@ -342,6 +342,16 @@ impl Engine {
         }).transpose()?;
         media_config.validate()?;
         config.agent.topic_source.validate()?;
+        let manual = {
+            let db = store.lock().map_err(|_| anyhow::anyhow!("store_poisoned"))?;
+            let mode = match db.manual_participation_mode()? {
+                "normal" => ManualMode::Normal,
+                "paused" => ManualMode::Paused,
+                "stopped" => ManualMode::Stopped,
+                _ => unreachable!(),
+            };
+            mode
+        };
         if config.agent.affect.enabled {
             crate::persona::affect::enable(
                 &*store
@@ -390,7 +400,8 @@ impl Engine {
             signal,
         )?;
         orientation.prompts = options.prompts.clone();
-        Ok(Arc::new(Self {
+        let log = options.log.clone();
+        let engine = Arc::new(Self {
             config,
             store,
             provider,
@@ -407,9 +418,14 @@ impl Engine {
             core: Mutex::new(Core::default()),
             self_identity,
             aborted,
-            participation: Mutex::new(Participation::default()),
+            participation: Mutex::new(Participation { manual, ..Participation::default() }),
             joining: tokio::sync::Mutex::new(()),
-        }))
+        });
+        let initialized = engine.store.lock().map_err(|_| anyhow::anyhow!("store_poisoned"))?
+            .take_manual_participation_initialized();
+        log(if initialized { "manual_participation_initialized" } else { "manual_participation_restored" },
+            json!({"mode":manual}));
+        Ok(engine)
     }
     fn core(&self) -> MutexGuard<'_, Core> {
         self.core.lock().expect("engine core poisoned")
@@ -439,6 +455,33 @@ impl Engine {
             }
         }
         (self.options.log)("participation_mode", json!({"mode":mode}));
+    }
+    /// Only human control requests persist. Exit draining and hot-reload handoff use
+    /// the transient setter above and must not create a new durable intent.
+    pub fn set_manual_mode_persisted(&self, mode: ManualMode) -> Result<()> {
+        let result: Result<()> = (|| {
+            let _core = self.core();
+            let db = self.db()?;
+            let mut state = self.participation.lock().unwrap();
+            let value = match mode {
+                ManualMode::Normal => "normal",
+                ManualMode::Paused => "paused",
+                ManualMode::Stopped => "stopped",
+            };
+            if state.manual == mode && db.manual_participation_mode()? == value { return Ok(()); }
+            db.save_manual_participation(value)?;
+            state.manual = mode;
+            if mode != ManualMode::Normal && !*self.aborted.borrow() {
+                self.aborted.send_replace(false);
+            }
+            Ok(())
+        })();
+        match &result {
+            Ok(()) => (self.options.log)("participation_mode", json!({"mode":mode})),
+            Err(error) => (self.options.log)("manual_participation_write_failed",
+                json!({"requestedMode":mode,"error":error.to_string()})),
+        }
+        result
     }
     pub fn participation_state(&self) -> Value {
         let state = *self.participation.lock().unwrap();

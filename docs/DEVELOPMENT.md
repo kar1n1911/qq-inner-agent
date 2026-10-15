@@ -678,6 +678,8 @@ Node 热重载测试需要已构建的内核；`QQ_CORE_BIN` 可指向其他构�
 
 运行时可用 `./agent pause` 暂停发言但继续观察学习，`./agent stop-participation` 停止 ingest 与决策并保持进程，`./agent resume` 恢复人工控制的状态，`./agent exit` 请求走现有排空路径退出。由 `Restart=always` 管理时，退出后 systemd 会重新启动服务；需要持续停机时用 `./agent stop`。OneBot 长时间失联会自动停止参与并低频静默探测，连接恢复后自动恢复；人工停止参与不会被自动恢复覆盖。`./agent agent-status` 查看控制状态。
 
+人工 `normal` / `paused` / `stopped` 状态保存在 `agent.sqlite` 的 `manual_participation` 单行表，完整重启前后保持；`agent.exit` 的排空停止和热重载状态移交不写入该表。新库首次建立状态会记录 `manual_participation_initialized`，后续启动（包括旧库完成迁移后）记录 `manual_participation_restored`；写入失败记录 `manual_participation_write_failed` 并让控制命令返回错误，不能视为已持久停止。既有状态表缺行、值非法或读取失败会拒绝正常启动，错误记录为 `manual_participation_restore_failed` 或 `store_open_failed`，不会自动恢复为 `normal`。OneBot 自动降级状态只由当前连接健康决定，不落盘。旧库缺表须使用 `./agent update full` 迁移，`update apply` 会拒绝该 schema 变更。
+
 控制套接字不可用或 agent 卡死时，使用 `./agent stop`：它直接通过 systemd 向服务发送 SIGTERM，**不依赖 agent 自身的控制通道**，仍走现有停机排空路径。
 - 本次一次性迁移只为 `messages` 增加 `received_at REAL NOT NULL DEFAULT -1`，保留 `ts` 原值。历史行统一为 sentinel `-1`，含义是“历史接收时刻未知”；本系统实际接收时刻使用非负 Unix 秒，因此不会与真实接收时间混淆。新入站消息由 ingest 写入当次引擎 `now`。幂等标记是数据库内专用表 `migration_received_at_v1` 的唯一行；它只服务本次变更，不是 `user_version` 或通用迁移台账。
 - 新二进制打开已有 `messages` 表却看不到 `received_at` 时直接拒绝启动并提示执行全量更新。全量备份保存在 `.runtime/update/database-before-<revision>-<随机数>.sqlite`；迁移在单个 SQLite immediate transaction 内完成，任何失败都会回滚事务并由编排层恢复备份。

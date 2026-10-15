@@ -459,14 +459,16 @@ struct StoreMigration;
 impl StoreMigration {
     fn required(database: &Path) -> Result<bool> {
         Ok(crate::store::Store::requires_received_at_migration(database)?
-            || crate::store::Store::requires_message_key_migration(database)?)
+            || crate::store::Store::requires_message_key_migration(database)?
+            || crate::store::Store::requires_manual_participation_migration(database)?)
     }
     fn backup(database: &Path, backup: &Path) -> Result<()> {
         crate::store::Store::backup_database(database, backup)
     }
     fn migrate(database: &Path) -> Result<()> {
         crate::store::Store::migrate_received_at(database)?;
-        crate::store::Store::migrate_message_keys(database)
+        crate::store::Store::migrate_message_keys(database)?;
+        crate::store::Store::migrate_manual_participation(database)
     }
 }
 
