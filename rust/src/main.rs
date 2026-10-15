@@ -103,9 +103,11 @@ fn resolve_root(explicit: Option<PathBuf>) -> Result<PathBuf> {
 }
 
 fn plugin_status(root: &std::path::Path, list: &Value) -> Value {
-    let resolved = qq_inner_core::engine::io::plugin_list::resolve(root, list, &mut |_id| {
-        Err("plugin_factory_unavailable".to_owned())
-    });
+    let resolved = qq_inner_core::engine::io::plugin_list::preflight(root, list);
+    project_plugin_status(&resolved, list)
+}
+
+fn project_plugin_status(resolved: &Value, list: &Value) -> Value {
     let entries: Vec<Value> = resolved["plugins"]
         .as_object()
         .into_iter()
@@ -113,8 +115,9 @@ fn plugin_status(root: &std::path::Path, list: &Value) -> Value {
         .map(|(id, item)| {
             json!({"id": id, "directory": item["directory"],
                 "requested_enabled": list["plugins"].as_array().and_then(|entries| entries.iter().find(|entry| entry["id"].as_str() == Some(id))).is_some_and(|entry| entry["enabled"] == true),
-                "effective_state": if item["reason"] == "disabled_by_user" { "disabled" } else if item["effective"] == true { "active" } else { "inactive" },
-                "reason": item["reason"], "installed": item["installed"]})
+                "effective_state": if item["reason"] == "disabled_by_user" { "disabled" } else if item["reason"] == "degraded" { "degraded" } else if item["effective"] == true { "active" } else { "inactive" },
+                "reason": item["reason"], "installed": item["installed"], "missing":item["missing"],
+                "host_permissions":item["host_permissions"], "capabilities":item["capabilities"]})
         })
         .collect();
     let discovery: Vec<Value> = entries.iter().filter(|entry| entry["id"] == entry["directory"]).map(|entry| {
@@ -124,7 +127,68 @@ fn plugin_status(root: &std::path::Path, list: &Value) -> Value {
     }).collect();
     json!({"schema_version":1,"mode":resolved["mode"],"generation":0,
         "plugins":entries,"discovery":discovery,"registered":resolved["registered"],
-        "activation_order":[]})
+        "activation_order":resolved["registered"], "reason":resolved["reason"]})
+}
+
+fn plugin_factory_status(root: &Path, list: &Value, log: Option<Logger>, bot: Option<Arc<OneBot>>, model_hourly_limit: u32)
+    -> (Value, Option<qq_inner_core::engine::io::factory::PublishedPorts>) {
+    use qq_inner_core::engine::io::factory::{self, HostServices};
+    let plugins = if root.join("plugins").is_dir() { root.join("plugins") } else { root.to_path_buf() };
+    let secrets = plugins.parent().and_then(|parent| fs::read(parent.join("secrets.json")).ok())
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok()).unwrap_or(Value::Null);
+    let secret = Arc::new(move |reference: &str| {
+        let key = reference.strip_prefix("secrets.")?;
+        secrets.get(key)?.as_str().map(str::to_owned)
+    });
+    let mut host = HostServices::without_runtime(secret);
+    host.model_hourly_limit = model_hourly_limit;
+    if let Some(bot) = bot {
+        use qq_inner_core::engine::io::PortReply;
+        let action_bot = bot.clone();
+        host.onebot_action = Some(Arc::new(move |action, params| {
+            let bot = action_bot.clone();
+            Box::pin(async move {
+                match bot.call(&action, params).await {
+                    Ok(data) => PortReply::Ok(data),
+                    Err(error) => PortReply::Failed { code: error.code, uncertain: error.uncertain },
+                }
+            })
+        }));
+        host.onebot_connection = Some(Arc::new(move || {
+            let state = bot.state();
+            (state.connected, state.online)
+        }));
+    }
+    if let Some(log) = log {
+        host.audit = Some(Arc::new(move |plugin, target| {
+            log("plugin_http_call", json!({"plugin":plugin,"target":target}));
+        }));
+    }
+    let mut outcome = factory::prepare(&plugins, list, &host);
+    for (id, state) in outcome.status["plugins"].as_object_mut().into_iter().flat_map(|m| m.iter_mut()) {
+        let directory = state["directory"].as_str().unwrap_or(id);
+        let manifest = plugins.join(directory).join("manifest.json");
+        if let Ok(bytes) = fs::read(manifest) {
+            if let Ok(value) = serde_json::from_slice::<Value>(&bytes) {
+                state["host_permissions"] = value["host_permissions"].clone();
+                state["capabilities"] = value["capabilities"].clone();
+            }
+        }
+    }
+    let status = project_plugin_status(&outcome.status, list);
+    (status, outcome.published)
+}
+
+fn load_plugin_batch(root: &Path, log: Logger, bot: Option<Arc<OneBot>>, model_hourly_limit: u32)
+    -> Result<Option<qq_inner_core::engine::io::factory::PublishedPorts>> {
+    let path = root.join("plugins/plugins.json");
+    if !path.is_file() { return Ok(None); }
+    let list: Value = serde_json::from_slice(&fs::read(path)?)?;
+    let (status, published) = plugin_factory_status(root, &list, Some(log), bot, model_hourly_limit);
+    if let Some(error) = plugin_configuration_error(&status, &list) {
+        anyhow::bail!("plugin batch rejected: {error}");
+    }
+    Ok(published)
 }
 
 fn plugin_configuration_error(status: &Value, list: &Value) -> Option<Value> {
@@ -135,9 +199,11 @@ fn plugin_configuration_error(status: &Value, list: &Value) -> Option<Value> {
     }
     status["plugins"].as_array()?.iter().find_map(|entry| {
         let selected = list["plugins"].as_array().is_some_and(|items| items.iter().any(|item| {
-            item["id"] == entry["id"] || item["directory"] == entry["directory"]
+            item["id"] == entry["id"]
         }));
         if !selected { return None; }
+        if entry["reason"] == "preflight_pending" || entry["effective_state"] == "active" || entry["effective_state"] == "degraded"
+            || entry["effective_state"] == "disabled" { return None; }
         let code = match entry["reason"].as_str()? {
             "missing_directory" => "plugin_directory_missing",
             "missing_manifest" => "plugin_manifest_missing",
@@ -147,7 +213,7 @@ fn plugin_configuration_error(status: &Value, list: &Value) -> Option<Value> {
             "invalid_config" => "plugin_config_invalid",
             "invalid_order" => "plugin_order_invalid",
             "preflight_failed" => "plugin_preflight_failed",
-            _ => return None,
+            _ => "plugin_activation_failed",
         };
         Some(json!({"code":code,"id":entry["id"],"directory":entry["directory"]}))
     })
@@ -161,9 +227,12 @@ async fn main() -> Result<()> {
     match cli.command {
         Command::Plugins { action: _, config, json: _ } => {
             let list: Value = serde_json::from_slice(&fs::read(&config)?)?;
-            let status = plugin_status(&root, &list);
+            let (mut status, _prepared) = plugin_factory_status(&root, &list, None, None, u32::MAX);
             if let Some(error) = plugin_configuration_error(&status, &list) {
-                eprintln!("{error}");
+                if let Some(fields) = error.as_object() {
+                    status.as_object_mut().expect("status object").extend(fields.clone());
+                }
+                eprintln!("{status}");
                 std::process::exit(2);
             }
             println!("{status}");
@@ -347,7 +416,11 @@ fn mode(c: &config::Config) -> &'static str {
     }
 }
 fn runtime_revision(root: &Path) -> Result<String> {
-    Ok(format!("{}:{}", settings::revision(root)?, qq_inner_core::prompt_overlay::revision(root)))
+    let base = format!("{}:{}", settings::revision(root)?, qq_inner_core::prompt_overlay::revision(root));
+    let list = root.join("plugins/plugins.json");
+    if !list.is_file() { return Ok(base); }
+    use sha2::{Digest, Sha256};
+    Ok(format!("{base}:{:x}", Sha256::digest(fs::read(list)?)))
 }
 fn changed(root: &Path, applied: &str) -> Result<Option<String>> {
     if root.join(".settings-write").exists() {
@@ -382,6 +455,7 @@ struct Runtime {
     store: Arc<Mutex<Store>>,
     provider: Arc<Provider>,
     model_port: Option<Arc<qq_inner_core::engine::io::adapters::model_http::HttpModel>>,
+    _plugin_ports: Option<qq_inner_core::engine::io::factory::PublishedPorts>,
     bot: Arc<OneBot>,
     onebot_io: Option<Arc<qq_inner_core::engine::io::adapters::onebot::OneBotAdapter>>,
     notices: mpsc::UnboundedReceiver<Notification>,
@@ -396,6 +470,10 @@ struct Runtime {
     now: Clock,
     log: Logger,
     control: Option<Arc<Backend>>,
+}
+struct RuntimePlugins {
+    ports: Option<qq_inner_core::engine::io::factory::PublishedPorts>,
+    initial_bot: Option<(Arc<OneBot>, mpsc::UnboundedReceiver<Notification>)>,
 }
 fn use_onebot_io(value: Option<&str>) -> bool {
     value == Some("1")
@@ -413,7 +491,15 @@ impl qq_inner_core::engine::orientation::OrientationProvider for SelectedModelPo
         Box::pin(async move { Ok(self.port.complete_engine_json(&self.model, system, payload, self.max_tokens).await?) })
     }
 }
+fn live_config(c: &config::Config, model: Option<&Arc<qq_inner_core::engine::io::adapters::model_http::HttpModel>>) -> config::Config {
+    let mut selected = c.clone();
+    if model.is_some() && selected.provider.io_port == "legacy" {
+        selected.provider.io_port = "openai".into();
+    }
+    selected
+}
 impl Runtime {
+    #[cfg(test)]
     fn new(
         loaded: config::Loaded,
         store: Arc<Mutex<Store>>,
@@ -422,15 +508,37 @@ impl Runtime {
         log: Logger,
         existing_bot: Option<Arc<OneBot>>,
     ) -> Result<Self> {
+        Self::new_with_plugins(loaded, store, applied, now, log, existing_bot,
+            RuntimePlugins { ports: None, initial_bot: None })
+    }
+    fn new_with_plugins(
+        loaded: config::Loaded,
+        store: Arc<Mutex<Store>>,
+        applied: String,
+        now: Clock,
+        log: Logger,
+        existing_bot: Option<Arc<OneBot>>,
+        plugins: RuntimePlugins,
+    ) -> Result<Self> {
+        let RuntimePlugins { ports: plugin_ports, initial_bot } = plugins;
         // Record the bytes actually loaded, including startup edits during resource setup.
-        let applied = format!("{}:{}", applied.split(':').next().unwrap_or(&applied), loaded.prompts.watch_revision());
-        let c = loaded.config;
+        let suffix = if plugin_ports.is_some() {
+            applied.rsplit_once(':').map(|(_, hash)| format!(":{hash}")).unwrap_or_default()
+        } else { String::new() };
+        let applied = format!("{}:{}{}", applied.split(':').next().unwrap_or(&applied), loaded.prompts.watch_revision(), suffix);
+        let mut c = loaded.config;
+        if let Some(instance) = plugin_ports.as_ref().and_then(|ports| ports.model_instance.as_ref()) {
+            c.provider.model = config::RuntimeText { text: instance.clone(), is_truthy: !instance.is_empty() };
+            c.provider.io_port = plugin_ports.as_ref().and_then(|ports| ports.model_kind.clone())
+                .unwrap_or_else(|| "openai".into());
+        }
         let provider = Arc::new(Provider::new(
             c.provider.clone(),
             c.api_key.text.clone(),
             store.clone(),
         ));
-        let model_port = if c.provider.io_port == "legacy" { None } else {
+        let model_port = if let Some(ports) = &plugin_ports { ports.model.clone() }
+            else if c.provider.io_port == "legacy" { None } else {
             Some(Arc::new(qq_inner_core::engine::io::adapters::model_http::HttpModel::configured(
                 &c.provider.io_port, &c.provider.base_url, Some(c.api_key.text.clone()),
                 (c.provider.context_window_tokens > 0).then_some(c.provider.context_window_tokens),
@@ -445,9 +553,15 @@ impl Runtime {
                     max_tokens: c.provider.max_tokens.round() as u32,
                 })
             } else { provider.clone() };
-        let (bot, notices) = OneBot::new(c.onebot.clone(), c.onebot_token.text.clone());
-        let bot = existing_bot.unwrap_or_else(|| Arc::new(bot));
-        let onebot_io = if use_onebot_io(std::env::var("QQ_INNER_ONEBOT_IO").ok().as_deref()) {
+        let (bot, notices) = if let Some((bot, notices)) = initial_bot {
+            (bot, notices)
+        } else {
+            let (bot, notices) = OneBot::new(c.onebot.clone(), c.onebot_token.text.clone());
+            (existing_bot.unwrap_or_else(|| Arc::new(bot)), notices)
+        };
+        let onebot_io = if let Some(plugin) = plugin_ports.as_ref().and_then(|ports| ports.onebot.clone()) {
+            Some(plugin)
+        } else if use_onebot_io(std::env::var("QQ_INNER_ONEBOT_IO").ok().as_deref()) {
             use qq_inner_core::engine::io::{adapters::onebot::OneBotAdapter, PortReply};
             let action_bot = bot.clone();
             let state_bot = bot.clone();
@@ -492,14 +606,26 @@ impl Runtime {
                     .unwrap_or_else(|| json!({})),
             )?,
         )?;
+        if let Some(ports) = &plugin_ports {
+            for (address, port) in &ports.persona_bindings {
+                let chat = format!("{}:{}", address.kind.as_str(), address.id);
+                engine.bind_persona_port(chat, address.clone(), port.clone());
+            }
+        }
+        let mut raw = loaded.raw;
+        if let Some(instance) = plugin_ports.as_ref().and_then(|ports| ports.model_instance.as_ref()) {
+            raw["provider"]["model"] = json!(instance);
+            raw["provider"]["ioPort"] = json!(c.provider.io_port);
+        }
         let (abort, _) = watch::channel(false);
         Ok(Self {
             control: None,
             config: c,
-            raw: loaded.raw,
+            raw,
             store,
             provider,
             model_port,
+            _plugin_ports: plugin_ports,
             bot,
             onebot_io,
             notices,
@@ -661,7 +787,7 @@ impl Runtime {
         let next = config::load_config(root)?;
         if root.join(".settings-write").exists()
             || runtime_revision(root)? != revision
-            || revision.split_once(':').map(|(_, prompt)| prompt) != Some(next.prompts.watch_revision())
+            || qq_inner_core::prompt_overlay::revision(root) != next.prompts.watch_revision()
         {
             return Ok(());
         }
@@ -671,6 +797,8 @@ impl Runtime {
         );
         let reconnect = next.raw["onebot"] != self.raw["onebot"]
             || next.raw["onebotToken"] != self.raw["onebotToken"];
+        let plugin_ports = load_plugin_batch(root, self.log.clone(), Some(self.bot.clone()),
+            next.config.provider.requests_per_hour.round() as u32)?;
         let engine = self.engine.clone();
         let stop = engine.stop();
         tokio::pin!(stop);
@@ -693,13 +821,14 @@ impl Runtime {
                 return Ok(());
             }
         }
-        let mut replacement = Self::new(
+        let mut replacement = Self::new_with_plugins(
             next,
             self.store.clone(),
             revision,
             self.now.clone(),
             self.log.clone(),
             (!reconnect).then(|| self.bot.clone()),
+            RuntimePlugins { ports: plugin_ports, initial_bot: None },
         )?;
         if self.engine.manual_mode() != qq_inner_core::engine::ManualMode::Normal {
             replacement.engine.set_manual_mode(self.engine.manual_mode());
@@ -722,7 +851,7 @@ impl Runtime {
                     bot: replacement.bot.clone(),
                     provider: replacement.provider.clone(),
                     model_port: replacement.model_port.clone(),
-                    config: replacement.config.clone(),
+                    config: live_config(&replacement.config, replacement.model_port.as_ref()),
                 }),
                 vec![
                     replacement.config.api_key.text.clone(),
@@ -807,7 +936,14 @@ async fn run(root: PathBuf) -> Result<()> {
         log(event, json!({"error":error.to_string()}));
     })?));
     store.lock().unwrap().recover_deliveries()?;
-    let mut rt = Runtime::new(loaded, store, runtime_revision(&root)?, now, log, None)?;
+    let initial_bot = if root.join("plugins/plugins.json").is_file() {
+        let (bot, notices) = OneBot::new(c.onebot.clone(), c.onebot_token.text.clone());
+        Some((Arc::new(bot), notices))
+    } else { None };
+    let plugin_ports = load_plugin_batch(&root, log.clone(), initial_bot.as_ref().map(|(bot, _)| bot.clone()),
+        c.provider.requests_per_hour.round() as u32)?;
+    let mut rt = Runtime::new_with_plugins(loaded, store, runtime_revision(&root)?, now, log, None,
+        RuntimePlugins { ports: plugin_ports, initial_bot })?;
     rt.engine.restore()?;
     (rt.log)(
         "started",
@@ -822,7 +958,7 @@ async fn run(root: PathBuf) -> Result<()> {
             bot: rt.bot.clone(),
             provider: rt.provider.clone(),
             model_port: rt.model_port.clone(),
-            config: rt.config.clone(),
+            config: live_config(&rt.config, rt.model_port.as_ref()),
         }),
         vec![
             rt.config.api_key.text.clone(),

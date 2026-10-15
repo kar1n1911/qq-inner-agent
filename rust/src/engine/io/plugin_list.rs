@@ -216,6 +216,21 @@ pub fn resolve_with(
     list: &Value,
     load: &mut impl FnMut(&ActivationRequest) -> Result<Value, String>,
 ) -> Value {
+    resolve_inner(root, list, load, false)
+}
+
+/// Validate the complete deployment request without constructing or reporting
+/// any instance as active. Startup uses this before opening runtime resources.
+pub fn preflight(root: &Path, list: &Value) -> Value {
+    resolve_inner(root, list, &mut |_| unreachable!("preflight never loads"), true)
+}
+
+fn resolve_inner(
+    root: &Path,
+    list: &Value,
+    load: &mut impl FnMut(&ActivationRequest) -> Result<Value, String>,
+    preflight_only: bool,
+) -> Value {
     let packages = scan(root);
     let mut states = Map::new();
     for (name, package) in &packages {
@@ -325,6 +340,9 @@ pub fn resolve_with(
             }
         }
         return json!({"schema_version":1,"mode":mode,"plugins":states,"registered":[],"reason":"preflight_failed"});
+    }
+    if preflight_only {
+        return json!({"schema_version":1,"mode":mode,"plugins":states,"registered":[]});
     }
     let mut registered = Vec::new();
     let mut activation_failed = false;

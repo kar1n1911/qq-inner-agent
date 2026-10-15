@@ -4,6 +4,8 @@ use futures_util::future::BoxFuture;
 use serde_json::{json, Value};
 use std::{collections::{HashMap, VecDeque}, io::{BufRead, BufReader}, sync::{Arc, Mutex, atomic::{AtomicU64, Ordering}}, time::{Duration, Instant}};
 
+type HttpAudit = Arc<dyn Fn(&str) + Send + Sync>;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Wire { Ollama, OpenAi, Claude }
 
@@ -17,6 +19,7 @@ pub struct HttpModel {
     calls: Arc<AtomicU64>,
     hourly_limit: Option<usize>,
     recent: Arc<Mutex<VecDeque<Instant>>>,
+    audit: Option<HttpAudit>,
 }
 
 impl HttpModel {
@@ -63,7 +66,12 @@ impl HttpModel {
                 host_permissions: vec![HostPermission::Http { origin: url.origin().ascii_serialization() }],
                 dependencies,
                 config_fields: fields }, window, calls: Arc::new(AtomicU64::new(0)),
-                hourly_limit: None, recent: Arc::new(Mutex::new(VecDeque::new())) })
+                hourly_limit: None, recent: Arc::new(Mutex::new(VecDeque::new())), audit: None })
+    }
+
+    pub fn with_audit(mut self, audit: HttpAudit) -> Self {
+        self.audit = Some(audit);
+        self
     }
 
     pub fn calls(&self) -> u64 { self.calls.load(Ordering::Relaxed) }
@@ -182,7 +190,9 @@ impl HttpModel {
     fn post(&self, body: Value) -> Result<ureq::Response, PortReply<ModelReply>> {
         self.reserve()?;
         let path = match self.wire { Wire::Ollama => "/api/chat", Wire::OpenAi => "/v1/chat/completions", Wire::Claude => "/v1/messages" };
-        let mut req = Self::agent().post(&self.endpoint(path)).set("Content-Type", "application/json");
+        let target = self.endpoint(path);
+        if let Some(audit) = &self.audit { audit(&target); }
+        let mut req = Self::agent().post(&target).set("Content-Type", "application/json");
         match self.wire {
             Wire::OpenAi => req = req.set("Authorization", &format!("Bearer {}", self.key.as_deref().unwrap_or_default())),
             Wire::Claude => req = req.set("x-api-key", self.key.as_deref().unwrap_or_default()).set("anthropic-version", "2023-06-01"),
@@ -408,7 +418,9 @@ impl ModelPort for HttpModel {
             let model = self.clone();
             let result = tokio::task::spawn_blocking(move || {
                 model.reserve()?;
-                let mut req = Self::agent().get(&model.endpoint(path));
+                let target = model.endpoint(path);
+                if let Some(audit) = &model.audit { audit(&target); }
+                let mut req = Self::agent().get(&target);
                 match model.wire {
                     Wire::OpenAi => req = req.set("Authorization", &format!("Bearer {}", model.key.as_deref().unwrap_or_default())),
                     Wire::Claude => req = req.set("x-api-key", model.key.as_deref().unwrap_or_default()).set("anthropic-version", "2023-06-01"),

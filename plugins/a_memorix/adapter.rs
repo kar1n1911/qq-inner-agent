@@ -5,20 +5,25 @@ use super::{ports::MemoryPort, types::*};
 use futures_util::future::BoxFuture;
 use prost_types::{value::Kind, Struct, Timestamp, Value as ProtoValue};
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, sync::Mutex, time::Duration};
+use std::{collections::BTreeMap, sync::{Arc, Mutex}, time::Duration};
 use tonic::{transport::{Channel, Endpoint}, Code, Request, Status};
 
 mod wire { tonic::include_proto!("a_memorix.api.v1"); }
+
+type MemoryAudit = Arc<dyn Fn(&str) + Send + Sync>;
 
 pub struct AmemorixPort {
     manifest: PortManifest,
     channel: Channel,
     token: String,
     capabilities: Mutex<MemoryCapabilities>,
+    endpoint: String,
+    audit: Option<MemoryAudit>,
 }
 
 impl AmemorixPort {
     pub fn new(endpoint: &str, token: String) -> Result<Self, IoError> {
+        let target = endpoint.to_owned();
         let endpoint = Endpoint::from_shared(endpoint.to_owned())
             .map_err(|_| IoError::new("invalid_memory_endpoint"))?
             .timeout(Duration::from_secs(4));
@@ -37,7 +42,13 @@ impl AmemorixPort {
             },
             channel: endpoint.connect_lazy(), token,
             capabilities: Mutex::new(MemoryCapabilities::default()),
+            endpoint: target, audit: None,
         })
+    }
+
+    pub fn with_audit(mut self, audit: MemoryAudit) -> Self {
+        self.audit = Some(audit);
+        self
     }
 
     /// Namespace is scoped to one full port-qualified chat and one subject.
@@ -62,6 +73,7 @@ impl AmemorixPort {
     }
 
     fn request<T>(&self, value: T) -> Result<Request<T>, IoError> {
+        if let Some(audit) = &self.audit { audit(&self.endpoint); }
         let mut request = Request::new(value);
         if !self.token.is_empty() {
             let auth = format!("Bearer {}", self.token).parse()

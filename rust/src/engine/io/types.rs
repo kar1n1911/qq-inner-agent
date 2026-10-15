@@ -332,7 +332,7 @@ pub struct PortManifest {
     pub kind: PortKind,
     pub transport: TransportKind,
     pub core_api_version: VersionReq,
-    /// Empty means no host capabilities are granted.
+    /// Declared host activity for visibility and audit; an empty list is not a denial rule.
     pub host_permissions: Vec<HostPermission>,
     /// Declarative runtime services used by an optional capability.
     #[serde(default)]
