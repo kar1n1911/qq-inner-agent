@@ -167,9 +167,47 @@ pub fn topic_tier(age: f64, c: &crate::config::TopicLifecycle) -> TopicTier {
 pub struct TopicDelivery {
     pub tier: TopicTier,
     pub target: Option<String>,
+    pub topic_key: Option<String>,
     pub last_activity: Option<f64>,
     pub stage: Option<crate::persona::conversation::Stage>,
     pub allowed: bool,
+}
+
+/// Classify the quoted bot message using the conversation stage already in use.
+/// An unresolved or non-bot quote supplies no stage and no learning evidence.
+pub fn replied_topic_stage(db: &Store, source_key: &str,
+    settings: &crate::persona::conversation::Config) -> Result<Option<&'static str>> {
+    let Some(target) = db.first(
+        "SELECT t.message_key FROM inbound_reply_relations r
+         JOIN messages t ON t.message_key=r.target_message_key AND t.self=1
+         JOIN messages s ON s.message_key=r.source_message_key AND s.chat=t.chat
+         WHERE r.source_message_key=? AND r.status='resolved'", [source_key])? else { return Ok(None); };
+    topic_stage_for_key(db,target["message_key"].as_str().unwrap(),settings)
+}
+
+pub fn topic_stage_for_key(db: &Store, key: &str,
+    settings: &crate::persona::conversation::Config) -> Result<Option<&'static str>> {
+    let Some(target) = db.first("SELECT chat,message_key,ts FROM messages WHERE message_key=?",[key])?
+        else { return Ok(None); };
+    let chat = target["chat"].as_str().unwrap();
+    let ts = target["ts"].as_f64().unwrap_or(0.);
+    let rows = db.rows("SELECT * FROM messages WHERE chat=? AND ts<=? ORDER BY ts,rowid",
+        rusqlite::params![chat,ts])?;
+    let Some(position) = rows.iter().position(|r| r["message_key"] == key) else { return Ok(None); };
+    let messages: Vec<policy::Message> = rows[..=position].iter().map(|r| policy::Message {
+        chat: chat.into(), id: crate::memory::text(r,"id").into(),
+        sender: crate::memory::text(r,"sender").into(),
+        name: crate::memory::text(r,"name").into(),
+        text: crate::memory::text(r,"text").into(),
+        ts: num(r,"ts"), is_self: r["self"] == 1, hint: policy::Hint::Open,
+    }).collect();
+    let stage = crate::persona::conversation::classify(&messages, position, ts, settings).stage;
+    Ok(Some(match stage {
+        crate::persona::conversation::Stage::Developing => "developing",
+        crate::persona::conversation::Stage::Closing => "closing",
+        crate::persona::conversation::Stage::NaturalEnd => "natural_end",
+        crate::persona::conversation::Stage::Standalone => "standalone",
+    }))
 }
 
 /// The selected thought is evidence, not a clock reset. Resolve the response object
@@ -187,6 +225,18 @@ pub fn topic_delivery(
         memory::{text, text::similarity},
         persona::conversation::{self, Stage},
     };
+    let learned = if settings.learning.enabled {
+        db.observe_topic_silence(chat, now, settings.learning.feedback_window_seconds)?;
+        db.topic_revisit(chat, &candidate.text)?
+    } else { None };
+    let passes = |row: &serde_json::Value| row["positives"].as_u64().unwrap_or(0)
+        >= u64::from(settings.learning.minimum_positive)
+        && row["revisitability"].as_f64().unwrap_or(0.) >= settings.learning.revisit_threshold;
+    let category = if let Some(row) = learned.as_ref().filter(|row| row["category"] != "unknown") {
+        db.topic_category_revisit(chat, row["category"].as_str().unwrap(), row["stage"].as_str().unwrap())?
+    } else { None };
+    let learned_eligible = learned.as_ref().is_some_and(passes)
+        || category.as_ref().is_some_and(passes);
     let rows = db.rows(
         "SELECT * FROM messages WHERE chat=? ORDER BY ts,rowid",
         [chat],
@@ -229,8 +279,17 @@ pub fn topic_delivery(
             .first()
             .map(|best| (best.0, matches.get(1).is_none_or(|next| best.1 > next.1)))
     };
+    let learned_anchor = if learned_eligible {
+        learned.as_ref().and_then(|row| row["topic_key"].as_str())
+            .and_then(|key| rows.iter().position(|row| row["message_key"] == key))
+            .filter(|index| {
+                let id = &messages[*index].id;
+                messages.iter().filter(|m| &m.id == id).count() == 1
+            })
+    } else { None };
     let anchor = explicit
         .map(|i| (i, true))
+        .or_else(|| learned_anchor.map(|i| (i,true)))
         .or_else(|| find_target(text(response, "text")))
         .or_else(|| find_target(&candidate.text));
     let Some((anchor, precise)) = anchor else {
@@ -246,6 +305,7 @@ pub fn topic_delivery(
         return Ok(TopicDelivery {
             tier,
             target: None,
+            topic_key: None,
             last_activity: None,
             stage: None,
             allowed: tier == TopicTier::Recent,
@@ -286,11 +346,35 @@ pub fn topic_delivery(
     Ok(TopicDelivery {
         tier,
         target: precise.then(|| messages[anchor].id.clone()),
+        topic_key: precise.then(|| rows[anchor]["message_key"].as_str().unwrap().to_owned()),
         last_activity: Some(last_activity),
         stage: Some(stage),
         allowed: tier == TopicTier::Recent
-            || (ended && precise && quotable && (tier != TopicTier::Remote || necessary)),
+            || (ended && precise && quotable && (tier != TopicTier::Remote || necessary || learned_eligible)),
     })
+}
+
+/// Optional EVALUATE result, constrained to a versioned finite vocabulary.
+/// No label or low-confidence label is stored as a confident category.
+pub fn topic_category(result: &serde_json::Value, candidate_id: &str) -> (&'static str, String) {
+    let Some(rating) = result["ratings"].as_array().and_then(|ratings|
+        ratings.iter().find(|r| r["id"].as_str() == Some(candidate_id))) else {
+        return ("unknown", "missing_rating".into());
+    };
+    let category = rating["topicCategory"].as_str().unwrap_or("unknown");
+    let confidence = rating["topicCategoryConfidence"].as_f64().unwrap_or(0.);
+    let evidence = rating["topicCategoryEvidence"].as_str().unwrap_or("");
+    if confidence < 0.8 || !confidence.is_finite() || evidence.is_empty() || evidence.len() > 300 {
+        return ("unknown", "low_confidence_or_missing_evidence".into());
+    }
+    let category = match category {
+        "shared_recurrence" => "shared_recurrence",
+        "ongoing_matter" => "ongoing_matter",
+        "time_sensitive_help" => "time_sensitive_help",
+        "ephemeral_chat" => "ephemeral_chat",
+        _ => return ("unknown", "unsupported_category".into()),
+    };
+    (category, evidence.to_owned())
 }
 
 #[cfg(test)]
@@ -300,6 +384,17 @@ mod lifecycle_tests {
     use serde_json::json;
 
     #[test]
+    fn topic_category_accepts_only_confident_versioned_enum_evidence() {
+        let ready = json!({"ratings":[{"id":"x","topicCategory":"shared_recurrence",
+            "topicCategoryConfidence":0.9,"topicCategoryEvidence":"群里反复提起海豚图"}]});
+        assert_eq!(topic_category(&ready,"x").0,"shared_recurrence");
+        let weak = json!({"ratings":[{"id":"x","topicCategory":"shared_recurrence",
+            "topicCategoryConfidence":0.5,"topicCategoryEvidence":"maybe"}]});
+        assert_eq!(topic_category(&weak,"x").0,"unknown");
+        assert_eq!(topic_category(&json!({"ratings":[]}),"x").0,"unknown");
+    }
+
+    #[test]
     fn tiers_include_exact_thresholds_and_accept_configuration() {
         // Design: elapsed time, inclusive upper bounds; no second state machine.
         for c in [
@@ -307,6 +402,7 @@ mod lifecycle_tests {
             TopicLifecycle {
                 recent_seconds: 10.,
                 remote_seconds: 20.,
+                ..TopicLifecycle::default()
             },
         ] {
             assert_eq!(topic_tier(0., &c), TopicTier::Recent);

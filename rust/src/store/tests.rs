@@ -28,7 +28,7 @@ fn schema_migration_and_constraints() -> Result<()> {
         .execute("INSERT INTO activity_rhythm(id) VALUES(1)", [])
         .is_err());
     let again = Store::initialize(s.db)?;
-    assert_eq!(again.schema()?["tables"].as_object().unwrap().len(), 23);
+    assert_eq!(again.schema()?["tables"].as_object().unwrap().len(), 26);
     Ok(())
 }
 
@@ -87,6 +87,62 @@ fn reply_relation_migration_requires_full_and_does_not_invent_old_edges() -> Res
     assert_eq!(store.rows("SELECT source_message_key,status,target_message_key FROM inbound_reply_status WHERE source_message_key=?", [&key])?,
         vec![json!({"source_message_key":key,"status":"unknown","target_message_key":null})]);
     drop(store);
+    fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
+fn topic_feedback_is_scoped_idempotent_and_silence_is_weak() -> Result<()> {
+    let db = Store::in_memory()?;
+    let delivery = db.delivery("group:10", true, 100.)?;
+    db.finish_delivery(&delivery, "sent_unconfirmed", Some(&json!("bot-id")))?;
+    db.outbound_message(&json!({"chat":"group:10","id":"bot-id","sender":"99","text":"海豚照片梗经典回顾","ts":100.,"self":true}), &delivery)?;
+    let bot_key = db.first("SELECT id FROM outbound_message_facts WHERE delivery_id=?",[&delivery])?.unwrap()["id"].as_str().unwrap().to_owned();
+    db.classify_topic_once(TopicClassification { chat:"group:10",topic_key:&bot_key,topic:"海豚照片梗经典回顾",
+        stage:"natural_end",category:"shared_recurrence",evidence:"海豚照片梗",now:100. })?;
+    db.link_topic_send("group:10",&delivery,&bot_key)?;
+    let (_, key) = db.record_inbound_message(&json!({"chat":"group:10","id":"reply-id","sender":"30","text":"这个海豚照片梗真好笑，再来","ts":101.,"self":false}),ReplyInput::Target("bot-id".into()))?;
+    assert!(db.learn_topic_reply(&key,101.,"natural_end")?);
+    db.learn_topic_reply(&key,101.,"natural_end")?;
+    let row = db.topic_revisit("group:10","海豚照片梗经典回顾")?.unwrap();
+    assert_eq!(row["positives"],1);
+    let score = row["revisitability"].as_f64().unwrap();
+    assert!(score > 0.49);
+    assert_eq!(db.first("SELECT positives FROM topic_revisit_category_status WHERE chat='group:10' AND category='shared_recurrence'",[])?.unwrap()["positives"],1);
+    assert!(db.topic_revisit("group:11","海豚照片梗经典回顾")?.is_none());
+    let quiet = db.delivery("group:10",true,200.)?;
+    db.finish_delivery(&quiet,"sent_unconfirmed",Some(&json!("quiet-id")))?;
+    db.outbound_message(&json!({"chat":"group:10","id":"quiet-id","sender":"99","text":"海豚照片梗经典回顾","ts":200.,"self":true}),&quiet)?;
+    db.link_topic_send("group:10",&quiet,&bot_key)?;
+    db.observe_topic_silence("group:10",1000.,600.)?;
+    let after = db.topic_revisit("group:10","海豚照片梗经典回顾")?.unwrap()["revisitability"].as_f64().unwrap();
+    assert!(after > 0. && after < score);
+    db.observe_topic_silence("group:10",1000.,600.)?;
+    assert_eq!(db.topic_revisit("group:10","海豚照片梗经典回顾")?.unwrap()["revisitability"], after);
+    Ok(())
+}
+
+#[test]
+fn topic_category_is_frozen_and_full_migration_keeps_old_scores_unknown() -> Result<()> {
+    let path = std::env::temp_dir().join(format!("qq-topic-revisit-{}-{}.sqlite", std::process::id(), rand::random::<u64>()));
+    let db = Store::open(&path)?;
+    let (_, old_key) = db.record_message(&message("old-topic",100.))?;
+    db.db.execute_batch("DROP VIEW topic_revisit_category_status; DROP VIEW topic_revisit_status;
+        DROP TABLE topic_revisit_feedback; DROP TABLE topic_revisit_sends; DROP TABLE topic_revisit_topics;")?;
+    drop(db);
+    assert!(Store::requires_message_key_migration(&path)?);
+    assert!(Store::open(&path).err().is_some_and(|e| e.to_string().contains("update full")));
+    Store::migrate_message_keys(&path)?;
+    Store::migrate_message_keys(&path)?;
+    let db = Store::open(&path)?;
+    assert!(db.topic_revisit("g","old")?.is_none());
+    let first = TopicClassification { chat:"g",topic_key:&old_key,topic:"old",stage:"natural_end",
+        category:"shared_recurrence",evidence:"group reference",now:200. };
+    db.classify_topic_once(first)?;
+    db.classify_topic_once(TopicClassification { chat:"g",topic_key:&old_key,topic:"old",stage:"natural_end",
+        category:"ephemeral_chat",evidence:"later guess",now:300. })?;
+    assert_eq!(db.topic_revisit("g","old")?.unwrap()["category"],"shared_recurrence");
+    drop(db);
     fs::remove_file(path)?;
     Ok(())
 }

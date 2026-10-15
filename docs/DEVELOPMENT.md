@@ -764,6 +764,25 @@ FROM inbound_reply_status r
 LEFT JOIN messages target ON target.message_key=r.target_message_key;
 ```
 
+### 话题回提反馈（P）
+
+`agent.topicLifecycle.learning.enabled` 默认关闭；关闭时沿用上面的三层静态投递判断。
+开启后，只有实时入站、同群且已解析到机器人出站 `message_key` 的 reply 才可提供明确
+反馈；历史回填、`unknown`／`unresolved` 引用和不确定投递不记正负反馈。明确好评记 1，
+明确反对记 0；有 ACK 且观察窗结束仍无回应的回提仅记权重 0.2 的弱负信号，并按来源
+消息键去重。正反馈至少 **3 次**且保守平滑分数至少 **0.6** 才可放宽远期必要性与
+概率相似度抑制；正文完全相同、引用不唯一、引用超窗仍会拦截。这两个门槛和观察窗
+分别由 `minimumPositive`、`revisitThreshold`、`feedbackWindowSeconds` 配置；观察窗
+默认 600 秒。
+
+`topic_revisit_topics` 用 `(chat,topic_key)` 保存具体话题，其中 `topic_key` 是消息内部键；
+`topic_revisit_feedback` 按群、话题和已有 `Stage` 分桶。`topic_revisit_status` 可只读查询
+`chat,topic,revisitability`；`topic_revisit_category_status` 按
+`(chat,category_version,category,stage)` 汇总。EVALUATE 的可选 `topicCategory*` 返回
+只接受版本 1 的有限类别与 ≥0.8 置信度、非空证据；不满足时固定为 `unknown`，不参与
+类别汇总。首次保存后不自动改名，旧消息没有回填评分。新表由既有 `update full` 迁移
+钩子在事务内创建，`update apply` 仍拒绝 schema 改变。
+
 ### 出站确认与对账
 
 发送 ACK 带 `message_id` 后先记录 `deliveries.status=sent_unconfirmed`、

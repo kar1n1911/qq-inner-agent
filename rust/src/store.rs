@@ -36,6 +36,10 @@ impl Store {
             !Self::reply_migration_required_on(&db)?,
             "database migration required; run ./agent update full"
         );
+        ensure!(
+            !Self::topic_revisit_migration_required_on(&db)?,
+            "database migration required; run ./agent update full"
+        );
         db.execute_batch(include_str!("store/schema.sql"))?;
         let store = Self {
             db,
@@ -224,6 +228,8 @@ mod operations;
 mod identity;
 mod reply;
 pub use reply::ReplyInput;
+mod topic_revisit;
+pub use topic_revisit::TopicClassification;
 
 pub(crate) use operations::{decode, uuid};
 #[path = "store/learning.rs"]

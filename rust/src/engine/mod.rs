@@ -615,6 +615,11 @@ impl Engine {
         }
         self.orientation.observe(&chat)?;
         let db = self.db()?;
+        if a.topic_lifecycle.learning.enabled {
+            if let Some(stage) = decision::replied_topic_stage(&db, &key, &self.media_config.classification)? {
+                db.learn_topic_reply(&key, now, stage)?;
+            }
+        }
         if a.learning.enabled { LayeredMemory::new(&db).capture(&value, now, &a.memory)?; }
         let Some(s) = state else { return Ok(()); };
         db.observe(&value, now)?;
@@ -804,6 +809,11 @@ impl Engine {
         }
         self.orientation.observe(&m.chat)?;
         let db = self.db()?;
+        if !backfill && a.topic_lifecycle.learning.enabled {
+            if let Some(stage) = decision::replied_topic_stage(&db, &key, &self.media_config.classification)? {
+                db.learn_topic_reply(&key, now, stage)?;
+            }
+        }
         if a.learning.enabled {
             LayeredMemory::new(&db).capture(&value, now, &a.memory)?;
         }
@@ -2099,6 +2109,26 @@ impl Engine {
         payload.as_object_mut().unwrap().remove("retainedIdeas");
         payload["candidates"] = json!(candidates);
         payload["recentAgentMessages"] = t.counts["total"].clone();
+        if a.topic_lifecycle.learning.enabled {
+            let unclassified = {
+                let db = self.db()?;
+                let mut ids = Vec::new();
+                for candidate in &candidates {
+                    if let (Some(id), Some(topic)) = (candidate["id"].as_str(), candidate["text"].as_str()) {
+                        if db.topic_revisit(chat, topic)?.is_none() { ids.push(id.to_owned()); }
+                    }
+                }
+                ids
+            };
+            if !unclassified.is_empty() {
+                payload["topicCategoryRequest"] = json!({
+                    "version":1,
+                    "candidateIds":unclassified,
+                    "instruction":"只对 candidateIds 中首次建立的话题，在对应 rating 中给出 topicCategory、topicCategoryConfidence（0 到 1）及 topicCategoryEvidence；只能选枚举值，不确定用 unknown。",
+                    "choices":["shared_recurrence","ongoing_matter","time_sensitive_help","ephemeral_chat","unknown"]
+                });
+            }
+        }
         path.visit("B.evaluation", "entered");
         let result = self
             .model(&self.options.prompts.compose_prompt(prompts::EVALUATION, &[]), payload)
@@ -2364,7 +2394,7 @@ impl Engine {
                 };
             }
         }
-        let (delivery_id, decorated, targeting) = {
+        let (delivery_id, decorated, targeting, mut topic_key) = {
             let mut core = self.core();
             let db = self.db()?;
             // 38–43：正文、作废、离线、重复/静默、dry-run，顺序不可换。
@@ -2425,12 +2455,25 @@ impl Engine {
                 .filter(|m| truthy(&m["self"]))
                 .map(|m| text(m, "text").to_owned())
                 .collect::<Vec<_>>();
-            if (t.hint != Hint::SelfChat && policy::quiet(self.now(), a.quiet_hours.as_ref()))
-                || (!behavior.burst
-                    && !face_only
-                    && policy::suppress_repetition(text(&decorated, "text"), &own, || {
-                        (self.options.selection_random)()
-                    }))
+            // Strong learned acceptance can overcome only the *probabilistic*
+            // similarity penalty. Exact repeated text remains blocked.
+            let learned_revisit = if a.topic_lifecycle.learning.enabled {
+                db.observe_topic_silence(chat, self.now(), a.topic_lifecycle.learning.feedback_window_seconds)?;
+                db.topic_revisit(chat, &selected.candidate.text)?.is_some_and(|row|
+                    row["positives"].as_u64().unwrap_or(0) >= u64::from(a.topic_lifecycle.learning.minimum_positive)
+                    && row["revisitability"].as_f64().unwrap_or(0.) >= a.topic_lifecycle.learning.revisit_threshold)
+            } else { false };
+            let quiet = t.hint != Hint::SelfChat && policy::quiet(self.now(), a.quiet_hours.as_ref());
+            let repetitive = if quiet || behavior.burst || face_only {
+                false
+            } else if learned_revisit {
+                policy::repeated(text(&decorated, "text"), &own)
+            } else {
+                policy::suppress_repetition(text(&decorated, "text"), &own, || {
+                    (self.options.selection_random)()
+                })
+            };
+            if quiet || repetitive
             {
                 path.stop("quiet_or_repeated");
                 db.assessment_status(chat, &t.id, "cancelled")?;
@@ -2438,7 +2481,7 @@ impl Engine {
                 self.finish(&mut core, &db, &t, false)?;
                 return Ok(());
             }
-            let topic = decision::topic_delivery(
+            let mut topic = decision::topic_delivery(
                 &db,
                 chat,
                 &selected.candidate,
@@ -2447,6 +2490,24 @@ impl Engine {
                 &a.topic_lifecycle,
                 &self.media_config.classification,
             )?;
+            if a.topic_lifecycle.learning.enabled {
+                if let (Some(key), Some(stage)) = (topic.topic_key.as_deref(), topic.stage) {
+                    let (category, evidence) = decision::topic_category(&result, &selected.candidate.id);
+                    let stage = match stage {
+                        crate::persona::conversation::Stage::Developing => "developing",
+                        crate::persona::conversation::Stage::Closing => "closing",
+                        crate::persona::conversation::Stage::NaturalEnd => "natural_end",
+                        crate::persona::conversation::Stage::Standalone => "standalone",
+                    };
+                    db.classify_topic_once(crate::store::TopicClassification {
+                        chat, topic_key:key, topic:&selected.candidate.text, stage,
+                        category, evidence:&evidence, now:self.now(),
+                    })?;
+                    // The newly frozen category may have earlier same-group evidence.
+                    topic = decision::topic_delivery(&db, chat, &selected.candidate, &response,
+                        self.now(), &a.topic_lifecycle, &self.media_config.classification)?;
+                }
+            }
             (self.options.log)("topic_lifecycle", json!({"chat":chat,
                 "tier":format!("{:?}",topic.tier),"target":topic.target,
                 "lastActivity":topic.last_activity,"stage":topic.stage,"allowed":topic.allowed}));
@@ -2508,7 +2569,30 @@ impl Engine {
             }
             db.r#use(&selected.candidate.id)?;
             self.finish(&mut core, &db, &t, true)?;
-            (delivery_id, decorated, targeting)
+            let topic_key = if a.topic_lifecycle.learning.enabled {
+                db.topic_revisit(chat, &selected.candidate.text)?
+                    .and_then(|row| row["topic_key"].as_str().map(str::to_owned))
+            } else { None };
+            (delivery_id, decorated, targeting, topic_key)
+        };
+        let register_topic_send = |db: &Store, delivery: &str, topic_key: &mut Option<String>, now: f64| -> Result<()> {
+            if !a.topic_lifecycle.learning.enabled { return Ok(()); }
+            if topic_key.is_none() {
+                let Some(row) = db.first("SELECT id FROM outbound_message_facts WHERE delivery_id=?",[delivery])?
+                    else { anyhow::bail!("outbound_topic_message_missing"); };
+                let key = row["id"].as_str().unwrap();
+                if let Some(stage) = decision::topic_stage_for_key(db, key, &self.media_config.classification)? {
+                    let (category,evidence) = decision::topic_category(&result,&selected.candidate.id);
+                    db.classify_topic_once(crate::store::TopicClassification {
+                        chat, topic_key:key, topic:&selected.candidate.text, stage,
+                        category, evidence:&evidence, now,
+                    })?;
+                    *topic_key = db.topic_revisit(chat,&selected.candidate.text)?
+                        .and_then(|row| row["topic_key"].as_str().map(str::to_owned));
+                }
+            }
+            if let Some(key) = topic_key.as_deref() { db.link_topic_send(chat,delivery,key)?; }
+            Ok(())
         };
         // 46：与 JS 一样，发送不受模型取消信号中断；stop 等待实际投递结果。
         let content = text(&decorated, "text");
@@ -2597,6 +2681,7 @@ impl Engine {
                         db.finish_delivery(&bubble_delivery, "sent_unconfirmed", receipt.get("message_id"))?;
                         let id = js_string(&receipt["message_id"]);
                         db.outbound_message(&json!({"chat":chat,"id":id,"sender":self.transport.self_id(),"name":a.name.text,"text":bubble,"ts":self.now(),"self":true}), &bubble_delivery)?;
+                        register_topic_send(&db, &bubble_delivery, &mut topic_key, self.now())?;
                         if a.emoji.face_only {
                             db.execute("INSERT OR REPLACE INTO humanize_reply_state VALUES(?,0)", [chat])?;
                         }
@@ -2649,6 +2734,7 @@ impl Engine {
                 if !multi {
                     let id = js_string(&sent["message_id"]);
                     db.outbound_message(&json!({"chat":chat,"id":id,"sender":self.transport.self_id(),"name":a.name.text,"text":content,"ts":self.now(),"self":true}), &delivery_id)?;
+                    register_topic_send(&db, &delivery_id, &mut topic_key, self.now())?;
                 }
                 self.record_decision(
                     &db,

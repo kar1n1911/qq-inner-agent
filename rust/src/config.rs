@@ -225,6 +225,12 @@ pub fn validate(c: &Value) -> std::result::Result<(), ConfigError> {
                 && c.remote_seconds > c.recent_seconds,
             "agent.topicLifecycle requires 0 < recentSeconds < remoteSeconds",
         )?;
+        check(c.learning.minimum_positive >= 3
+            && c.learning.revisit_threshold.is_finite()
+            && (0.0..=1.0).contains(&c.learning.revisit_threshold)
+            && c.learning.feedback_window_seconds.is_finite()
+            && c.learning.feedback_window_seconds > 0.,
+            "agent.topicLifecycle.learning: invalid threshold or feedback window")?;
     }
 
     let a = &c["agent"];
@@ -980,13 +986,30 @@ impl Default for Backfill {
 pub struct TopicLifecycle {
     pub recent_seconds: f64,
     pub remote_seconds: f64,
+    pub learning: TopicLearning,
 }
 impl Default for TopicLifecycle {
     fn default() -> Self {
         Self {
             recent_seconds: 300.,
             remote_seconds: 1800.,
+            learning: TopicLearning::default(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct TopicLearning {
+    pub enabled: bool,
+    pub minimum_positive: u32,
+    pub revisit_threshold: f64,
+    pub feedback_window_seconds: f64,
+}
+impl Default for TopicLearning {
+    fn default() -> Self {
+        Self { enabled: false, minimum_positive: 3,
+            revisit_threshold: 0.6, feedback_window_seconds: 600. }
     }
 }
 
