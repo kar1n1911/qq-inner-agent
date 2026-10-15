@@ -119,6 +119,163 @@ impl Drop for ModelServer {
     }
 }
 
+mod memory_wire {
+    tonic::include_proto!("a_memorix.api.v1");
+}
+
+#[derive(Clone)]
+struct MemoryProbeService;
+
+impl tonic::server::NamedService for MemoryProbeService {
+    const NAME: &'static str = "a_memorix.api.v1.NamespaceService";
+}
+
+impl tonic::codegen::Service<tonic::codegen::http::Request<tonic::body::BoxBody>> for MemoryProbeService {
+    type Response = tonic::codegen::http::Response<tonic::body::BoxBody>;
+    type Error = std::convert::Infallible;
+    type Future = tonic::codegen::BoxFuture<Self::Response, Self::Error>;
+
+    fn poll_ready(&mut self, _: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, request: tonic::codegen::http::Request<tonic::body::BoxBody>) -> Self::Future {
+        match request.uri().path() {
+            "/a_memorix.api.v1.NamespaceService/GetNamespace" => {
+                struct GetNamespace;
+                impl tonic::server::UnaryService<memory_wire::GetNamespaceRequest> for GetNamespace {
+                    type Response = memory_wire::GetNamespaceResponse;
+                    type Future = tonic::codegen::BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
+                    fn call(&mut self, request: tonic::Request<memory_wire::GetNamespaceRequest>) -> Self::Future {
+                        Box::pin(async move {
+                            Ok(tonic::Response::new(memory_wire::GetNamespaceResponse {
+                                namespace: Some(memory_wire::NamespaceInfo {
+                                    namespace_id: request.into_inner().namespace_id,
+                                    status: memory_wire::NamespaceStatus::Active as i32,
+                                    ..Default::default()
+                                }),
+                            }))
+                        })
+                    }
+                }
+                Box::pin(async move {
+                    Ok(tonic::server::Grpc::new(tonic::codec::ProstCodec::default())
+                        .unary(GetNamespace, request).await)
+                })
+            }
+            "/a_memorix.api.v1.NamespaceService/GetNamespaceCapabilities" => {
+                struct GetCapabilities;
+                impl tonic::server::UnaryService<memory_wire::GetNamespaceCapabilitiesRequest> for GetCapabilities {
+                    type Response = memory_wire::GetNamespaceCapabilitiesResponse;
+                    type Future = tonic::codegen::BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
+                    fn call(&mut self, request: tonic::Request<memory_wire::GetNamespaceCapabilitiesRequest>) -> Self::Future {
+                        Box::pin(async move {
+                            Ok(tonic::Response::new(memory_wire::GetNamespaceCapabilitiesResponse {
+                                capabilities: Some(memory_wire::NamespaceCapabilities {
+                                    namespace_id: request.into_inner().namespace_id,
+                                    capabilities: std::collections::HashMap::from([
+                                        ("search_memory".into(), true),
+                                        ("embedding".into(), false),
+                                    ]),
+                                    degraded: false,
+                                    ..Default::default()
+                                }),
+                            }))
+                        })
+                    }
+                }
+                Box::pin(async move {
+                    Ok(tonic::server::Grpc::new(tonic::codec::ProstCodec::default())
+                        .unary(GetCapabilities, request).await)
+                })
+            }
+            "/a_memorix.api.v1.NamespaceService/GetNamespaceHealth" => {
+                struct GetHealth;
+                impl tonic::server::UnaryService<memory_wire::GetNamespaceHealthRequest> for GetHealth {
+                    type Response = memory_wire::GetNamespaceHealthResponse;
+                    type Future = tonic::codegen::BoxFuture<tonic::Response<Self::Response>, tonic::Status>;
+                    fn call(&mut self, request: tonic::Request<memory_wire::GetNamespaceHealthRequest>) -> Self::Future {
+                        Box::pin(async move {
+                            Ok(tonic::Response::new(memory_wire::GetNamespaceHealthResponse {
+                                health: Some(memory_wire::NamespaceHealth {
+                                    namespace: Some(memory_wire::NamespaceInfo {
+                                        namespace_id: request.into_inner().namespace_id,
+                                        status: memory_wire::NamespaceStatus::Active as i32,
+                                        ..Default::default()
+                                    }),
+                                    runtime_state: memory_wire::NamespaceRuntimeState::Ready as i32,
+                                    healthy: true,
+                                    degraded: false,
+                                    ..Default::default()
+                                }),
+                            }))
+                        })
+                    }
+                }
+                Box::pin(async move {
+                    Ok(tonic::server::Grpc::new(tonic::codec::ProstCodec::default())
+                        .unary(GetHealth, request).await)
+                })
+            }
+            _ => Box::pin(async move {
+                Ok(tonic::codegen::http::Response::builder()
+                    .header("grpc-status", "12")
+                    .header("content-type", "application/grpc")
+                    .body(tonic::body::empty_body())
+                    .unwrap())
+            }),
+        }
+    }
+}
+
+struct MemoryServer {
+    url: String,
+    stop: Option<tokio::sync::oneshot::Sender<()>>,
+    task: Option<thread::JoinHandle<()>>,
+}
+impl MemoryServer {
+    fn start() -> Result<Self> {
+        let listener = TcpListener::bind("127.0.0.1:0")?;
+        listener.set_nonblocking(true)?;
+        let url = format!("http://{}", listener.local_addr()?);
+        let (stop, stopped) = tokio::sync::oneshot::channel();
+        let task = thread::spawn(move || {
+            tokio::runtime::Runtime::new().unwrap().block_on(async move {
+                let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+                let incoming = futures_util::stream::unfold(listener, |listener| async move {
+                    let result = listener.accept().await.map(|(stream, _)| stream);
+                    Some((result, listener))
+                });
+                tonic::transport::Server::builder()
+                    .add_service(MemoryProbeService)
+                    .serve_with_incoming_shutdown(incoming, async { let _ = stopped.await; })
+                    .await
+                    .unwrap();
+            });
+        });
+        Ok(Self { url, stop: Some(stop), task: Some(task) })
+    }
+
+    fn verify(&self) -> Result<()> {
+        use qq_inner_core::engine::io::{adapters::amemorix::AmemorixPort, ChatAddress, ChatKind, MemorySubject, PortReply};
+        let address = ChatAddress::new(ChatKind::Group, "onebot", "10")?;
+        tokio::runtime::Runtime::new()?.block_on(async {
+            let port = AmemorixPort::new(&self.url, String::new())?;
+            let result = port.refresh_capabilities(&address, &MemorySubject::Group).await;
+            anyhow::ensure!(matches!(result, PortReply::Ok(ref capabilities)
+                if capabilities.text_retrieval && !capabilities.embeddings),
+                "Memory fixture must probe healthy base retrieval without embeddings: {result:?}");
+            Ok(())
+        })
+    }
+}
+impl Drop for MemoryServer {
+    fn drop(&mut self) {
+        if let Some(stop) = self.stop.take() { let _ = stop.send(()); }
+        if let Some(task) = self.task.take() { let _ = task.join(); }
+    }
+}
+
 struct Agent(Child);
 impl Agent {
     fn start(dir: &Directory) -> Result<Self> {
@@ -535,22 +692,27 @@ fn manifest_claim_not_supported_by_real_port_is_not_advertised() -> Result<()> {
 
 #[test]
 fn missing_optional_embedding_dependency_is_explicitly_degraded() -> Result<()> {
+    let server = MemoryServer::start()?;
+    server.verify()?;
     let dir = Directory::new()?;
-    let mut memory = model_manifest(
-        "memory",
-        &["text_retrieval", "semantic_retrieval"],
-        json!([]),
-    );
-    memory["kind"] = json!("Memory");
-    memory["dependencies"] =
-        json!([{"role":"embedding_provider","needed_for":"semantic_retrieval","required":false}]);
-    package(&dir, "memory", memory)?;
+    let memory = json!({
+        "name":"a_memorix","version":"1.0.0","kind":"Memory","transport":"Remote",
+        "core_api_version":{"major":1,"min_minor":0,"max_minor":null},
+        "protocol":{"name":"gRPC","schema_version":"1.0","schema":"a_memorix.api.v1.NamespaceService"},
+        "entry":{"type":"grpc","endpoint":server.url},
+        "capabilities":{"supported":["text_retrieval"],"unsupported":[],"unknown":["embeddings"]},
+        "dependencies":[{"role":"embedding_provider","needed_for":"semantic_retrieval","required":false}],
+        "host_permissions":[],
+        "config_schema":[{"key":"endpoint","label":"gRPC endpoint","type":"string","required":true,"secret":false}]
+    });
+    package(&dir, "a_memorix", memory)?;
     list(
         &dir,
-        vec![entry("memory", "memory", "http://127.0.0.1:1/v1", true)],
+        vec![json!({"id":"a_memorix","directory":"a_memorix","enabled":true,
+            "params":{"endpoint":server.url},"bindings":{},"secret_refs":{}})],
     )?;
     let (_, degraded) = reconcile(&dir)?;
-    let memory_state = plugin(&degraded, "memory")?;
+    let memory_state = plugin(&degraded, "a_memorix")?;
     assert_eq!(
         memory_state["effective_state"], "degraded",
         "missing optional embedding provider must be reported as degraded"
