@@ -1725,3 +1725,48 @@ Agent 2 在 X4 第一步明确留下：
 | M | 1.6 | 历史上已并入 L，本次未再次合并 |
 
 合并说明：本次没有合并不同需求。原有 L/M 合并照旧；★ 与 R/S/T 为总览和详细任务书，X 与 F1 为端口迁移和插件系统范围说明，均保留原文以免丢失验收口径。
+
+## 9. 偶发失败：复现结论文档 ⏸ 待定策略（2026-10-16）
+
+**方法**：Agent 1 自写复现脚本（`runner.py`），**6 轮全量 Rust 测试**，
+每轮记录**完整 cargo 输出、时间线、系统快照、残留进程**。
+**证据在 VM 的 `/tmp/flaky-repro/`**；**未写任何仓库文件**。
+
+| 轮次 | 条件 | 结果 |
+| --- | --- | --- |
+| **run-01** | `threads=1` | ✅ 通过 |
+| **run-02** | `threads=1` | ✅ 通过 |
+| **run-03** | **`threads=4`** | ❌ `engine_parity` **95/96** |
+| **run-04** | `threads=4` | ✅ 通过 |
+| **run-05** | **`threads=1` + CPU 负载** | ❌ `plugin_factory_contract` **7/8** |
+| run-06 | `threads=4` + CPU 负载 | （额度中断，未完成） |
+
+### 两次失败**性质不同**
+
+**① run-03 —— 被测系统内部的时序**
+```
+builtin_graph_trace_distinguishes_optional_feed_audit_and_injection
+panicked at tests/engine_parity.rs:994:9
+assertion `left == right` failed   left: false   right: true
+```
+→ **`K.untrusted_audit` 的 `feed_items` 节点未被访问**。
+
+**② run-05 —— ⚠️ 外部依赖抖动**
+```
+Error: control test.model failed:
+  {"data":{"state":"websocket_error"},"event":"onebot"}
+```
+→ **碰到了【真实的 OneBot 连接】**。
+
+### 已确认
+- **触发条件**：**资源竞争 / 时序** 或 **外部依赖抖动**；
+- **不止一条测试敏感**（两个不同测试都中招）→ **是一类现象，不是孤例**；
+- **单线程 + 无负载时稳定通过**。
+
+### ⚠️ 新暴露的问题（可能比偶发本身更重要）
+**某些测试会碰到真实 OneBot** —— 这是**有意的集成测试**，还是**意外耦合**？
+若是意外，**影响面多大、怎么隔离**？**待策略阶段给出结论。**
+
+### 未做
+**未修改任何实现或测试**（按要求）。
+
