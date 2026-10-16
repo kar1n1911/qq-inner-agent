@@ -45,10 +45,17 @@ async fn state(service: &Service) -> Option<Value> {
         .write_all(b"{\"id\":\"test\",\"method\":\"state.get\",\"params\":{}}\n")
         .await
         .ok()?;
-    let mut line = String::new();
-    BufReader::new(socket).read_line(&mut line).await.ok()?;
-    let value: Value = serde_json::from_str(&line).ok()?;
-    (value["ok"] == true).then(|| value["result"].clone())
+    let mut reader = BufReader::new(socket);
+    loop {
+        let mut line = String::new();
+        if reader.read_line(&mut line).await.ok()? == 0 {
+            return None;
+        }
+        let value: Value = serde_json::from_str(&line).ok()?;
+        if value["id"] == "test" {
+            return (value["ok"] == true).then(|| value["result"].clone());
+        }
+    }
 }
 async fn wait_state(service: &Service, predicate: impl Fn(&Value) -> bool) -> Value {
     timeout(Duration::from_secs(20), async {

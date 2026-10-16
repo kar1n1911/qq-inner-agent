@@ -23,15 +23,23 @@ async fn running_revision(data_dir: &std::path::Path) -> Option<String> {
             .write_all(b"{\"id\":\"full-update\",\"method\":\"state.get\"}\n")
             .await
             .ok()?;
-        let mut line = String::new();
-        BufReader::new(socket).read_line(&mut line).await.ok()?;
-        let reply: Value = serde_json::from_str(&line).ok()?;
-        if reply["ok"] != true {
-            return None;
+        let mut reader = BufReader::new(socket);
+        loop {
+            let mut line = String::new();
+            if reader.read_line(&mut line).await.ok()? == 0 {
+                return None;
+            }
+            let reply: Value = serde_json::from_str(&line).ok()?;
+            if reply["id"] != "full-update" {
+                continue;
+            }
+            if reply["ok"] != true {
+                return None;
+            }
+            return reply["result"]["runningRevision"]
+                .as_str()
+                .map(str::to_owned);
         }
-        reply["result"]["runningRevision"]
-            .as_str()
-            .map(str::to_owned)
     })
     .await
     .ok()
@@ -1584,6 +1592,26 @@ mod tests {
                 .block_on(run(PathBuf::from(root)))
                 .unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn running_revision_ignores_event_before_matching_response() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        let dir = Temp::new();
+        let listener = tokio::net::UnixListener::bind(dir.0.join("control.sock")).unwrap();
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let mut socket = BufReader::new(socket);
+            let mut request = String::new();
+            socket.read_line(&mut request).await.unwrap();
+            let request: Value = serde_json::from_str(&request).unwrap();
+            assert_eq!(request["id"], "full-update");
+            assert_eq!(request["method"], "state.get");
+            socket.get_mut().write_all(b"{\"event\":\"onebot\",\"data\":{\"state\":\"websocket_error\"}}\n").await.unwrap();
+            socket.get_mut().write_all(b"{\"id\":\"full-update\",\"ok\":true,\"result\":{\"runningRevision\":\"revision-after-event\"}}\n").await.unwrap();
+        });
+        assert_eq!(running_revision(&dir.0).await.as_deref(), Some("revision-after-event"));
+        server.await.unwrap();
     }
 
     // Usability: prove the production run() wires update methods into its control bus.
