@@ -2423,6 +2423,28 @@ impl Engine {
                 }
             }
         } else { None };
+        // Review the whole proposed sequence before reserving any delivery or sending.
+        // A failed/invalid review falls back to the single-text path; its final guard still runs.
+        if a.multi_bubble_review {
+            if let Some(items) = bubbles.as_ref() {
+                let review = tokio::time::timeout(
+                    std::time::Duration::from_secs(5),
+                    self.model(
+                        &self.options.prompts.compose_prompt(crate::persona::humanize::MULTI_BUBBLE_CONCLUSION_REVIEW, &[]),
+                        json!({"text":response["text"],"bubbles":items,"selectedIdea":selected.candidate.text}),
+                    ),
+                ).await;
+                let accepted = matches!(&review, Ok(Ok(value)) if crate::persona::humanize::bubble_review_accepts(value));
+                let repeated = crate::persona::humanize::repeated_bubble_conclusion(items);
+                if !accepted || repeated {
+                    let reason = if repeated { "repeated_conclusion" } else if review.is_err() {
+                        "review_timeout"
+                    } else { "review_invalid_or_failed" };
+                    (self.options.log)("bubble_conclusion_review", json!({"chat":chat,"outcome":"single_text","reason":reason}));
+                    bubbles = None;
+                }
+            }
+        }
         if let Some(items) = bubbles.as_mut() {
             // Put attribution in the first bubble, even if a later send is cancelled.
             let remaining = (a.max_output_chars as usize).min(90)

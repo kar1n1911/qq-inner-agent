@@ -740,6 +740,10 @@ fn default_emoji_enabled() -> bool {
     true
 }
 
+fn default_multi_bubble_review() -> bool {
+    true
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Emoji {
@@ -1056,6 +1060,9 @@ pub struct Agent {
     /// 引擎按间隔依次发送并加与长度成比例的打字延迟（含抖动）。
     #[serde(default)]
     pub multi_bubble: bool,
+    /// 可显式关闭同轮结论审阅，恢复原有多气泡投递行为；多气泡本身仍默认关闭。
+    #[serde(default = "default_multi_bubble_review")]
+    pub multi_bubble_review: bool,
     /// 配置键 `agent.learning`。
     pub learning: Learning,
     /// 配置键 `agent.observation`。

@@ -12,6 +12,11 @@ pub use crate::prompts::FACE_ONLY_INSTRUCTIONS as FACE_ONLY_INSTRUCTIONS;
 /// 多气泡（门控）：允许模型额外返回 `bubbles` 数组模拟连续多气泡。
 pub use crate::prompts::MULTI_BUBBLE_INSTRUCTIONS as MULTI_BUBBLE_INSTRUCTIONS;
 
+/// Rust-only reviewer task; shared JS prompts and their generated Rust snapshot stay in sync.
+pub const MULTI_BUBBLE_CONCLUSION_REVIEW: &str = r##"TASK: BUBBLE_CONCLUSION_REVIEW
+逐条审阅拟连续发送的气泡。后一句即使换词或反讽，只要仍收束到前一句的同一结论、笑点或评价落点，就判重复。共享话题词不是重复证据；新的观察、评价维度、后果、行动或对话推进应放行。不要把回应中的引用或来源标注当成结论。
+只返回一个 JSON 对象，verdict 只能是 "accept" 或 "duplicate"，duplicate 为布尔值，reason 为简短依据。例如：{"verdict":"accept","duplicate":false,"reason":"后一条新增了后果"}。不能确定时判 duplicate。"##;
+
 /// 原始段标记单独保存，避免把用户输入的字面量 [QQface:...] 误当真实 face。
 /// 只在学习开关开启后采集；旧消息没有段证据，按冷启动处理，不猜测回填。
 pub fn enable(store: &Store) -> Result<()> {
@@ -193,9 +198,50 @@ pub fn multi_bubbles(value: &Value, max_chars: usize) -> Result<Option<Vec<Strin
     Ok(Some(bubbles))
 }
 
+/// A narrow independent veto for an obvious repeated punchline. The model review
+/// handles other semantic relationships; sharing a topic word alone is not a veto.
+pub fn repeated_bubble_conclusion(bubbles: &[String]) -> bool {
+    let postponed = |text: &str| {
+        ["明天", "改天", "下次", "以后"].into_iter().find(|when| {
+            text.contains(when)
+                && ["开始", "再", "等", "排到", "拖到", "计划"]
+                    .into_iter().any(|cue| text.contains(cue))
+        })
+    };
+    bubbles.iter().enumerate().any(|(index, earlier)| bubbles.iter().skip(index + 1).any(|later| {
+        if earlier.trim() == later.trim() { return true; }
+        let later_adds_consequence = ["之后", "因此", "所以", "结果", "导致", "影响"]
+            .into_iter().any(|cue| later.contains(cue));
+        !later_adds_consequence && postponed(earlier).is_some_and(|when| postponed(later) == Some(when))
+    }))
+}
+
+pub fn bubble_review_accepts(response: &Value) -> bool {
+    response["verdict"] == "accept" && response["duplicate"] == false
+        && ["accepted", "valid", "allow"].into_iter()
+            .all(|key| response.get(key).is_none_or(|value| value == true))
+}
+
 /// human-like-replies.md:185–186（改动 8）：独立随机源，不消耗长度/装饰抽签。
 /// 每条 400ms + 20ms/字符（基础封顶 2500ms）+ 0–100ms 抖动；条间另加 300–800ms。
 pub fn bubble_delay_ms(chars: usize, first: bool, jitter: u64) -> u64 {
     400_u64.saturating_add((chars as u64).saturating_mul(20)).min(2500)
         + jitter % 101 + if first { 0 } else { 300 + jitter % 501 }
+}
+
+#[cfg(test)]
+mod bubble_conclusion_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn postponed_punchline_is_repeated_but_a_new_consequence_is_not() {
+        let repeated = ["早睡计划又说明天开始。".to_owned(), "真准时，一到今晚就宣布明天再开始。".to_owned()];
+        let different = ["早睡计划今晚先把手机放远一点。".to_owned(), "早睡之后明早通勤也许能少打两个哈欠。".to_owned()];
+        assert!(repeated_bubble_conclusion(&repeated));
+        assert!(repeated_bubble_conclusion(&["等明天再开始。".into(), "先聊别的。".into(), "改天再说，等明天。".into()]));
+        assert!(!repeated_bubble_conclusion(&different));
+        assert!(bubble_review_accepts(&json!({"verdict":"accept","duplicate":false})));
+        assert!(!bubble_review_accepts(&json!({"unexpected":"response"})));
+    }
 }

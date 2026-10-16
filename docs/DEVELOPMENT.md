@@ -48,6 +48,7 @@ agent "是谁、怎么说话"这一整条链。
 
 **现状**:身份自治开关全开但**从未尝试**——`enough()` 要求 `traits ≥ minTraits(3)`,而 `traits` 层只有 1 条;
 多气泡已接入 `ARTICULATION` 输出契约；配置允许且通过场景、数量、长度和内容校验时逐条发送（见 `engine/mod.rs::cycle`、`persona/humanize.rs::multi_bubbles`）。
+`agent.multiBubble` 仍默认关闭。开启后，`agent.multiBubbleReview` 默认开启，可显式设为 `false` 恢复原有多气泡行为。真正拆成 2–3 条时，引擎在创建 delivery 前、无 Store/Core 锁下进行至多 5 秒的同轮结论审阅；审阅要求 `{"verdict":"accept","duplicate":false}`，无效、超时或重复时整轮回退单条正文，随后仍走原有最终内容与发送闸门。审阅任务文本在 `persona/humanize.rs`，不修改由 JS 生成的 `prompts.rs`。
 
 **本系统用到的对外接口**:`set_group_card` / `set_qq_profile` / `set_qq_avatar` / `set_self_longnick`(见[传输系统](#8-传输系统))。
 

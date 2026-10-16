@@ -326,6 +326,7 @@ impl OrientationProvider for Harness {
                         .map(|v| json!({"index":v["index"],"action":"keep","reason":"非敏感的明确教学"}))
                         .collect::<Vec<_>>()})
                 }
+                "BUBBLE_CONCLUSION_REVIEW" => json!({"verdict":"accept","duplicate":false,"reason":"existing bubble delivery fixture"}),
                 "ORIENT" => json!({"style":"谨慎接话","summary":"园艺讨论","topics":["园艺"]}),
                 _ => panic!("unexpected stage"),
             })
