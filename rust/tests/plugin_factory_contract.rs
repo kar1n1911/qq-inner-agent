@@ -277,6 +277,40 @@ impl Drop for MemoryServer {
 }
 
 struct Agent(Child);
+fn control_response(
+    stream: UnixStream,
+    method: &str,
+    deadline: Instant,
+) -> Result<(Value, Vec<Value>)> {
+    let mut reader = BufReader::new(stream);
+    let mut events = Vec::new();
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        anyhow::ensure!(
+            !remaining.is_zero(),
+            "control {method} response timed out; events: {events:?}"
+        );
+        reader.get_mut().set_read_timeout(Some(remaining))?;
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
+            Ok(0) => anyhow::bail!("control {method} disconnected; events: {events:?}"),
+            Ok(_) => {},
+            Err(error) if matches!(error.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock) => {
+                anyhow::bail!("control {method} response timed out; events: {events:?}")
+            }
+            Err(error) => return Err(error).with_context(|| format!("control {method} read failed; events: {events:?}")),
+        }
+        let response: Value = serde_json::from_str(&line).context("control response JSON")?;
+        if response["id"] == "factory-contract" {
+            return Ok((response, events));
+        }
+        if response["event"].is_string() {
+            events.push(response);
+        } else {
+            anyhow::bail!("control {method} received unexpected frame: {response}; events: {events:?}");
+        }
+    }
+}
 impl Agent {
     fn start(dir: &Directory) -> Result<Self> {
         let child = Command::new(BIN)
@@ -312,21 +346,33 @@ impl Agent {
             );
             thread::sleep(Duration::from_millis(20));
         };
-        stream.set_read_timeout(Some(Duration::from_secs(5)))?;
         writeln!(
             stream,
             "{}",
             json!({"id":"factory-contract","method":method,"params":{}})
         )?;
-        let mut line = String::new();
-        BufReader::new(stream).read_line(&mut line)?;
-        let response: Value = serde_json::from_str(&line).context("control response JSON")?;
+        let (response, _events) = control_response(stream, method, deadline)?;
         anyhow::ensure!(
             response["ok"] == true,
             "control {method} failed: {response}"
         );
         Ok(response["result"].clone())
     }
+}
+#[test]
+fn control_client_ignores_onebot_event_before_matching_response() -> Result<()> {
+    let (client, mut server) = UnixStream::pair()?;
+    let writer = thread::spawn(move || -> Result<()> {
+        writeln!(server, "{}", json!({"event":"onebot","data":{"state":"websocket_error"}}))?;
+        writeln!(server, "{}", json!({"id":"factory-contract","ok":true,"result":{"ok":true}}))?;
+        Ok(())
+    });
+    let (response, events) = control_response(client, "test.model", Instant::now() + Duration::from_secs(5))?;
+    writer.join().expect("control writer panicked")?;
+    assert_eq!(events, vec![json!({"event":"onebot","data":{"state":"websocket_error"}})]);
+    assert_eq!(response["id"], "factory-contract");
+    assert_eq!(response["result"], json!({"ok":true}));
+    Ok(())
 }
 impl Drop for Agent {
     fn drop(&mut self) {

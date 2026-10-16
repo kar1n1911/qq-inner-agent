@@ -961,17 +961,28 @@ async fn builtin_graph_trace_distinguishes_optional_relay_audit_and_injection() 
 
 #[tokio::test]
 async fn builtin_graph_trace_distinguishes_optional_feed_audit_and_injection() {
-    use std::{io::{Read, Write}, net::TcpListener};
+    use std::{io::{BufRead, BufReader, Write}, net::TcpListener};
     for (enabled, keep) in [(false, false), (true, false), (true, true)] {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let feed = format!("http://{}/rss", listener.local_addr().unwrap());
-        let server = enabled.then(|| std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut method = [0; 3];
-            stream.read_exact(&mut method).unwrap();
-            assert_eq!(&method, b"GET");
+        let server = enabled.then(|| std::thread::spawn(move || -> Result<(Vec<String>, usize)> {
+            let (mut stream, _) = listener.accept()?;
+            stream.set_read_timeout(Some(std::time::Duration::from_secs(10)))?;
+            let mut reader = BufReader::new(stream.try_clone()?);
+            let mut request = Vec::new();
+            loop {
+                let mut line = String::new();
+                anyhow::ensure!(reader.read_line(&mut line)? > 0, "incomplete HTTP request: {request:?}");
+                let end = line == "\r\n" || line == "\n";
+                request.push(line.trim_end().to_owned());
+                if end { break; }
+            }
+            anyhow::ensure!(request[0].starts_with("GET /rss HTTP/1."), "unexpected HTTP request: {request:?}");
             let body = "<rss><item><title>esp32</title><link>https://example.org/1</link></item></rss>";
-            write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            let parsed = qq_inner_core::topic::parse(body, 1)?.len();
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len())?;
+            stream.flush()?;
+            Ok((request, parsed))
         }));
         let (e, h) = topic_setup_with_graph(json!({"topicSource":{"enabled":enabled,"feeds":[feed],"maxRequests":1}}), json!({}), true);
         *h.model.lock().unwrap() = json!({"empty":true,"feedAudit":{"keep":if keep {json!([0])} else {json!([])}}});
@@ -983,18 +994,21 @@ async fn builtin_graph_trace_distinguishes_optional_feed_audit_and_injection() {
         }
         e.tick().unwrap();
         e.wait_idle().await;
-        if let Some(server) = server { server.join().unwrap(); }
+        let exchange = server.map(|server| server.join().expect("HTTP fixture panicked"));
         let trace = json!(h.trace.lock().unwrap().clone());
         let paths = behavior_paths(&trace);
         let path = paths.iter().find(|p| visits(p).iter().any(|(n, _)| *n == "B.formation"))
-            .unwrap_or_else(|| panic!("feed enabled={enabled} keep={keep}: {paths:?}"));
+            .unwrap_or_else(|| panic!("feed enabled={enabled} keep={keep}: HTTP exchange={exchange:?}, paths={paths:?}"));
+        let audit_inputs = h.model_inputs.lock().unwrap().iter().filter(|(stage, _)| stage == "FEED_AUDIT").count();
+        let diagnostic = format!("feed enabled={enabled} keep={keep}: HTTP exchange={exchange:?}, selected path={path:?}, all paths={paths:?}, feed audit calls={audit_inputs}");
+        assert!(exchange.as_ref().is_none_or(Result::is_ok), "{diagnostic}");
         let graph = compile(Profile { three_layer: true, sending: true }, &[], &[], &[]).unwrap();
         assert_trace_follows_graph(&graph, path);
         let v = visits(path);
-        assert_eq!(v.contains(&("K.untrusted_audit", "feed_items")), enabled);
-        assert_eq!(v.contains(&("B.context_inject", "feed_kept")), enabled && keep);
-        assert_eq!(v.contains(&("B.context_inject", "present")), enabled && keep);
-        assert_eq!(h.model_inputs.lock().unwrap().iter().any(|(stage, _)| stage == "FEED_AUDIT"), enabled);
+        assert_eq!(v.contains(&("K.untrusted_audit", "feed_items")), enabled, "{diagnostic}");
+        assert_eq!(v.contains(&("B.context_inject", "feed_kept")), enabled && keep, "{diagnostic}");
+        assert_eq!(v.contains(&("B.context_inject", "present")), enabled && keep, "{diagnostic}");
+        assert_eq!(audit_inputs > 0, enabled, "{diagnostic}");
         e.stop().await;
     }
 }
