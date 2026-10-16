@@ -117,7 +117,8 @@ fn project_plugin_status(resolved: &Value, list: &Value) -> Value {
                 "requested_enabled": list["plugins"].as_array().and_then(|entries| entries.iter().find(|entry| entry["id"].as_str() == Some(id))).is_some_and(|entry| entry["enabled"] == true),
                 "effective_state": if item["reason"] == "disabled_by_user" { "disabled" } else if item["reason"] == "degraded" { "degraded" } else if item["effective"] == true { "active" } else { "inactive" },
                 "reason": item["reason"], "installed": item["installed"], "missing":item["missing"],
-                "host_permissions":item["host_permissions"], "capabilities":item["capabilities"]})
+                "host_permissions":item["host_permissions"], "capabilities":item["capabilities"],
+                "declared_capabilities":item["declared_capabilities"]})
         })
         .collect();
     let discovery: Vec<Value> = entries.iter().filter(|entry| entry["id"] == entry["directory"]).map(|entry| {
@@ -171,7 +172,7 @@ fn plugin_factory_status(root: &Path, list: &Value, log: Option<Logger>, bot: Op
         if let Ok(bytes) = fs::read(manifest) {
             if let Ok(value) = serde_json::from_slice::<Value>(&bytes) {
                 state["host_permissions"] = value["host_permissions"].clone();
-                state["capabilities"] = value["capabilities"].clone();
+                state["declared_capabilities"] = value["capabilities"].clone();
             }
         }
     }
@@ -749,8 +750,10 @@ impl Runtime {
             "reconnects":bot.reconnects, "activeChats":self.engine.chats().len(),
             "model":self.raw["provider"]["model"], "provider":if c.provider.io_port == "legacy" { &c.provider.kind } else { &c.provider.io_port }, "apiCallsThisRun":self.model_port.as_ref().map_or_else(|| self.provider.calls(), |p| p.calls()),
             "lastCycleAt":self.engine.last_cycle(), "lastError":self.engine.last_error()});
-        if self._plugin_ports.is_some() {
-            status["pluginAppliedRevision"] = json!(self.applied.rsplit(':').next());
+        if let Some(ports) = &self._plugin_ports {
+            let revision = self.applied.rsplit(':').next().unwrap_or_default();
+            status["pluginAppliedRevision"] = json!(revision);
+            status["plugins"] = ports.status_snapshot(revision, &iso(now));
         }
         if let Some(failure) = &self.plugin_reload_failure {
             status["pluginReloadFailure"] = failure.clone();

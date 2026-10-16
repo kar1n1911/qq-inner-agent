@@ -104,7 +104,7 @@ function pluginValidateList(root, list) {
       if (!fields[key] || fields[key].secret === true) throw fail(422, `Plugin ${item.id}: secret or unknown parameter ${key}`);
       const type = fields[key].type;
       if (!(type === 'array' ? Array.isArray(value) : type === 'object' ? value !== null && typeof value === 'object' && !Array.isArray(value)
-        : type === 'number' ? typeof value === 'number' : type === 'string' ? typeof value === 'string'
+        : type === 'integer' ? Number.isSafeInteger(value) : type === 'number' ? typeof value === 'number' && Number.isFinite(value) : type === 'string' ? typeof value === 'string'
           : type === 'boolean' && typeof value === 'boolean'))
         throw fail(422, `Plugin ${item.id}: invalid parameter ${key}`);
     }
@@ -146,6 +146,31 @@ function pluginMerged(root, proposal, replaceIds = []) {
   pluginValidateList(root, merged);
   return { merged, live };
 }
+function pluginSecretStates(root, manifest, item) {
+  const fields = Array.isArray(manifest?.config_schema) ? manifest.config_schema :
+    Object.entries(manifest?.config_schema || {}).map(([key, field]) => ({ key, ...field }));
+  let stored = {};
+  try { stored = readJson(path.join(root, 'secrets.json'), {}); } catch { /* unreadable is not configured */ }
+  return Object.fromEntries(fields.filter(field => field.secret === true).map(field => {
+    const reference = item?.secret_refs?.[field.key];
+    const name = typeof reference === 'string' && /^secrets\.[a-zA-Z0-9_]+$/.test(reference)
+      ? reference.slice('secrets.'.length) : null;
+    return [field.key, { configured: !!(name && typeof stored[name] === 'string' && stored[name]) }];
+  }));
+}
+function pluginProbe(endpoint, timeoutMs = 1500) {
+  return new Promise(resolve => {
+    let url;
+    try { url = new URL(endpoint); } catch { resolve({ state: 'failed', code: 'invalid_endpoint' }); return; }
+    if (!['http:', 'https:'].includes(url.protocol)) { resolve({ state: 'unsupported' }); return; }
+    const socket = net.connect({ host: url.hostname, port: Number(url.port) || (url.protocol === 'https:' ? 443 : 80) });
+    let finished = false;
+    const finish = result => { if (finished) return; finished = true; socket.destroy(); resolve(result); };
+    socket.setTimeout(timeoutMs, () => finish({ state: 'failed', code: 'timeout' }));
+    socket.once('connect', () => finish({ state: 'connected', evidenceSource: 'tcp_connect' }));
+    socket.once('error', () => finish({ state: 'failed', code: 'connection_failed' }));
+  });
+}
 async function body(req) {
   if (!String(req.headers['content-type']).startsWith('application/json')) throw fail(415, 'JSON required');
   const chunks = []; let size = 0;
@@ -168,6 +193,7 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
   let capture = null;
   const diagnostics = new Diagnostics(() => loadConfig(root), makeBot);
   const sessions = new Map(), attempts = new Map(); let saving = false, testing = false;
+  const pluginSelfTests = new Map();
   const origins = new Set(settings.origins), hosts = new Set([...origins].map(o => new URL(o).host));
   serviceControl ||= async action => { await exec('systemctl', ['--user', action, 'qq-inner-agent.service'], { timeout: 30000 }); };
   serviceStatus ||= async () => {
@@ -363,12 +389,31 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
         fs.unlinkSync(pluginDraftFile(root));
         json(res, 200, { targetRevision, strategy: restart ? 'restart' : 'hot_reload', pending: true }); return;
       }
+      if (url.pathname === '/api/plugins/self-test' && req.method === 'POST') {
+        const input = await body(req);
+        const live = pluginLive(root);
+        const configured = live.bytes ? pluginPublicList(root, JSON.parse(live.bytes)) : null;
+        const item = configured?.plugins?.find(plugin => plugin.id === input.id);
+        if (!item) throw fail(404, 'Plugin instance not found');
+        const packageInfo = pluginManifest(root, item.directory);
+        let result = { state: 'unsupported' };
+        if (packageInfo.state === 'discovered' && packageInfo.manifest.kind === 'Model'
+          && typeof item.params?.base_url === 'string') result = await pluginProbe(item.params.base_url);
+        result = { ...result, id: item.id, checkedAt: new Date().toISOString() };
+        pluginSelfTests.set(item.id, result);
+        json(res, 200, result); return;
+      }
       if (url.pathname === '/api/plugins/status' && req.method === 'GET') {
         const dataDir = loadConfig(root).dataDir;
         const record = readJson(path.join(dataDir, 'plugin-activation.json'), null);
         const running = readJson(path.join(dataDir, 'status.json'), null);
-        const targetRevision = record?.targetRevision ?? pluginLive(root).revision;
-        const appliedRevision = running?.pluginAppliedRevision ?? running?.appliedRevision ?? null;
+        const live = pluginLive(root);
+        const configured = live.bytes ? pluginPublicList(root, JSON.parse(live.bytes)) : null;
+        const draft = readJson(pluginDraftFile(root), null);
+        const listed = configured?.plugins || [];
+        const proposed = draft?.state === 'staged' ? draft.list?.plugins || [] : [];
+        const targetRevision = record?.targetRevision ?? live.revision;
+        const appliedRevision = running?.pluginAppliedRevision ?? null;
         const pending = !!targetRevision && targetRevision !== appliedRevision;
         const error = pending ? running?.reloadError : null;
         const pluginIds = record?.pluginIds || [];
@@ -381,14 +426,42 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
           && running.plugins[id].instanceRevision !== targetRevision)
           || !!(pending && record?.oldRevision && running?.pluginAppliedRevision === record.oldRevision
             && record.oldActiveIds?.some(id => pluginIds.includes(id)));
-        const plugins = Object.fromEntries(pluginIds.map(id => [id, {
-          effective_state: alerts.some(alert => alert.pluginId === id) ? 'abnormal' : pending ? 'pending' : 'active',
-          targetRevision, instanceRevision: running?.plugins?.[id]?.instanceRevision ?? running?.pluginAppliedRevision ?? null,
-          oldInstanceRunning: !!((running?.plugins?.[id]?.effective_state === 'active'
-            && running.plugins[id].instanceRevision !== targetRevision)
-            || (pending && record?.oldRevision && running?.pluginAppliedRevision === record.oldRevision
-              && record.oldActiveIds?.includes(id))),
-        }]));
+        const discovered = pluginDiscovery(root);
+        const entries = new Map();
+        for (const found of discovered) entries.set(found.directory, { id: found.directory, directory: found.directory });
+        for (const item of listed) entries.set(item.id, item);
+        for (const item of proposed) entries.set(item.id, item);
+        for (const id of pluginIds) if (!entries.has(id)) entries.set(id, { id, directory: id });
+        const plugins = Object.fromEntries([...entries].map(([id, item]) => {
+          const found = pluginManifest(root, item.directory);
+          const observed = running?.plugins?.[id];
+          const hasEvidence = !!(appliedRevision && observed && observed.instanceRevision === appliedRevision);
+          const alarm = alerts.some(alert => alert.pluginId === id);
+          const oldRunning = !!((observed?.effective_state === 'active' && observed.instanceRevision !== targetRevision)
+            || (pending && record?.oldRevision && appliedRevision === record.oldRevision
+              && record.oldActiveIds?.includes(id)));
+          const effective_state = alarm ? 'abnormal' : found.state !== 'discovered' ? 'unrecognized'
+            : item.enabled === false ? 'disabled' : hasEvidence ? observed.effective_state || 'unknown'
+              : item.enabled === true && pending ? 'pending' : 'unknown';
+          return [id, {
+            id, directory: item.directory, kind: found.manifest?.kind ?? null,
+            transport: found.manifest?.transport ?? null, requested_enabled: item.enabled === true,
+            discoveryState: found.state, reason: found.reason,
+            effective_state, targetRevision,
+            instanceRevision: hasEvidence ? observed.instanceRevision : oldRunning ? observed?.instanceRevision ?? appliedRevision : null,
+            oldInstanceRunning: oldRunning,
+            declaredCapabilities: found.manifest?.capabilities ?? null,
+            effectiveCapabilities: hasEvidence ? observed.capabilities ?? observed.effectiveCapabilities ?? null : null,
+            dependencies: found.manifest?.dependencies ?? [], bindings: item.bindings ?? {},
+            params: item.params ?? {}, configSchema: found.manifest?.config_schema ?? [],
+            secrets: pluginSecretStates(root, found.manifest, item),
+            hostPermissions: found.manifest?.host_permissions ?? [], hotReload: found.manifest?.hot_reload === true,
+            portState: hasEvidence ? observed.portState ?? 'unknown' : 'unknown',
+            observedAt: hasEvidence ? observed.observedAt ?? null : null,
+            evidenceSource: hasEvidence ? observed.evidenceSource ?? null : null,
+            selfTest: pluginSelfTests.get(id) ?? null,
+          }];
+        }));
         json(res, 200, { targetRevision, appliedRevision, pending, strategy: record?.strategy ?? null,
           alerts, plugins, oldInstanceRunning, effective_state: alerts.length ? 'abnormal' : pending ? 'pending' : 'active' }); return;
       }

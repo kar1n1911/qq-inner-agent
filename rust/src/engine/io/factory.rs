@@ -51,6 +51,7 @@ pub struct PublishedPorts {
     pub model_kind: Option<String>,
     pub onebot: Option<Arc<OneBotAdapter>>,
     pub persona_bindings: Vec<(ChatAddress, Arc<SillyTavernPersona>)>,
+    observations: HashMap<String, Value>,
     sidecars: Vec<ManagedSidecar>,
 }
 
@@ -81,9 +82,24 @@ impl PublishedPorts {
                 }
             }
         }
-        Ok(Self { registry, model, model_instance, model_kind, onebot, persona_bindings, sidecars })
+        Ok(Self { registry, model, model_instance, model_kind, onebot, persona_bindings,
+            observations: HashMap::new(), sidecars })
     }
     pub fn sidecar_count(&self) -> usize { self.sidecars.len() }
+    /// Read only: the snapshot uses ports already published by this generation.
+    pub fn status_snapshot(&self, revision: &str, snapshot_at: &str) -> Value {
+        let items = self.observations.iter().map(|(id, evidence)| {
+            let state = self.registry.chat.get(id).map(|port| match port.state() {
+                PortState::Available => "available", PortState::Degraded => "degraded",
+                PortState::Disconnected => "disconnected",
+            }).unwrap_or("unknown");
+            (id.clone(), json!({"effective_state":evidence["effective_state"],
+                "instanceRevision":revision,"capabilities":evidence["capabilities"],
+                "portState":state,"observedAt":evidence["observedAt"],
+                "snapshotAt":snapshot_at,"evidenceSource":"factory_prepared_port_capabilities"}))
+        });
+        Value::Object(items.collect())
+    }
 }
 
 pub struct FactoryOutcome {
@@ -263,6 +279,7 @@ pub fn prepare(root: &Path, list: &Value, host: &HostServices) -> FactoryOutcome
     let mut errors = HashMap::new();
     let mut missing = HashMap::new();
     let mut unhealthy = HashMap::new();
+    let mut measured = HashMap::new();
     let mut result = plugin_list::resolve_with(root, list, &mut |request| {
         let mut missing_bindings = Vec::new();
         for (role, target) in request.bindings.as_object().into_iter().flat_map(|bindings| bindings.iter()) {
@@ -280,6 +297,7 @@ pub fn prepare(root: &Path, list: &Value, host: &HostServices) -> FactoryOutcome
         match prepare_one(root, request, host) {
             Ok(port) => {
                 let actual = prepared_capabilities(&port);
+                measured.insert(request.id.clone(), actual.clone());
                 let unverified_sidecar = matches!(&port, PreparedPort::Model { sidecar: Some(_), .. });
                 if unverified_sidecar {
                     errors.insert(request.id.clone(), "sidecar_protocol_unverified".to_owned());
@@ -309,7 +327,7 @@ pub fn prepare(root: &Path, list: &Value, host: &HostServices) -> FactoryOutcome
     });
     let successful = result["registered"].as_array().is_some_and(|items| items.len() == candidates.len())
         && errors.is_empty() && result["reason"] != "preflight_failed";
-    let published = if successful {
+    let mut published = if successful {
         match PublishedPorts::publish(candidates) {
             Ok(ports) => Some(ports),
             Err(code) => {
@@ -355,12 +373,49 @@ pub fn prepare(root: &Path, list: &Value, host: &HostServices) -> FactoryOutcome
             }
         }
     }
+    if let Some(ports) = &mut published {
+        for (id, capabilities) in measured {
+            let state = &result["plugins"][&id];
+            if state["effective"] == true {
+                let degraded = state["reason"] == "degraded";
+                let effective_capabilities = json!({"supported":capabilities["capabilities"],
+                    "unsupported":[],"unknown":[]});
+                result["plugins"][&id]["capabilities"] = effective_capabilities.clone();
+                let observed_at = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+                ports.observations.insert(id, json!({"effective_state":
+                    if degraded { "degraded" } else { "active" },
+                    "capabilities":effective_capabilities,"observedAt":observed_at}));
+            }
+        }
+    }
     FactoryOutcome { status: result, published }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn published_snapshot_reads_live_chat_state_without_repreparing() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let connected = Arc::new(AtomicBool::new(false));
+        let state = connected.clone();
+        let action: Action = Arc::new(|_, _| Box::pin(async { PortReply::Ok(Value::Null) }));
+        let connection: Connection = Arc::new(move || (state.load(Ordering::Relaxed), true));
+        let chat = Arc::new(OneBotAdapter::new("onebot", action, connection).unwrap());
+        let mut ports = PublishedPorts::publish(vec![PreparedPort::Chat { port: chat }]).unwrap();
+        ports.observations.insert("onebot".into(), json!({"effective_state":"active",
+            "capabilities":{"supported":["reply"]},"observedAt":42}));
+        let offline = ports.status_snapshot("revision", "snapshot");
+        assert_eq!(offline["onebot"]["portState"], "disconnected");
+        assert_eq!(offline["onebot"]["capabilities"]["supported"][0], "reply");
+        assert_eq!(offline["onebot"]["observedAt"], 42);
+        connected.store(true, Ordering::Relaxed);
+        let online = ports.status_snapshot("revision", "later");
+        assert_eq!(online["onebot"]["portState"], "available");
+        assert_eq!(online["onebot"]["snapshotAt"], "later");
+    }
 
     #[test]
     fn unsupported_claim_fails_before_secret_or_network_activity() {

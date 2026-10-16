@@ -67,9 +67,92 @@ function showPluginDiscovery(rows) {
   for (const row of rows) container.append(element('p', `${row.directory}: ${row.state}${row.reason ? ` · ${row.reason}` : ''}${row.hot_reload === undefined ? '' : row.hot_reload ? ' · hot reload supported' : ' · restart required'}`));
   if (!rows.length) container.append(element('p', 'No plugin directories found.', 'empty'));
 }
+function pluginFields(schema) {
+  return Array.isArray(schema) ? schema : Object.entries(schema || {}).map(([key, field]) => ({ key, ...field }));
+}
+function renderPluginCards(plugins) {
+  const container = $('plugin-cards'); container.replaceChildren();
+  for (const row of Object.values(plugins || {})) {
+    const card = element('details', null, 'plugin-card');
+    card.append(element('summary', `${row.id} · ${row.kind || 'unrecognized'} · ${row.effective_state}`));
+    card.append(element('p', `Directory: ${row.directory} · Transport: ${row.transport || 'unknown'} · Running instance: ${row.instanceRevision || 'unknown'}`));
+    if (row.reason) card.append(element('p', `Discovery: ${row.reason}`));
+    card.append(element('p', `Declared capabilities: ${JSON.stringify(row.declaredCapabilities ?? 'unknown')}`));
+    card.append(element('p', `Measured capabilities: ${JSON.stringify(row.effectiveCapabilities ?? 'unknown')} · Port state: ${row.portState || 'unknown'}`));
+    card.append(element('p', `Evidence: ${row.evidenceSource || 'none'} · Observed: ${row.observedAt || 'unknown'}`));
+    card.append(element('p', `Dependencies: ${JSON.stringify(row.dependencies || [])} · Bindings: ${JSON.stringify(row.bindings || {})}`));
+    card.append(element('p', `Declared host activity: ${JSON.stringify(row.hostPermissions || [])}`));
+    const testButton = element('button', 'Test connectivity', 'secondary'); testButton.type = 'button';
+    const testResult = element('span', row.selfTest ? ` ${row.selfTest.state} (${row.selfTest.checkedAt})` : ' Not tested.');
+    testButton.addEventListener('click', async () => {
+      testButton.disabled = true;
+      try {
+        const result = await api('/api/plugins/self-test', { method: 'POST', body: JSON.stringify({ id: row.id }) });
+        testResult.textContent = ` ${result.state}${result.code ? ` · ${result.code}` : ''} (${result.checkedAt})`;
+      } catch (error) { testResult.textContent = ` ${error.message}`; }
+      finally { testButton.disabled = false; }
+    });
+    card.append(testButton, testResult);
+    const edit = (section, key, value) => {
+      try {
+        const list = pluginEdit(); const item = list.plugins.find(plugin => plugin.id === row.id);
+        if (!item) throw Error('Recognize this package before editing it.');
+        item[section] ||= {};
+        if (value === '') delete item[section][key]; else item[section][key] = value;
+        $('plugin-list-editor').value = JSON.stringify(list, null, 2);
+        pluginDraftSave = stagePluginEdits().catch(error => { $('plugin-status').textContent = error.message; });
+      } catch (error) { $('plugin-status').textContent = error.message; }
+    };
+    if (row.discoveryState === 'discovered') {
+      const enabled = element('input'); enabled.type = 'checkbox'; enabled.checked = row.requested_enabled;
+      enabled.addEventListener('change', () => {
+        try {
+          const list = pluginEdit(); const item = list.plugins.find(plugin => plugin.id === row.id);
+          if (!item) throw Error('Recognize this package before editing it.');
+          item.enabled = enabled.checked;
+          $('plugin-list-editor').value = JSON.stringify(list, null, 2);
+          pluginDraftSave = stagePluginEdits().catch(error => { $('plugin-status').textContent = error.message; });
+        } catch (error) { enabled.checked = !enabled.checked; $('plugin-status').textContent = error.message; }
+      });
+      const label = element('label', ' Enabled after activation '); label.append(enabled); card.append(label);
+      for (const field of pluginFields(row.configSchema)) {
+        const label = element('label', `${field.label || field.key}${field.required ? ' (required)' : ''}: `);
+        if (field.secret) {
+          label.append(element('span', row.secrets?.[field.key]?.configured ? 'Configured' : 'Not configured'));
+          card.append(label); continue;
+        }
+        if (!['string', 'number', 'integer', 'boolean', 'array', 'object'].includes(field.type)) {
+          label.append(element('span', `Unsupported field type: ${field.type || 'unknown'}`)); card.append(label); continue;
+        }
+        const input = element('input'); input.type = field.type === 'boolean' ? 'checkbox' : ['number', 'integer'].includes(field.type) ? 'number' : 'text';
+        if (input.type === 'number') input.step = field.type === 'integer' ? '1' : 'any';
+        if (input.type === 'checkbox') input.checked = !!row.params?.[field.key];
+        else input.value = ['array', 'object'].includes(field.type) ? JSON.stringify(row.params?.[field.key] ?? '') : row.params?.[field.key] ?? '';
+        input.addEventListener('change', () => {
+          try {
+            const value = input.type === 'checkbox' ? input.checked : !input.value ? ''
+              : ['array', 'object'].includes(field.type) ? JSON.parse(input.value)
+                : input.type === 'number' ? Number(input.value) : input.value;
+            edit('params', field.key, value);
+          } catch (error) { $('plugin-status').textContent = error.message; }
+        });
+        label.append(input); card.append(label);
+      }
+      for (const dependency of row.dependencies || []) {
+        const label = element('label', `${dependency.role}${dependency.required ? ' (required)' : ''}: `);
+        const input = element('input'); input.value = row.bindings?.[dependency.role] || '';
+        input.addEventListener('change', () => edit('bindings', dependency.role, input.value.trim()));
+        label.append(input); card.append(label);
+      }
+    }
+    container.append(card);
+  }
+  if (!container.childElementCount) container.append(element('p', 'No plugin packages found.', 'empty'));
+}
 async function refreshPluginStatus() {
   if (!csrf) return;
   const result = await api('/api/plugins/status');
+  renderPluginCards(result.plugins);
   if (result.alerts?.length) $('plugin-status').textContent = result.alerts.map(alert =>
     `${alert.pluginId}: ${alert.message}${result.oldInstanceRunning ? ' Previous instance remains active.' : ''}`).join(' ');
   else if (result.pending) $('plugin-status').textContent = `Applying ${result.targetRevision}; core still reports ${result.appliedRevision || 'no applied revision'}.`;
@@ -90,8 +173,10 @@ async function loadPluginPage() {
   showPluginDiscovery(found.discovery);
   $('plugin-list-editor').value = JSON.stringify(draft.state === 'staged' ? draft.list : found.list, null, 2);
   $('plugin-preview').textContent = draft.state === 'staged' ? JSON.stringify(draft.preview, null, 2) : 'No changes staged.';
-  if (draft.state === 'staged') $('plugin-status').textContent = `${draft.changes.length} plugin changes staged. The running agent is unchanged.`;
-  else await refreshPluginStatus();
+  if (draft.state === 'staged') {
+    $('plugin-status').textContent = `${draft.changes.length} plugin changes staged. The running agent is unchanged.`;
+    renderPluginCards((await api('/api/plugins/status')).plugins);
+  } else await refreshPluginStatus();
 }
 function renderModelPlugin() {
   const port = document.querySelector('[data-config="provider.ioPort"]').value;
