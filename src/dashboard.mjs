@@ -18,6 +18,134 @@ import { ControlClient } from './control.mjs';
 const exec = promisify(execFile), hash = s => createHash('sha256').update(s).digest();
 const equal = (a, b) => timingSafeEqual(hash(String(a)), hash(String(b)));
 const fail = (status, message) => Object.assign(Error(message), { status });
+const pluginHash = bytes => createHash('sha256').update(bytes).digest('hex');
+const pluginListFile = root => path.join(root, 'plugins', 'plugins.json');
+const pluginDraftFile = root => path.join(loadConfig(root).dataDir, 'plugin-draft.json');
+function pluginLive(root) {
+  const file = pluginListFile(root);
+  const bytes = fs.existsSync(file) ? fs.readFileSync(file) : null;
+  return { bytes, revision: bytes === null ? null : pluginHash(bytes) };
+}
+function pluginWrite(file, value) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const temporary = `${file}.${randomBytes(8).toString('hex')}.tmp`;
+  try {
+    fs.writeFileSync(temporary, value, { mode: 0o600 });
+    fs.renameSync(temporary, file);
+  } finally { if (fs.existsSync(temporary)) fs.unlinkSync(temporary); }
+}
+function pluginManifest(root, directory) {
+  if (typeof directory !== 'string' || !/^[^/\\.][^/\\]*$/.test(directory))
+    return { state: 'unrecognized', reason: 'invalid_directory' };
+  const packageDir = path.join(root, 'plugins', directory);
+  try { if (!fs.lstatSync(packageDir).isDirectory() || fs.lstatSync(packageDir).isSymbolicLink())
+    return { state: 'unrecognized', reason: 'invalid_directory' }; }
+  catch { return { state: 'unrecognized', reason: 'missing_directory' }; }
+  const file = path.join(root, 'plugins', directory, 'manifest.json');
+  if (!fs.existsSync(file)) return { state: 'unrecognized', reason: 'manifest_missing' };
+  let manifest;
+  try { manifest = JSON.parse(fs.readFileSync(file, 'utf8')); }
+  catch { return { state: 'unrecognized', reason: 'invalid_json' }; }
+  const valid = manifest && manifest.name === directory && typeof manifest.version === 'string' && manifest.version !== 'TBD'
+    && ['Chat', 'Model', 'Db', 'Memory', 'External', 'Persona'].includes(manifest.kind)
+    && ['InProcess', 'Sidecar', 'Remote'].includes(manifest.transport)
+    && manifest.core_api_version?.major === 1 && Number.isInteger(manifest.core_api_version?.min_minor)
+    && Array.isArray(manifest.dependencies) && Array.isArray(manifest.host_permissions)
+    && (Array.isArray(manifest.config_schema) || !!manifest.config_schema && typeof manifest.config_schema === 'object')
+    && manifest.capabilities && (manifest.hot_reload === undefined || typeof manifest.hot_reload === 'boolean')
+    && manifest.status !== 'placeholder' && !JSON.stringify(manifest).includes('"TBD"');
+  return valid ? { state: 'discovered', reason: null, manifest } : { state: 'unrecognized', reason: manifest?.status === 'placeholder' ? 'placeholder' : 'invalid_manifest' };
+}
+function pluginPublicList(root, list) {
+  if (!Array.isArray(list?.plugins)) return null;
+  for (const item of list.plugins) {
+    if (!item || typeof item !== 'object') return null;
+    const manifest = pluginManifest(root, item.directory).manifest;
+    const fields = Array.isArray(manifest?.config_schema) ? manifest.config_schema :
+      Object.entries(manifest?.config_schema || {}).map(([key, field]) => ({ key, ...field }));
+    if (Object.keys(item.params || {}).some(key => fields.some(field => field.key === key && field.secret === true)
+      || /(?:key|token|secret|password)/i.test(key))) return null;
+  }
+  return list;
+}
+function pluginDiscovery(root) {
+  const folder = path.join(root, 'plugins');
+  if (!fs.existsSync(folder)) return [];
+  return fs.readdirSync(folder, { withFileTypes: true }).filter(item => item.isDirectory() && !item.isSymbolicLink())
+    .map(item => { const result = pluginManifest(root, item.name); return { directory: item.name, state: result.state, reason: result.reason,
+      ...(result.manifest ? { kind: result.manifest.kind, transport: result.manifest.transport,
+        hot_reload: result.manifest.hot_reload === true, capabilities: result.manifest.capabilities,
+        dependencies: result.manifest.dependencies } : {}) }; });
+}
+function pluginPackageRevision(root) {
+  const folder = path.join(root, 'plugins');
+  if (!fs.existsSync(folder)) return pluginHash('missing');
+  const parts = fs.readdirSync(folder, { withFileTypes: true })
+    .filter(item => item.isDirectory() && !item.isSymbolicLink())
+    .map(item => [item.name, fs.existsSync(path.join(folder, item.name, 'manifest.json'))
+      ? pluginHash(fs.readFileSync(path.join(folder, item.name, 'manifest.json'))) : null]);
+  return pluginHash(JSON.stringify(parts));
+}
+function pluginValidateList(root, list) {
+  if (!list || typeof list !== 'object' || Array.isArray(list) || list.schema_version !== 1
+    || !['manual', 'auto'].includes(list.mode) || !Array.isArray(list.plugins)) throw fail(422, 'Invalid plugin list');
+  const ids = new Set();
+  for (const item of list.plugins) {
+    if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !item.id
+      || ids.has(item.id) || typeof item.directory !== 'string' || !/^[^/\\.][^/\\]*$/.test(item.directory)
+      || typeof item.enabled !== 'boolean'
+      || !['params', 'bindings', 'secret_refs'].every(key => item[key] === undefined || item[key] && typeof item[key] === 'object' && !Array.isArray(item[key])))
+      throw fail(422, 'Invalid plugin entry');
+    ids.add(item.id);
+    const { state, reason, manifest } = pluginManifest(root, item.directory);
+    if (state !== 'discovered') throw fail(422, `Plugin ${item.id}: ${reason}`);
+    const fields = Array.isArray(manifest.config_schema) ? Object.fromEntries(manifest.config_schema.map(field => [field.key, field])) : manifest.config_schema;
+    for (const [key, value] of Object.entries(item.params || {})) {
+      if (!fields[key] || fields[key].secret === true) throw fail(422, `Plugin ${item.id}: secret or unknown parameter ${key}`);
+      const type = fields[key].type;
+      if (!(type === 'array' ? Array.isArray(value) : type === 'object' ? value !== null && typeof value === 'object' && !Array.isArray(value)
+        : type === 'number' ? typeof value === 'number' : type === 'string' ? typeof value === 'string'
+          : type === 'boolean' && typeof value === 'boolean'))
+        throw fail(422, `Plugin ${item.id}: invalid parameter ${key}`);
+    }
+    for (const [key, value] of Object.entries(item.secret_refs || {})) {
+      if (fields[key]?.secret !== true || typeof value !== 'string' || !/^secrets\.[a-zA-Z0-9_]+$/.test(value))
+        throw fail(422, `Plugin ${item.id}: invalid secret reference ${key}`);
+    }
+    for (const [role, target] of Object.entries(item.bindings || {})) {
+      if (!manifest.dependencies.some(dep => dep.role === role) || typeof target !== 'string' || !target)
+        throw fail(422, `Plugin ${item.id}: invalid binding ${role}`);
+    }
+    if (item.enabled) {
+      for (const [key, field] of Object.entries(fields)) if (field.required === true
+        && !Object.hasOwn(item.params || {}, key) && !Object.hasOwn(item.secret_refs || {}, key))
+        throw fail(422, `Plugin ${item.id}: missing ${key}`);
+      for (const dep of manifest.dependencies) if (dep.required === true && !Object.hasOwn(item.bindings || {}, dep.role))
+        throw fail(422, `Plugin ${item.id}: missing binding ${dep.role}`);
+    }
+  }
+}
+function pluginMerged(root, proposal, replaceIds = []) {
+  const live = pluginLive(root);
+  const previous = live.bytes ? JSON.parse(live.bytes) : { schema_version: 1, mode: 'manual', plugins: [] };
+  if (!Array.isArray(previous.plugins)) throw fail(422, 'Invalid current plugin list');
+  const merged = structuredClone(previous);
+  const ids = new Set(merged.plugins.map(item => item.id));
+  for (const item of proposal.plugins) {
+    if (ids.has(item.id)) {
+      const index = merged.plugins.findIndex(old => old.id === item.id);
+      if (JSON.stringify(merged.plugins[index]) !== JSON.stringify(item)) {
+        if (!replaceIds.includes(item.id)) throw fail(409, `Plugin ${item.id} was edited; explicit replacement is required`);
+        merged.plugins[index] = structuredClone(item);
+      }
+      continue;
+    }
+    ids.add(item.id); merged.plugins.push(structuredClone(item));
+  }
+  if (!live.bytes) merged.mode = proposal.mode;
+  pluginValidateList(root, merged);
+  return { merged, live };
+}
 async function body(req) {
   if (!String(req.headers['content-type']).startsWith('application/json')) throw fail(415, 'JSON required');
   const chunks = []; let size = 0;
@@ -163,6 +291,107 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
       if (!session || session.expires < Date.now()) { if (id) sessions.delete(id); throw fail(401, 'Sign in required'); }
       if (req.method !== 'GET' && !equal(req.headers['x-csrf-token'] || '', session.csrf)) throw fail(403, 'Session verification failed; sign in again.');
       if (url.pathname === '/api/session' && req.method === 'GET') { json(res, 200, { csrf: session.csrf }); return; }
+      if (url.pathname === '/api/plugins/discover' && req.method === 'GET') {
+        const live = pluginLive(root);
+        const list = live.bytes ? pluginPublicList(root, JSON.parse(live.bytes)) : { schema_version: 1, mode: 'manual', plugins: [] };
+        json(res, 200, { discovery: pluginDiscovery(root), liveRevision: live.revision,
+          packageRevision: pluginPackageRevision(root),
+          list, ...(list ? {} : { listError: 'Existing plugin list contains a raw credential. Correct it locally before using the editor.' }) }); return;
+      }
+      if (url.pathname === '/api/plugins/draft' && req.method === 'GET') {
+        json(res, 200, readJson(pluginDraftFile(root), { state: 'idle', changes: [] })); return;
+      }
+      if (url.pathname === '/api/plugins/draft' && req.method === 'DELETE') {
+        const file = pluginDraftFile(root);
+        if (fs.existsSync(file)) fs.unlinkSync(file);
+        json(res, 200, { state: 'idle', changes: [] }); return;
+      }
+      if (url.pathname === '/api/plugins/draft' && req.method === 'PUT') {
+        const input = await body(req);
+        pluginValidateList(root, input.list);
+        const replaceIds = Array.isArray(input.replaceIds) && input.replaceIds.every(id => typeof id === 'string') ? input.replaceIds : [];
+        const { merged, live } = pluginMerged(root, input.list, replaceIds);
+        const previous = live.bytes ? JSON.parse(live.bytes) : { plugins: [] };
+        const oldItems = new Map(previous.plugins.map(item => [item.id, item]));
+        const changes = merged.plugins.filter(item => JSON.stringify(oldItems.get(item.id)) !== JSON.stringify(item))
+          .map(item => ({ action: oldItems.has(item.id) ? 'update' : 'add', id: item.id, directory: item.directory, enabled: item.enabled }));
+        const draft = { state: 'staged', draft_id: randomBytes(16).toString('hex'), baselineRevision: live.revision,
+          packageRevision: pluginPackageRevision(root), list: input.list, replaceIds, changes, preview: { changes, target: merged } };
+        pluginWrite(pluginDraftFile(root), JSON.stringify(draft, null, 2) + '\n');
+        json(res, 200, draft); return;
+      }
+      if (url.pathname === '/api/plugins/activate' && req.method === 'POST') {
+        await body(req);
+        const draft = readJson(pluginDraftFile(root), null);
+        if (!draft) throw fail(409, 'No staged plugin changes');
+        if (pluginLive(root).revision !== draft.baselineRevision) throw fail(409, 'Plugin list changed elsewhere; review the draft again');
+        if (pluginPackageRevision(root) !== draft.packageRevision) throw fail(409, 'Plugin manifests changed; recognize and review again');
+        const { merged, live } = pluginMerged(root, draft.list, draft.replaceIds);
+        const text = JSON.stringify(merged, null, 2) + '\n';
+        const targetRevision = pluginHash(text);
+        const changed = draft.changes.map(change => change.id);
+        if (!changed.length) throw fail(409, 'No plugin changes to activate');
+        const threshold = Number.isInteger(settings.pluginRestartThreshold) && settings.pluginRestartThreshold > 0
+          ? settings.pluginRestartThreshold : 3;
+        const topologyChanged = changed.some(id => {
+          const before = live.bytes ? JSON.parse(live.bytes).plugins.find(plugin => plugin.id === id) : null;
+          const after = merged.plugins.find(plugin => plugin.id === id);
+          return before && JSON.stringify(before.bindings || {}) !== JSON.stringify(after.bindings || {});
+        });
+        const restart = settings.pluginHotReloadAvailable === false || changed.length >= threshold || topologyChanged || changed.some(id => {
+          const item = merged.plugins.find(plugin => plugin.id === id);
+          return pluginManifest(root, item.directory).manifest?.hot_reload !== true;
+        });
+        const recordFile = path.join(loadConfig(root).dataDir, 'plugin-activation.json');
+        const listFile = pluginListFile(root);
+        const restartMarker = path.join(root, '.plugin-restart-pending');
+        if (restart) pluginWrite(restartMarker, `${targetRevision}\n`);
+        pluginWrite(listFile, text);
+        try {
+          if (restart) await serviceControl('restart');
+        } catch (error) {
+          if (live.bytes) pluginWrite(listFile, live.bytes);
+          else fs.unlinkSync(listFile);
+          throw fail(502, `Plugin framework restart failed: ${error.message}`);
+        } finally {
+          if (restart && fs.existsSync(restartMarker)) fs.unlinkSync(restartMarker);
+        }
+        const oldActiveIds = live.bytes ? JSON.parse(live.bytes).plugins.filter(item => item.enabled).map(item => item.id) : [];
+        pluginWrite(recordFile, JSON.stringify({ targetRevision, oldRevision: live.revision, oldActiveIds,
+          pluginIds: changed, strategy: restart ? 'restart' : 'hot_reload',
+          requestedAt: new Date().toISOString() }) + '\n');
+        fs.unlinkSync(pluginDraftFile(root));
+        json(res, 200, { targetRevision, strategy: restart ? 'restart' : 'hot_reload', pending: true }); return;
+      }
+      if (url.pathname === '/api/plugins/status' && req.method === 'GET') {
+        const dataDir = loadConfig(root).dataDir;
+        const record = readJson(path.join(dataDir, 'plugin-activation.json'), null);
+        const running = readJson(path.join(dataDir, 'status.json'), null);
+        const targetRevision = record?.targetRevision ?? pluginLive(root).revision;
+        const appliedRevision = running?.pluginAppliedRevision ?? running?.appliedRevision ?? null;
+        const pending = !!targetRevision && targetRevision !== appliedRevision;
+        const error = pending ? running?.reloadError : null;
+        const pluginIds = record?.pluginIds || [];
+        const structured = pending ? running?.pluginReloadFailure : null;
+        const failedIds = structured?.pluginId ? [structured.pluginId] : error
+          ? pluginIds.filter(id => String(error).includes(id)) : [];
+        const alerts = failedIds.map(pluginId => ({ event: 'plugin_hot_reload_failed', pluginId,
+          code: structured?.code || 'plugin_reload_failed', message: structured ? 'Plugin update was rejected; previous instance remains active.' : String(error) }));
+        const oldInstanceRunning = pluginIds.some(id => running?.plugins?.[id]?.effective_state === 'active'
+          && running.plugins[id].instanceRevision !== targetRevision)
+          || !!(pending && record?.oldRevision && running?.pluginAppliedRevision === record.oldRevision
+            && record.oldActiveIds?.some(id => pluginIds.includes(id)));
+        const plugins = Object.fromEntries(pluginIds.map(id => [id, {
+          effective_state: alerts.some(alert => alert.pluginId === id) ? 'abnormal' : pending ? 'pending' : 'active',
+          targetRevision, instanceRevision: running?.plugins?.[id]?.instanceRevision ?? running?.pluginAppliedRevision ?? null,
+          oldInstanceRunning: !!((running?.plugins?.[id]?.effective_state === 'active'
+            && running.plugins[id].instanceRevision !== targetRevision)
+            || (pending && record?.oldRevision && running?.pluginAppliedRevision === record.oldRevision
+              && record.oldActiveIds?.includes(id))),
+        }]));
+        json(res, 200, { targetRevision, appliedRevision, pending, strategy: record?.strategy ?? null,
+          alerts, plugins, oldInstanceRunning, effective_state: alerts.length ? 'abnormal' : pending ? 'pending' : 'active' }); return;
+      }
       if (url.pathname === '/api/model-plugins' && req.method === 'GET') {
         json(res, 200, JSON.parse(fs.readFileSync(path.join(root, 'rust/src/engine/io/adapters/model_config.json'), 'utf8'))); return;
       }

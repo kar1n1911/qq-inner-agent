@@ -2,6 +2,17 @@
 // configuration editors and other user-provided values remain untouched.
 const pairs = `
 Advanced|高级
+Plugins|插件
+Recognize plugins|识别插件
+Activate plugin configuration|启用当前插件配置
+Discard staged edits|放弃暂存改动
+Staged plugin list|暂存的插件清单
+Plugin list JSON|插件清单 JSON
+No plugin changes staged.|没有待应用的插件改动。
+No changes staged.|没有暂存改动。
+No plugin directories found.|未找到插件目录。
+Recognition only reads manifests. Changes remain staged until activation.|识别仅读取插件清单。改动在启用前只作暂存。
+Newly recognized plugins start disabled. Edit the list below; changes are staged and previewed before activation. Credentials belong in secret references, never here.|新识别的插件默认禁用。编辑下方清单后，改动先暂存并预览，再启用。清单只保存密钥引用，不保存密钥值。
 Pause speaking|暂停发言
 Stop participation|停止参与
 Resume|恢复参与

@@ -281,6 +281,7 @@ async fn main() -> Result<()> {
                     std::process::exit(2);
                 }
             }
+            let _ = fs::remove_file(root.join(".plugin-restart-pending"));
             run(root).await?;
         }
         Command::DbSchema { database } => {
@@ -423,7 +424,7 @@ fn runtime_revision(root: &Path) -> Result<String> {
     Ok(format!("{base}:{:x}", Sha256::digest(fs::read(list)?)))
 }
 fn changed(root: &Path, applied: &str) -> Result<Option<String>> {
-    if root.join(".settings-write").exists() {
+    if root.join(".settings-write").exists() || root.join(".plugin-restart-pending").exists() {
         return Ok(None);
     }
     let next = runtime_revision(root)?;
@@ -467,6 +468,8 @@ struct Runtime {
     applied: String,
     reloading: bool,
     reload_error: Option<&'static str>,
+    plugin_reload_failure: Option<Value>,
+    last_alerted_plugin_revision: Option<String>,
     now: Clock,
     log: Logger,
     control: Option<Arc<Backend>>,
@@ -637,6 +640,8 @@ impl Runtime {
             applied,
             reloading: false,
             reload_error: None,
+            plugin_reload_failure: None,
+            last_alerted_plugin_revision: None,
             now,
             log,
         })
@@ -733,16 +738,24 @@ impl Runtime {
         drop(db);
         let bot = self.bot.state();
         // JS status fields retain their types and seconds; runningRevision reports this live process.
-        Ok(json!({"updatedAt":iso(now), "pid":pid, "mode":mode(c),
+        let mut status = json!({"updatedAt":iso(now), "pid":pid, "mode":mode(c),
             "runningRevision":qq_inner_core::update::REVISION,
             "prompts":self.engine.prompt_status(),
-            "appliedRevision":self.applied.split(':').next(), "reloading":self.reloading, "reloadError":self.reload_error,
+            "appliedRevision":self.applied.split(':').next(),
+            "reloading":self.reloading, "reloadError":self.reload_error,
             "scheduleActive":active, "activityRhythm":activity, "missing":config::readiness(c),
             "onebotConnected":bot.connected, "qqOnline":bot.online, "selfId":bot.self_id,
             "participation":self.engine.participation_state(),
             "reconnects":bot.reconnects, "activeChats":self.engine.chats().len(),
             "model":self.raw["provider"]["model"], "provider":if c.provider.io_port == "legacy" { &c.provider.kind } else { &c.provider.io_port }, "apiCallsThisRun":self.model_port.as_ref().map_or_else(|| self.provider.calls(), |p| p.calls()),
-            "lastCycleAt":self.engine.last_cycle(), "lastError":self.engine.last_error()}))
+            "lastCycleAt":self.engine.last_cycle(), "lastError":self.engine.last_error()});
+        if self._plugin_ports.is_some() {
+            status["pluginAppliedRevision"] = json!(self.applied.rsplit(':').next());
+        }
+        if let Some(failure) = &self.plugin_reload_failure {
+            status["pluginReloadFailure"] = failure.clone();
+        }
+        Ok(status)
     }
     fn report(&self) -> Result<()> {
         settings::atomic_json(
@@ -994,9 +1007,23 @@ async fn run(root: PathBuf) -> Result<()> {
                 _ = watcher.tick() => {
                     if let Some(revision) = changed(&root, &rt.applied)? {
                         rt.reloading = true;
-                        if rt.reload(&root, revision, &mut shutdown, &mut report).await.is_err() {
+                        let attempted_revision = revision.clone();
+                        if let Err(error) = rt.reload(&root, revision, &mut shutdown, &mut report).await {
                             rt.reload_error = Some("Invalid configuration; previous settings remain active.");
-                            (rt.log)("config_reload_rejected", json!({}));
+                            let details = error.to_string();
+                            let failure = details.strip_prefix("plugin batch rejected: ")
+                                .and_then(|body| serde_json::from_str::<Value>(body).ok());
+                            rt.plugin_reload_failure = failure.as_ref().and_then(|value| {
+                                Some(json!({"pluginId":value["id"].as_str()?, "code":value["code"].as_str()?}))
+                            });
+                            if let Some(failure) = &rt.plugin_reload_failure {
+                                if rt.last_alerted_plugin_revision.as_deref() != Some(attempted_revision.as_str()) {
+                                    (rt.log)("plugin_hot_reload_failed", failure.clone());
+                                    rt.last_alerted_plugin_revision = Some(attempted_revision);
+                                }
+                            } else {
+                                (rt.log)("config_reload_rejected", json!({}));
+                            }
                         }
                         rt.reloading = false;
                         rt.report()?;

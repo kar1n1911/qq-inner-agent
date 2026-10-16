@@ -14,6 +14,7 @@ const $ = id => document.getElementById(id);
 startI18n();
 let csrf = '', saved = null, dirty = false, polling = false, logs = [], online = false, modelPlugins = {};
 let learningView = '', preset = {};
+let pluginLiveList = { schema_version: 1, mode: 'manual', plugins: [] }, pluginDraftTimer, pluginHasDraft = false, pluginDraftSave = Promise.resolve();
 // Object key order is irrelevant; arrays are atomic ordered values. Missing
 // advanced keys are rejected rather than silently resetting unrelated settings.
 function configPatch(base, next, prefix = '', patch = Object.create(null)) {
@@ -44,7 +45,53 @@ function changed() { dirty = true; $('dirty-dot').hidden = false; applyStatus('U
 function page(name) {
   for (const p of document.querySelectorAll('.page')) p.hidden = p.id !== name;
   for (const b of document.querySelectorAll('.nav')) b.classList.toggle('active', b.dataset.page === name);
-  $('page-title').textContent = { overview: 'Overview', config: 'Configuration', activity: 'Activity & logs', advanced: 'Advanced' }[name];
+  $('page-title').textContent = { overview: 'Overview', config: 'Configuration', plugins: 'Plugins', activity: 'Activity & logs', advanced: 'Advanced' }[name];
+}
+function pluginEdit() { return JSON.parse($('plugin-list-editor').value); }
+function pluginReplacements(list) {
+  return list.plugins.filter(item => {
+    const original = pluginLiveList.plugins.find(before => before.id === item.id);
+    return original && JSON.stringify(original) !== JSON.stringify(item);
+  }).map(item => item.id);
+}
+async function stagePluginEdits() {
+  const list = pluginEdit();
+  const draft = await api('/api/plugins/draft', { method: 'PUT', body: JSON.stringify({ list, replaceIds: pluginReplacements(list) }) });
+  pluginHasDraft = true;
+  $('plugin-preview').textContent = JSON.stringify(draft.preview, null, 2);
+  $('plugin-status').textContent = `${draft.changes.length} plugin changes staged. The running agent is unchanged.`;
+  return draft;
+}
+function showPluginDiscovery(rows) {
+  const container = $('plugin-discovery'); container.replaceChildren();
+  for (const row of rows) container.append(element('p', `${row.directory}: ${row.state}${row.reason ? ` · ${row.reason}` : ''}${row.hot_reload === undefined ? '' : row.hot_reload ? ' · hot reload supported' : ' · restart required'}`));
+  if (!rows.length) container.append(element('p', 'No plugin directories found.', 'empty'));
+}
+async function refreshPluginStatus() {
+  if (!csrf) return;
+  const result = await api('/api/plugins/status');
+  if (result.alerts?.length) $('plugin-status').textContent = result.alerts.map(alert =>
+    `${alert.pluginId}: ${alert.message}${result.oldInstanceRunning ? ' Previous instance remains active.' : ''}`).join(' ');
+  else if (result.pending) $('plugin-status').textContent = `Applying ${result.targetRevision}; core still reports ${result.appliedRevision || 'no applied revision'}.`;
+  else if (result.targetRevision) $('plugin-status').textContent = `Applied plugin revision: ${result.appliedRevision}.`;
+}
+async function loadPluginPage() {
+  const [found, draft] = await Promise.all([api('/api/plugins/discover'), api('/api/plugins/draft')]);
+  if (!found.list) {
+    showPluginDiscovery(found.discovery);
+    $('plugin-list-editor').value = '';
+    $('plugin-status').textContent = found.listError;
+    $('plugin-activate').disabled = true;
+    return;
+  }
+  $('plugin-activate').disabled = false;
+  pluginLiveList = found.list;
+  pluginHasDraft = draft.state === 'staged';
+  showPluginDiscovery(found.discovery);
+  $('plugin-list-editor').value = JSON.stringify(draft.state === 'staged' ? draft.list : found.list, null, 2);
+  $('plugin-preview').textContent = draft.state === 'staged' ? JSON.stringify(draft.preview, null, 2) : 'No changes staged.';
+  if (draft.state === 'staged') $('plugin-status').textContent = `${draft.changes.length} plugin changes staged. The running agent is unchanged.`;
+  else await refreshPluginStatus();
 }
 function renderModelPlugin() {
   const port = document.querySelector('[data-config="provider.ioPort"]').value;
@@ -204,6 +251,7 @@ async function boot() {
   for (const name of Object.keys(modelPlugins)) { const option = element('option', `${({openai:'OpenAI',ollama:'Ollama',claude:'Claude'})[name] || name} plugin`); option.value = name; ports.append(option); }
   populate(await api('/api/config'));
   $('login').hidden = true; $('console').hidden = false;
+  await loadPluginPage();
   await refresh();
 }
 $('login-form').addEventListener('submit', async e => {
@@ -213,6 +261,52 @@ $('login-form').addEventListener('submit', async e => {
   finally { b.disabled = false; }
 });
 document.querySelectorAll('[data-page]').forEach(b => b.addEventListener('click', () => page(b.dataset.page)));
+$('plugin-discover').addEventListener('click', async () => {
+  try {
+    const found = await api('/api/plugins/discover');
+    if (!found.list) { $('plugin-status').textContent = found.listError; showPluginDiscovery(found.discovery); return; }
+    pluginLiveList = found.list;
+    showPluginDiscovery(found.discovery);
+    const current = pluginEdit();
+    const known = new Set(current.plugins.map(item => item.directory));
+    for (const row of found.discovery) if (row.state === 'discovered' && !known.has(row.directory)) {
+      current.plugins.push({ id: row.directory, directory: row.directory, enabled: false, params: {}, bindings: {}, secret_refs: {} });
+      known.add(row.directory);
+    }
+    $('plugin-list-editor').value = JSON.stringify(current, null, 2);
+    $('plugin-status').textContent = 'Recognition complete. Review the proposed list before activation.';
+  } catch (error) { $('plugin-status').textContent = error.message; }
+});
+$('plugin-list-editor').addEventListener('input', () => {
+  clearTimeout(pluginDraftTimer);
+  $('plugin-status').textContent = 'Staging plugin edits…';
+  pluginDraftTimer = setTimeout(() => {
+    pluginDraftSave = stagePluginEdits().catch(error => { $('plugin-status').textContent = error.message; });
+  }, 500);
+});
+$('plugin-cancel').addEventListener('click', async () => {
+  clearTimeout(pluginDraftTimer);
+  try { await pluginDraftSave; await api('/api/plugins/draft', { method: 'DELETE' }); await loadPluginPage(); }
+  catch (error) { $('plugin-status').textContent = error.message; }
+});
+setInterval(() => {
+  if (!document.hidden && !$('plugins').hidden && !pluginHasDraft) refreshPluginStatus().catch(() => {});
+}, 5000);
+$('plugin-activate').addEventListener('click', async () => {
+  clearTimeout(pluginDraftTimer);
+  const button = $('plugin-activate'); button.disabled = true;
+  $('plugin-list-editor').disabled = true;
+  try {
+    await pluginDraftSave;
+    const draft = await stagePluginEdits();
+    if (!draft.changes.length) { $('plugin-status').textContent = 'No plugin changes to activate.'; return; }
+    if (!window.confirm(`Apply these plugin changes?\n${draft.changes.map(change => `${change.action}: ${change.id} (${change.enabled ? 'enabled' : 'disabled'})`).join('\n')}`)) return;
+    const result = await api('/api/plugins/activate', { method: 'POST', body: '{}' });
+    $('plugin-status').textContent = `Submitted ${result.targetRevision} by ${result.strategy}; waiting for the core to confirm.`;
+    await loadPluginPage();
+  } catch (error) { $('plugin-status').textContent = error.message; }
+  finally { button.disabled = false; $('plugin-list-editor').disabled = false; }
+});
 for (const selector of ['#interface-language', '[data-config="ui.language"]']) {
   document.querySelector(selector).addEventListener('change', e => {
     const language = e.target.value; setLanguage(language);

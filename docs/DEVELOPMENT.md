@@ -818,3 +818,9 @@ JOIN messages m ON m.message_key=f.id ORDER BY d.ts DESC LIMIT 50;
 模型插件的依赖与配置字段统一声明在 `plugins/model_config.json`；WebUI 的 `/api/model-plugins` 只返回字段定义，不返回密钥值。宿主 HTTP 权限仍由 `PortManifest.host_permissions` 独立声明，依赖声明本身不授予权限。设置保存仍使用 `/api/config` 的差异 patch；密钥沿用只写、仅展示“已配置/未配置”的路径。`ModelRequest.payload` 的工具定义、调用、结果形态见端口计划 §5.3。协议参考：[OpenAI Chat Completions](https://developers.openai.com/api/reference/resources/chat)、[Claude Messages](https://platform.claude.com/docs/en/api/messages/create)、[Ollama API](https://github.com/ollama/ollama/blob/main/docs/api.md)。
 
 插件清单存在时，`engine/io/factory.rs` 使用受信任的构造器描述符准备实例、探测后端，再把整批实例注册到新的 `PortRegistry`；准备失败会回收已启动的 Sidecar，热重载保留旧运行代。清单内容纳入运行时修订号，单独编辑清单也会触发重载。未提供清单时继续使用原有模型与 OneBot 路径。`host_permissions` 用于显示声明和对照宿主调用日志，空声明不构成拦截规则；模型 HTTP 与 A_memorix gRPC 的调用日志记录插件实例与目标地址，不记录密钥。当前没有通用 Sidecar 线协议及健康握手，单凭进程存活不会使其成为有效端口；Ollama 的 Sidecar 清单也必须提供可管理入口。`DbPort` 保留进程内锁守卫语义，尚无可由清单替换的独立数据库插件。
+
+### AB3 插件识别与启用
+
+WebUI 的“识别插件”仅读取 `plugins/` 的目录和 manifest，不调用工厂，也不写 `plugins/plugins.json`；无效、占位和缺 manifest 的目录会列出原因。插件页编辑先写到数据目录的 `plugin-draft.json`，预览新增和明确替换的实例；普通设置仍使用原有 `/api/config` 保存路径。取消草稿不会改变运行代。“启用当前插件配置”在基线清单未变的条件下原子写正式清单；密钥只允许 `secret_refs`，不允许明文参数。启用成功的 HTTP 响应表示已提交应用请求，`/api/plugins/status` 的 `targetRevision` 与内核上报的 `pluginAppliedRevision` 相同才表示实际生效。
+
+插件 manifest 顶层可声明布尔 `hot_reload`，缺失视为 `false`。禁用实例可暂缺必填参数，但已有字段的类型和密钥位置仍须合法；启用时再校验所有必填项。变更含不支持热重载的实例、跨实例绑定变化、宿主设置 `pluginHotReloadAvailable=false` 或达到仪表盘 `dashboard.json` 的 `pluginRestartThreshold`（默认 3 个变更实例）时，应用一次服务重启。热重载失败时旧运行代保留，内核记录 `plugin_hot_reload_failed`（插件 ID、错误码）；页面同时显示目标与实际修订号及旧实例是否仍在运行。

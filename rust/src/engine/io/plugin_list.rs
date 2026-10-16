@@ -121,8 +121,8 @@ fn safe_directory(name: &str) -> bool {
     !name.is_empty() && name != "." && name != ".." && !name.contains('/') && !name.contains('\\')
 }
 
-fn valid_instance(manifest: &Value, entry: &Value) -> bool {
-    if manifest["transport"] != "InProcess"
+fn valid_instance(manifest: &Value, entry: &Value, enabled: bool) -> bool {
+    if enabled && manifest["transport"] != "InProcess"
         && (manifest["protocol"].is_null() || manifest["entry"].is_null())
     {
         return false;
@@ -175,7 +175,7 @@ fn valid_instance(manifest: &Value, entry: &Value) -> bool {
         }
     }
     for (key, field) in &schema {
-        if field["required"] == true && !params.contains_key(key) && !refs.contains_key(key) {
+        if enabled && field["required"] == true && !params.contains_key(key) && !refs.contains_key(key) {
             return false;
         }
     }
@@ -192,7 +192,7 @@ fn valid_instance(manifest: &Value, entry: &Value) -> bool {
         }
     }
     dependencies.iter().all(|dependency| {
-        dependency["required"] != true
+        !enabled || dependency["required"] != true
             || dependency["role"]
                 .as_str()
                 .is_some_and(|role| bindings.contains_key(role))
@@ -286,7 +286,11 @@ fn resolve_inner(
             invalid = true;
             continue;
         }
-        if !valid_instance(package.manifest.as_ref().expect("validated package"), entry) {
+        if !valid_instance(
+            package.manifest.as_ref().expect("validated package"),
+            entry,
+            entry["enabled"] == true,
+        ) {
             states.insert(id.to_owned(), json!({"installed":true,"effective":false,"reason":"invalid_config","directory":directory}));
             invalid = true;
             continue;
