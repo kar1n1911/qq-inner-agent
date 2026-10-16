@@ -259,6 +259,7 @@ test('failed hot replacement names the plugin and old live revision; success sho
     'activation must identify the desired revision, distinct from the running one');
   fs.writeFileSync(path.join(f.root, 'data/status.json'), JSON.stringify({
     updatedAt: new Date().toISOString(), appliedRevision: 'old-running-revision',
+    pluginAppliedRevision: 'old-running-revision',
     reloadError: 'plugin batch rejected: openai backend_unavailable',
     plugins: { openai: { effective_state: 'active', instanceRevision: 'old-running-revision' } },
   }));
@@ -270,7 +271,7 @@ test('failed hot replacement names the plugin and old live revision; success sho
   assert.equal(failed.data.oldInstanceRunning, true, 'status must say the old instance remains live');
 
   fs.writeFileSync(path.join(f.root, 'data/status.json'), JSON.stringify({
-    updatedAt: new Date().toISOString(), appliedRevision: target, reloadError: null,
+    updatedAt: new Date().toISOString(), appliedRevision: target, pluginAppliedRevision: target, reloadError: null,
     plugins: { openai: { effective_state: 'active', instanceRevision: target } },
   }));
   const succeeded = await f.request('/api/plugins/status');
