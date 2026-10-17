@@ -138,10 +138,44 @@ impl OneBotAdapter {
                             message.push(json!({"type":"at","data":{"qq":id}})),
                         Segment::Face { id } if !id.is_empty() && id.len() <= 5 && id.bytes().all(|b| b.is_ascii_digit()) =>
                             message.push(json!({"type":"face","data":{"id":id}})),
+                        Segment::Image { src, summary } => {
+                            let data = match image_data(&src, summary.as_deref()) {
+                                Ok(data) => data,
+                                Err(code) => return failed(code, false),
+                            };
+                            message.push(json!({"type":"image","data":data}));
+                        }
                         _ => return failed("unsupported_send_segment", false),
                     }
                 }
                 if message.is_empty() { return failed("empty_message", false); }
+                let (action, params) = match chat.kind {
+                    ChatKind::Group => ("send_group_msg", json!({"group_id":id,"message":message,"auto_escape":true})),
+                    ChatKind::Private => ("send_private_msg", json!({"user_id":id,"message":message,"auto_escape":true})),
+                };
+                match (self.action)(action.into(), params).await {
+                    PortReply::Ok(data) => match wire_string(&data["message_id"]) {
+                        Some(message_id) => PortReply::Ok(CommandResult::Sent { message_id }),
+                        None => failed("missing_ack_message_id", true),
+                    },
+                    PortReply::Failed { code, uncertain } => PortReply::Failed { code, uncertain },
+                    PortReply::Unsupported { capability } => PortReply::Unsupported { capability },
+                    PortReply::Degraded { .. } => failed("degraded_send_ack", true),
+                }
+            }
+            Command::SendMedia { chat, media } => {
+                if media.kind != "image" {
+                    return PortReply::Unsupported { capability: Capability::Custom(media.kind) };
+                }
+                let id = match numeric_id(&chat.id) {
+                    Some(id) => id,
+                    None => return failed("invalid_chat", false),
+                };
+                let data = match image_data(&media.source, None) {
+                    Ok(data) => data,
+                    Err(code) => return failed(code, false),
+                };
+                let message = vec![json!({"type":"image","data":data})];
                 let (action, params) = match chat.kind {
                     ChatKind::Group => ("send_group_msg", json!({"group_id":id,"message":message,"auto_escape":true})),
                     ChatKind::Private => ("send_private_msg", json!({"user_id":id,"message":message,"auto_escape":true})),
@@ -165,7 +199,7 @@ impl OneBotAdapter {
                     PortReply::Degraded { .. } => failed("degraded_recall_ack", true),
                 }
             }
-            _ => failed("onebot_command_unimplemented", false),
+            _ => PortReply::Unsupported { capability: Capability::Custom("onebot_command_unimplemented".into()) },
         }
     }
 }
@@ -208,7 +242,7 @@ pub(crate) struct OutboundEvidence {
 impl ChatPort for OneBotAdapter {
     fn manifest(&self) -> &PortManifest { &self.manifest }
     fn capabilities(&self) -> Capabilities {
-        Capabilities { mention: true, reply: true, ..Capabilities::default() }
+        Capabilities { mention: true, reply: true, media: true, ..Capabilities::default() }
     }
     fn state(&self) -> PortState {
         let (connected, online) = (self.connection)();
@@ -238,6 +272,28 @@ fn numeric_id(value: &str) -> Option<u64> {
         return None;
     }
     value.parse::<u64>().ok()
+}
+
+fn image_data(source: &MediaSrc, summary: Option<&str>) -> Result<Value, &'static str> {
+    let file = match source {
+        MediaSrc::Url(value) => {
+            let url = url::Url::parse(value).map_err(|_| "invalid_media")?;
+            if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none()
+                || !url.username().is_empty() || url.password().is_some() {
+                return Err("invalid_media");
+            }
+            value.clone()
+        }
+        MediaSrc::LocalPath(value) => url::Url::from_file_path(value)
+            .map_err(|_| "invalid_media")?.to_string(),
+        MediaSrc::Opaque(value) if !value.trim().is_empty() => value.clone(),
+        MediaSrc::Opaque(_) => return Err("invalid_media"),
+    };
+    let mut data = json!({"file":file});
+    if let Some(summary) = summary.filter(|text| !text.trim().is_empty()) {
+        data["summary"] = json!(summary);
+    }
+    Ok(data)
 }
 
 fn map_segment(segment: &Value) -> Segment {

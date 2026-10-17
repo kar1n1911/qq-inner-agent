@@ -56,7 +56,7 @@ async fn send_and_recall_require_confirmed_action_ack() {
     let port = adapter(calls.clone(), PortReply::Ok(json!({"message_id":"ack:8"})));
     let chat: ChatAddress = "group:onebot:123".parse().unwrap();
     assert!(!port.capabilities().history);
-    assert!(!port.capabilities().media);
+    assert!(port.capabilities().media);   // media sending is implemented; declaration follows it
     assert!(port.capabilities().mention && port.capabilities().reply);
     assert_eq!(port.deliver(Command::Send {
         chat, segments: vec![Segment::Text("你好".into())], reply_to: None,

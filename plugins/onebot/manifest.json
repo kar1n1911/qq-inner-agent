@@ -16,10 +16,10 @@
   "capabilities": {
     "supported": [
       "mention",
-      "reply"
+      "reply",
+      "media"
     ],
     "unsupported": [
-      "media",
       "forward",
       "group_card",
       "profile",
