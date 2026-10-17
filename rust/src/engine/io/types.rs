@@ -109,6 +109,28 @@ pub struct Incoming {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum PortEvent {
+    Incoming(Incoming),
+    Notice(Notice),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Notice {
+    pub kind: NoticeKind,
+    pub chat: Option<ChatAddress>,
+    pub actor: Option<String>,
+    pub self_id: Option<String>,
+    /// Protocol timestamp, never the local receive time.
+    pub at: f64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum NoticeKind {
+    GroupJoined,
+    Unknown(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Sender {
     pub id: String,
     pub name: String,
@@ -357,11 +379,28 @@ pub struct PortConfigField {
     pub secret: bool,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub enum PortState {
-    Available,
-    Degraded,
-    Disconnected,
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PortState {
+    pub connected: bool,
+    pub online: bool,
+    pub self_id: Option<String>,
+    pub degraded: Option<String>,
+}
+
+impl PortState {
+    pub fn available() -> Self {
+        Self { connected: true, online: true, self_id: None, degraded: None }
+    }
+
+    pub fn disconnected() -> Self {
+        Self { connected: false, online: false, self_id: None, degraded: None }
+    }
+
+    pub fn is_available(&self) -> bool { self.connected && self.online }
+
+    pub fn label(&self) -> &'static str {
+        if !self.connected { "disconnected" } else if !self.online { "degraded" } else { "available" }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -392,6 +431,7 @@ pub struct Capabilities {
     pub mention: bool,
     pub reply: bool,
     pub media: bool,
+    pub notices: bool,
     pub forward: bool,
     pub group_card: bool,
     pub profile: bool,

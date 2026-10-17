@@ -4,7 +4,7 @@ use qq_inner_core::{
     config::{defaults, merge, Config},
     engine::{
         io::{factory::{self, HostServices}, plugin_list, Capabilities, ChatAddress, ChatKind, ChatPort, Command, CommandResult,
-            Incoming, IoError, PortKind, PortManifest, PortReply, PortState, Segment, Sender,
+            Incoming, IoError, PortKind, PortManifest, PortEvent, PortReply, PortState, Segment, Sender,
             TransportKind, VersionReq},
         orientation::{OrientationProvider, OrientationTransport},
         Engine, EngineTransport, Options,
@@ -78,14 +78,14 @@ impl PublishedChat {
 impl ChatPort for PublishedChat {
     fn manifest(&self) -> &PortManifest { &self.manifest }
     fn capabilities(&self) -> Capabilities { Capabilities::default() }
-    fn state(&self) -> PortState { PortState::Available }
+    fn state(&self) -> PortState { PortState::available() }
     fn deliver<'a>(&'a self, command: Command) -> BoxFuture<'a, PortReply<CommandResult>> {
         Box::pin(async move {
             self.commands.lock().unwrap().push(command);
             self.result.clone()
         })
     }
-    fn attach(&self, _sink: mpsc::Sender<Incoming>) -> std::result::Result<(), IoError> {
+    fn attach(&self, _sink: mpsc::Sender<PortEvent>) -> std::result::Result<(), IoError> {
         Ok(())
     }
 }
@@ -184,7 +184,7 @@ async fn enabled_list_preflights_publishes_and_its_chat_port_ingests() {
             PortReply::Ok(json!({"message_id":"port-1"}))
         })
     }));
-    host.onebot_connection = Some(Arc::new(|| (true, true)));
+    host.onebot_connection = Some(Arc::new(|| (true, true, None::<String>)));
     let outcome = factory::prepare(&fixture.root, &fixture.list, &host);
     let published = outcome.published.unwrap_or_else(|| panic!("enabled port must publish: {}", outcome.status));
     let port = published.onebot.expect("onebot ChatPort must be published");
@@ -239,7 +239,7 @@ async fn unbound_group_fallback_is_visible_and_sends_once() {
             PortReply::Ok(json!({"message_id":"unexpected-plugin-send"}))
         })
     }));
-    host.onebot_connection = Some(Arc::new(|| (true, true)));
+    host.onebot_connection = Some(Arc::new(|| (true, true, None::<String>)));
     let published = factory::prepare(&fixture.root, &fixture.list, &host).published
         .expect("enabled plugin must publish before testing unbound fallback");
     assert!(published.onebot.is_some());

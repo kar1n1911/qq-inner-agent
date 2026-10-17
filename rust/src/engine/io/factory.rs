@@ -5,7 +5,7 @@ use super::{
     adapters::{amemorix::AmemorixPort, model_http::HttpModel, null::NullDb,
         onebot::{Action, Connection, OneBotAdapter}, sillytavern::SillyTavernPersona},
     plugin_list::{self, ActivationRequest}, ports::{ChatPort, MemoryPort, ModelPort, PersonaPort},
-    types::{ChatAddress, ChatKind, MemorySubject, PortReply, PortState}, PortRegistry,
+    types::{ChatAddress, ChatKind, MemorySubject, PortReply}, PortRegistry,
 };
 use serde_json::{json, Value};
 use std::{collections::{HashMap, HashSet}, net::{TcpStream, ToSocketAddrs}, path::{Path, PathBuf},
@@ -89,10 +89,7 @@ impl PublishedPorts {
     /// Read only: the snapshot uses ports already published by this generation.
     pub fn status_snapshot(&self, revision: &str, snapshot_at: &str) -> Value {
         let items = self.observations.iter().map(|(id, evidence)| {
-            let state = self.registry.chat.get(id).map(|port| match port.state() {
-                PortState::Available => "available", PortState::Degraded => "degraded",
-                PortState::Disconnected => "disconnected",
-            }).unwrap_or("unknown");
+            let state = self.registry.chat.get(id).map(|port| port.state().label()).unwrap_or("unknown");
             (id.clone(), json!({"effective_state":evidence["effective_state"],
                 "instanceRevision":revision,"capabilities":evidence["capabilities"],
                 "portState":state,"observedAt":evidence["observedAt"],
@@ -307,7 +304,7 @@ pub fn prepare(root: &Path, list: &Value, host: &HostServices) -> FactoryOutcome
                 missing_optional.sort();
                 missing_optional.dedup();
                 missing.insert(request.id.clone(), missing_optional);
-                let not_ready = matches!(&port, PreparedPort::Chat { port } if port.state() != PortState::Available);
+                let not_ready = matches!(&port, PreparedPort::Chat { port } if !port.state().is_available());
                 if not_ready {
                     unhealthy.insert(request.id.clone(), "onebot_connection".to_owned());
                 }
@@ -402,7 +399,7 @@ mod tests {
         let connected = Arc::new(AtomicBool::new(false));
         let state = connected.clone();
         let action: Action = Arc::new(|_, _| Box::pin(async { PortReply::Ok(Value::Null) }));
-        let connection: Connection = Arc::new(move || (state.load(Ordering::Relaxed), true));
+        let connection: Connection = Arc::new(move || (state.load(Ordering::Relaxed), true, None));
         let chat = Arc::new(OneBotAdapter::new("onebot", action, connection).unwrap());
         let mut ports = PublishedPorts::publish(vec![PreparedPort::Chat { port: chat }]).unwrap();
         ports.observations.insert("onebot".into(), json!({"effective_state":"active",

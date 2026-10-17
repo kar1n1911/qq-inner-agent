@@ -745,12 +745,47 @@ impl Engine {
     pub fn ingest_backfill(&self, event: &Value) -> Result<()> {
         self.ingest_with_source(event, true)
     }
+    fn notice_group_joined(&self, chat: &str, at: f64) -> Result<()> {
+        let mut core = self.core();
+        let previous = self.orientation.get(chat)?.map(|r| r.epoch);
+        self.orientation.joined(chat, at)?;
+        if previous != self.orientation.get(chat)?.map(|r| r.epoch) {
+            if let Some(s) = core.get_mut(chat) {
+                s.version += 1;
+                s.pending = false;
+                s.pause_done = true;
+            }
+        }
+        Ok(())
+    }
+    pub fn ingest_notice(&self, notice: &io::types::Notice) -> Result<()> {
+        match &notice.kind {
+            io::types::NoticeKind::Unknown(kind) => {
+                (self.options.log)("notice_unhandled", json!({"kind":kind}));
+                Ok(())
+            }
+            io::types::NoticeKind::GroupJoined => {
+                if !self.participates() || !(self.config.agent.observation.enabled || self.config.agent.identity.enabled) {
+                    return Ok(());
+                }
+                let Some(chat) = &notice.chat else { anyhow::bail!("missing_notice_chat"); };
+                ensure!(chat.kind == io::types::ChatKind::Group, "invalid_notice_chat");
+                let self_id = self.transport.self_id();
+                if notice.self_id.as_deref().is_some_and(|id| id != self_id)
+                    || notice.actor.as_deref() != Some(&self_id)
+                    || !self.config.agent.allowed_groups.contains(&chat.id) {
+                    return Ok(());
+                }
+                ensure!(notice.at.is_finite() && notice.at > 0., "invalid_notice_time");
+                self.notice_group_joined(&format!("group:{}", chat.id), notice.at)
+            }
+        }
+    }
     fn ingest_with_source(&self, event: &Value, backfill: bool) -> Result<()> {
         if !self.participates() { return Ok(()); }
         if !backfill && event["post_type"] == "message_sent" {
             return self.reconcile_outbound_event(event, self.now());
         }
-        let mut core = self.core();
         let a = &self.config.agent;
         let now = self.now();
         let self_id = self.transport.self_id();
@@ -763,19 +798,10 @@ impl Engine {
             && a.allowed_groups.contains(&js_string(&event["group_id"]))
         {
             let chat = format!("group:{}", js_string(&event["group_id"]));
-            let previous = self.orientation.get(&chat)?.map(|r| r.epoch);
             let ts = crate::transport::js_number(&event["time"]);
-            self.orientation
-                .joined(&chat, if ts == 0. || ts.is_nan() { now } else { ts })?;
-            if previous != self.orientation.get(&chat)?.map(|r| r.epoch) {
-                if let Some(s) = core.get_mut(&chat) {
-                    s.version += 1;
-                    s.pending = false;
-                    s.pause_done = true;
-                }
-            }
-            return Ok(());
+            return self.notice_group_joined(&chat, if ts == 0. || ts.is_nan() { now } else { ts });
         }
+        let mut core = self.core();
         // 感知与值班解耦：离岗仍记录、观察和学习，是否发言由回复路径检查。
         let message = if backfill {
             policy::normalize_backfill(event, &self_id, a, now)

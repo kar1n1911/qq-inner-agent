@@ -57,13 +57,13 @@ impl ChatPort for TestChat {
         }
     }
     fn state(&self) -> PortState {
-        PortState::Available
+        PortState::available()
     }
     fn deliver<'a>(&'a self, _: Command) -> BoxFuture<'a, PortReply<CommandResult>> {
         self.deliveries.fetch_add(1, Ordering::SeqCst);
         Box::pin(async { PortReply::Ok(CommandResult::Ok) })
     }
-    fn attach(&self, _: mpsc::Sender<Incoming>) -> Result<(), IoError> {
+    fn attach(&self, _: mpsc::Sender<PortEvent>) -> Result<(), IoError> {
         Ok(())
     }
 }
@@ -205,7 +205,7 @@ async fn null_io_is_complete_and_real_calls_fail_explicitly() {
     let chat: ChatAddress = "group:null-chat:room".parse().unwrap();
     assert_eq!(
         io.chat().get("null-chat").unwrap().state(),
-        PortState::Disconnected
+        PortState::disconnected()
     );
     let (sink, _) = mpsc::channel(1);
     assert_eq!(

@@ -6,7 +6,7 @@ use qq_inner_core::{
     config::{defaults, merge, Config},
     engine::behavior::{compile, Profile},
     engine::orientation::{OrientationProvider, OrientationTransport},
-    engine::io::{adapters::{onebot::OneBotAdapter, sillytavern::{parse_card, SillyTavernPersona}}, ChatAddress, ChatKind, PortReply},
+    engine::io::{adapters::{onebot::OneBotAdapter, sillytavern::{parse_card, SillyTavernPersona}}, ChatAddress, ChatKind, PortEvent, PortReply},
     engine::{Engine, EngineTransport, Options},
     transport::{OneBotError, State},
     store::Store,
@@ -425,12 +425,13 @@ async fn opted_in_incoming_reaches_ported_outbound_after_existing_gates() {
     let adapter = Arc::new(OneBotAdapter::new("onebot", Arc::new(move |action, params| {
         seen.lock().unwrap().push((action, params));
         Box::pin(async { PortReply::Ok(json!({"message_id":"out:1"})) })
-    }), Arc::new(|| (true, true))).unwrap());
+    }), Arc::new(|| (true, true, None::<String>))).unwrap());
     let event = harness.event(&json!({"id":"in:1","text":[
         {"type":"at","data":{"qq":"99"}},
         {"type":"text","data":{"text":"你好"}}
     ]}));
-    let incoming = adapter.map_event(&event, harness.now() + 3.).unwrap().unwrap();
+    let event = adapter.map_event(&event, harness.now() + 3.).unwrap().unwrap();
+    let PortEvent::Incoming(incoming) = event else { panic!("a message frame must map to Incoming") };
     engine.ingest_incoming(&incoming, adapter).unwrap();
     let messages = harness.rows("SELECT message_key,id,ts,received_at FROM messages");
     assert_eq!(messages[0]["id"], "in:1");

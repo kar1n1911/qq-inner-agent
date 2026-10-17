@@ -18,7 +18,7 @@ fn adapter(connected: bool, online: bool, answer: PortReply<Value>) -> (OneBotAd
         let answer = answer.clone();
         Box::pin(async move { answer })
     });
-    let connection = Arc::new(move || (connected, online));
+    let connection = Arc::new(move || (connected, online, None::<String>));
     (OneBotAdapter::new("onebot", action, connection).unwrap(), calls)
 }
 

@@ -2,7 +2,7 @@
 use futures_util::future::BoxFuture;
 use qq_inner_core::engine::io::{
     adapters::onebot::{Action, OneBotAdapter}, ChatPort, ChatAddress, Command,
-    CommandResult, PortReply, Segment,
+    CommandResult, PortEvent, PortReply, Segment,
 };
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
@@ -16,17 +16,18 @@ fn adapter(
         let reply = reply.clone();
         Box::pin(async move { reply }) as BoxFuture<'static, PortReply<Value>>
     });
-    OneBotAdapter::new("onebot", action, Arc::new(|| (true, true))).unwrap()
+    OneBotAdapter::new("onebot", action, Arc::new(|| (true, true, None::<String>))).unwrap()
 }
 
 #[test]
 fn incoming_keeps_protocol_id_and_both_clocks_separate() {
     let adapter = adapter(Arc::new(Mutex::new(vec![])), PortReply::Ok(json!({})));
-    let incoming = adapter.map_event(&json!({
+    let event = adapter.map_event(&json!({
         "post_type":"message","message_type":"group","group_id":"room:alpha",
         "self_id":"99","user_id":"user-x","message_id":"proto:7","time":100.0,
         "sender":{"nickname":"甲"},"message":"[CQ:at,qq=99]你好"
     }), 105.0).unwrap().unwrap();
+    let PortEvent::Incoming(incoming) = event else { panic!("a message frame must map to Incoming") };
     assert_eq!(incoming.chat.to_string(), "group:onebot:room:alpha");
     assert_eq!(incoming.message_id, "proto:7");
     assert_eq!((incoming.ts, incoming.received_at), (100.0, 105.0));
@@ -39,11 +40,12 @@ fn incoming_keeps_protocol_id_and_both_clocks_separate() {
 #[test]
 fn self_echo_without_message_type_or_message_array_maps_without_becoming_human_input() {
     let adapter = adapter(Arc::new(Mutex::new(vec![])), PortReply::Ok(json!({})));
-    let incoming = adapter.map_event(&json!({
+    let event = adapter.map_event(&json!({
         "post_type":"message_sent","message_sent_type":"self","self_id":99,
         "user_id":99,"group_id":10,"message_id":42,"time":100.,
         "raw_message":"sent","sender":{"user_id":99}
     }), 105.).unwrap().unwrap();
+    let PortEvent::Incoming(incoming) = event else { panic!("a self echo must map to Incoming") };
     assert!(incoming.self_message);
     assert_eq!(incoming.chat.to_string(), "group:onebot:10");
     assert_eq!((incoming.ts, incoming.received_at), (100., 105.));

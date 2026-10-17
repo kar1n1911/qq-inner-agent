@@ -47,12 +47,12 @@ impl ChatPort for NullChat {
         Capabilities::default()
     }
     fn state(&self) -> PortState {
-        PortState::Disconnected
+        PortState::disconnected()
     }
     fn deliver<'a>(&'a self, _: Command) -> BoxFuture<'a, PortReply<CommandResult>> {
         Box::pin(async { unavailable("chat_port_unavailable") })
     }
-    fn attach(&self, _: mpsc::Sender<Incoming>) -> Result<(), IoError> {
+    fn attach(&self, _: mpsc::Sender<PortEvent>) -> Result<(), IoError> {
         Err(IoError::new("chat_port_unavailable"))
     }
 }

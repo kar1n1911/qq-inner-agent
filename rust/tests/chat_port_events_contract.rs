@@ -124,7 +124,7 @@ fn unknown_notice_kind_is_visible_instead_of_dropped() {
     port.publish(event).expect("deliver unknown notice");
     assert!(matches!(
         events.try_recv(),
-        Ok(PortEvent::Notice(notice)) if matches!(notice.kind, NoticeKind::Unknown(kind) if kind == "group_recall")
+        Ok(PortEvent::Notice(notice)) if matches!(&notice.kind, NoticeKind::Unknown(kind) if kind == "group_recall")
     ));
     assert!(events.try_recv().is_err());
 }

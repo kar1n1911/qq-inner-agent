@@ -8,13 +8,13 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
 pub type Action = Arc<dyn Fn(String, Value) -> BoxFuture<'static, PortReply<Value>> + Send + Sync>;
-pub type Connection = Arc<dyn Fn() -> (bool, bool) + Send + Sync>;
+pub type Connection = Arc<dyn Fn() -> (bool, bool, Option<String>) + Send + Sync>;
 
 pub struct OneBotAdapter {
     manifest: PortManifest,
     action: Action,
     connection: Connection,
-    sink: Mutex<Option<mpsc::Sender<Incoming>>>,
+    sink: Mutex<Option<mpsc::Sender<PortEvent>>>,
 }
 
 impl OneBotAdapter {
@@ -38,12 +38,28 @@ impl OneBotAdapter {
         })
     }
 
-    /// Heartbeats are deliberately ignored; other non-message events lack a
-    /// P0 `Incoming` representation and fail visibly on the opt-in path.
-    pub fn map_event(&self, event: &Value, received_at: f64) -> Result<Option<Incoming>, IoError> {
+    /// Heartbeats are deliberately ignored; notices retain their own typed shape.
+    pub fn map_event(&self, event: &Value, received_at: f64) -> Result<Option<PortEvent>, IoError> {
         if event["post_type"] != "message" && event["post_type"] != "message_sent" {
-            return if event["post_type"] == "meta_event" { Ok(None) }
-                else { Err(IoError::new("incoming_event_unimplemented")) };
+            if event["post_type"] == "meta_event" { return Ok(None); }
+            if event["post_type"] != "notice" { return Err(IoError::new("incoming_event_unimplemented")); }
+            let kind = event["notice_type"].as_str().filter(|kind| !kind.is_empty())
+                .ok_or_else(|| IoError::new("incoming_event_unimplemented"))?;
+            let at = event["time"].as_f64()
+                .or_else(|| event["time"].as_str().and_then(|s| s.parse::<f64>().ok()))
+                .filter(|ts| ts.is_finite() && *ts > 0.)
+                .ok_or_else(|| IoError::new("invalid_server_time"))?;
+            let chat = wire_string(&event["group_id"])
+                .map(|id| ChatAddress::new(ChatKind::Group, &self.manifest.name, id))
+                .transpose()?;
+            return Ok(Some(PortEvent::Notice(Notice {
+                kind: if kind == "group_increase" { NoticeKind::GroupJoined }
+                    else { NoticeKind::Unknown(kind.to_owned()) },
+                chat,
+                actor: wire_string(&event["user_id"]),
+                self_id: wire_string(&event["self_id"]),
+                at,
+            })));
         }
         let kind = match event["message_type"].as_str().or_else(|| {
             (event["post_type"] == "message_sent").then(|| {
@@ -80,7 +96,7 @@ impl OneBotAdapter {
             _ => return Err(IoError::new("invalid_message_segments")),
         };
         let sender = &event["sender"];
-        Ok(Some(Incoming {
+        Ok(Some(PortEvent::Incoming(Incoming {
             port: self.manifest.name.clone(),
             chat: ChatAddress::new(kind, &self.manifest.name, id)?,
             message_id,
@@ -100,20 +116,20 @@ impl OneBotAdapter {
             segments,
             self_message: sender_id == self_id,
             raw: Some(event.clone()),
-        }))
+        })))
     }
 
-    pub fn publish(&self, incoming: Incoming) -> Result<(), IoError> {
+    pub fn publish(&self, event: PortEvent) -> Result<(), IoError> {
         let guard = self.sink.lock().map_err(|_| IoError::new("sink_poisoned"))?;
         let sink = guard.as_ref().ok_or_else(|| IoError::new("sink_not_attached"))?;
-        sink.try_send(incoming).map_err(|_| IoError::new("incoming_sink_unavailable"))
+        sink.try_send(event).map_err(|_| IoError::new("incoming_sink_unavailable"))
     }
 
     async fn command(&self, command: Command) -> PortReply<CommandResult> {
         if command.port() != self.manifest.name {
             return failed("wrong_port", false);
         }
-        let (connected, online) = (self.connection)();
+        let (connected, online, _) = (self.connection)();
         if matches!(command, Command::Health { .. }) {
             return PortReply::Ok(CommandResult::Health(HealthInfo { connected, online }));
         }
@@ -242,16 +258,17 @@ pub(crate) struct OutboundEvidence {
 impl ChatPort for OneBotAdapter {
     fn manifest(&self) -> &PortManifest { &self.manifest }
     fn capabilities(&self) -> Capabilities {
-        Capabilities { mention: true, reply: true, media: true, ..Capabilities::default() }
+        Capabilities { mention: true, reply: true, media: true, notices: true, ..Capabilities::default() }
     }
     fn state(&self) -> PortState {
-        let (connected, online) = (self.connection)();
-        if !connected { PortState::Disconnected } else if !online { PortState::Degraded } else { PortState::Available }
+        let (connected, online, self_id) = (self.connection)();
+        PortState { connected, online, self_id: self_id.filter(|id| !id.is_empty()),
+            degraded: (connected && !online).then(|| "qq_offline".to_owned()) }
     }
     fn deliver<'a>(&'a self, command: Command) -> BoxFuture<'a, PortReply<CommandResult>> {
         Box::pin(self.command(command))
     }
-    fn attach(&self, sink: mpsc::Sender<Incoming>) -> Result<(), IoError> {
+    fn attach(&self, sink: mpsc::Sender<PortEvent>) -> Result<(), IoError> {
         let mut guard = self.sink.lock().map_err(|_| IoError::new("sink_poisoned"))?;
         if guard.is_some() { return Err(IoError::new("sink_already_attached")); }
         *guard = Some(sink);

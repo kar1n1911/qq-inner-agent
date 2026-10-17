@@ -165,7 +165,7 @@ fn plugin_factory_status(root: &Path, list: &Value, log: Option<Logger>, bot: Op
         }));
         host.onebot_connection = Some(Arc::new(move || {
             let state = bot.state();
-            (state.connected, state.online)
+            (state.connected, state.online, (!state.self_id.is_empty()).then(|| state.self_id.clone()))
         }));
     }
     if let Some(log) = log {
@@ -590,7 +590,7 @@ impl Runtime {
                 }),
                 Arc::new(move || {
                     let state = state_bot.state();
-                    (state.connected, state.online)
+                    (state.connected, state.online, (!state.self_id.is_empty()).then(|| state.self_id.clone()))
                 }),
             )?))
         } else { None };
@@ -699,9 +699,10 @@ impl Runtime {
                 }
                 if !self.engine.participates() { return; }
                 if let Some(adapter) = &self.onebot_io {
+                    use qq_inner_core::engine::io::PortEvent;
                     let context = event_rejected_context(&event);
-                    let incoming = match adapter.map_event(&event, (self.now)()) {
-                        Ok(Some(incoming)) => incoming,
+                    let port_event = match adapter.map_event(&event, (self.now)()) {
+                        Ok(Some(port_event)) => port_event,
                         Ok(None) => return,
                         Err(error) => {
                             (self.log)("event_rejected", event_rejected_payload(context, "map_incoming_failed", &error.to_string()));
@@ -710,7 +711,10 @@ impl Runtime {
                     };
                     let engine = self.engine.clone();
                     let adapter = adapter.clone();
-                    let outcome = tokio::task::spawn_blocking(move || engine.ingest_incoming(&incoming, adapter)).await;
+                    let outcome = tokio::task::spawn_blocking(move || match port_event {
+                        PortEvent::Incoming(incoming) => engine.ingest_incoming(&incoming, adapter),
+                        PortEvent::Notice(notice) => engine.ingest_notice(&notice),
+                    }).await;
                     match outcome {
                         Ok(Ok(())) => {}
                         Ok(Err(error)) => (self.log)("event_rejected", event_rejected_payload(context, "ingest_incoming_failed", &error.to_string())),
@@ -1113,6 +1117,35 @@ mod tests {
         dir.config(json!({"provider":{"ioPort":"ollama","baseUrl":"http://127.0.0.1:11434","model":"test"}}));
         let runtime = dir.runtime();
         assert_eq!(qq_inner_core::engine::io::ModelPort::manifest(runtime.model_port.as_ref().unwrap().as_ref()).name, "ollama");
+    }
+
+    #[tokio::test]
+    async fn ported_group_join_notice_reaches_engine_and_unknown_preserves_state() {
+        use qq_inner_core::engine::{io::{adapters::onebot::OneBotAdapter, ChatAddress, Notice, NoticeKind}, ChatState};
+        let dir = Temp::new();
+        dir.config(json!({"onebot":{"selfId":"99"},"agent":{"allowedGroups":["42"],
+            "observation":{"enabled":true}}}));
+        let mut rt = dir.runtime();
+        let action = Arc::new(|_, _| Box::pin(async { qq_inner_core::engine::io::PortReply::Ok(Value::Null) }) as futures_util::future::BoxFuture<'static, qq_inner_core::engine::io::PortReply<Value>>);
+        rt.onebot_io = Some(Arc::new(OneBotAdapter::new("onebot", action,
+            Arc::new(|| (true, true, Some("99".into())))).unwrap()));
+        let state = ChatState { pending: true, pause_done: false, ..Default::default() };
+        rt.engine.inherit_chats(vec![("group:42".into(), state)]);
+        rt.store.lock().unwrap().ensure_orientation("group:42", 1_700_000_000.).unwrap();
+        let before = rt.store.lock().unwrap().orientation_state("group:42").unwrap().unwrap().epoch;
+
+        rt.notice(Notification::Event(json!({"post_type":"notice","notice_type":"group_increase",
+            "group_id":42,"user_id":99,"self_id":99,"time":1_700_000_001}))).await;
+        let joined = rt.store.lock().unwrap().orientation_state("group:42").unwrap().unwrap().epoch;
+        assert!(joined > before, "ported notice must advance the orientation epoch");
+        assert!(!rt.engine.state("group:42").unwrap().pending, "ported notice must clear pending");
+
+        let unknown = Notice { kind: NoticeKind::Unknown("group_recall".into()),
+            chat: Some(ChatAddress::new(qq_inner_core::engine::io::ChatKind::Group, "onebot", "42").unwrap()),
+            actor: Some("99".into()), self_id: Some("99".into()), at: 1_700_000_002. };
+        rt.engine.ingest_notice(&unknown).unwrap();
+        assert_eq!(rt.store.lock().unwrap().orientation_state("group:42").unwrap().unwrap().epoch, joined);
+        assert!(!rt.engine.state("group:42").unwrap().pending);
     }
 
     #[tokio::test]
