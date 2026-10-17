@@ -58,11 +58,44 @@ systemctl --user status qq-inner-dashboard  # 看板 + WebUI
 
 ### 角色分离（**不要合并**）
 
-| Agent | 会话 ID | 职责 | 禁止 |
+| Agent | 职责 | 禁止 |
+| --- | --- | --- |
+| **Agent 1** | 代码 + **单元测试** | 改契约测试的断言 |
+| **Agent 2** | **目标性 / 契约测试** | 读实现来迎合它 |
+| **Agent 3** | 审计（只读）+ 文档整理（可写 `docs/`） | 改代码 |
+
+### ⭐ 会话 UUID（`codex exec resume` 用这个）
+
+```bash
+AGENT1_CODEX=01a0ed80-82b3-7242-9984-b37181533d06   # 代码 + 单元测试
+AGENT2_CODEX=01a139d5-a001-7eb2-894e-a9f7550b3193   # 目标性 / 契约测试
+AGENT3_CODEX=01a139e1-db41-7e11-b6e6-fadd136de604   # 审计 + 文档
+```
+
+| 名字 | UUID | 建立时间 | 说明 |
 | --- | --- | --- | --- |
-| **Agent 1** | `01a0ed80-82b3-7242-9984-b37181533d06` | 代码 + **单元测试** | 改契约测试的断言 |
-| **Agent 2** | `01a139d5-a001-7eb2-894e-a9f7550b3193` | **目标性 / 契约测试** | 读实现来迎合它 |
-| **Agent 3** | `01a139e1-db41-7e11-b6e6-fadd136de604` | 审计（只读）+ 文档整理（可写 `docs/`） | 改代码 |
+| **Agent 1** | `01a0ed80-82b3-7242-9984-b37181533d06` | 2026-09-29 | **主代码会话**，累积了最多上下文 |
+| **Agent 2** | `01a139d5-a001-7eb2-894e-a9f7550b3193` | 2026-10-14 | **测试作者会话** |
+| **Agent 3** | `01a139e1-db41-7e11-b6e6-fadd136de604` | 2026-10-14 | **审计 / 文档会话** |
+| 一次性会话 A | `01a14968-ca72-7832-9b63-c3c18b972379` | 2026-10-17 | Agent 1 被占用时开的旁路会话（做 manifest 清单），**可弃用** |
+
+**怎么自己发现会话 UUID**（VM 上）：
+
+```bash
+# 最近改动过的会话（越靠前越新）
+ls -1t ~/.codex/sessions/*/*/*/rollout-*.jsonl | head -5
+
+# 从文件名里抽出 UUID（文件名末尾就是）
+ls -1 ~/.codex/sessions/*/*/*/rollout-*.jsonl \
+  | sed -E 's/.*rollout-[0-9T-]+-([0-9a-f-]{36})\.jsonl/\1/' | tail -5
+```
+
+**会话文件位置**：`~/.codex/sessions/<YYYY>/<MM>/<DD>/rollout-<ISO时间>-<UUID>.jsonl`
+
+⚠️ **同一个 UUID 同一时刻只能有一个 writer**
+（否则报 `thread ... already has an active writer`）。
+**要并行就开新会话**：`codex exec`（**不加** `resume`），它会自己生成新 UUID ——
+**但新会话没有累积上下文，任务书必须自包含**。
 
 ### 三步走（每个功能都这样）
 
@@ -96,7 +129,10 @@ cd ~/github_repo/qq-inner-agent
 for p in $(ps -eo pid,args | grep -E "codex.*(app-server|proxy)" | grep -v grep | awk '{print $1}'); do kill "$p" 2>/dev/null; done
 sleep 2
 git pull --rebase origin main 2>&1 | tail -1
-SID1=01a0ed80-82b3-7242-9984-b37181533d06
+# 三类任务用不同会话（见「会话 UUID」一节）
+SID1=01a0ed80-82b3-7242-9984-b37181533d06   # 代码 / 实现
+# SID2=01a139d5-a001-7eb2-894e-a9f7550b3193 # 测试
+# SID3=01a139e1-db41-7e11-b6e6-fadd136de604 # 审计 / 文档
 rm -f /tmp/c-result-xxx.txt
 nohup codex exec resume "$SID1" \
   -c 'sandbox_mode="danger-full-access"' \
