@@ -139,7 +139,7 @@ fn project_plugin_status(resolved: &Value, list: &Value) -> Value {
         "activation_order":resolved["registered"], "reason":resolved["reason"]})
 }
 
-fn plugin_factory_status(root: &Path, list: &Value, log: Option<Logger>, bot: Option<Arc<OneBot>>, model_hourly_limit: u32)
+fn plugin_factory_status(root: &Path, list: &Value, log: Option<Logger>, _bot: Option<Arc<OneBot>>, c: Option<&config::Config>, model_hourly_limit: u32)
     -> (Value, Option<qq_inner_core::engine::io::factory::PublishedPorts>) {
     use qq_inner_core::engine::io::factory::{self, HostServices};
     let plugins = if root.join("plugins").is_dir() { root.join("plugins") } else { root.to_path_buf() };
@@ -151,22 +151,9 @@ fn plugin_factory_status(root: &Path, list: &Value, log: Option<Logger>, bot: Op
     });
     let mut host = HostServices::without_runtime(secret);
     host.model_hourly_limit = model_hourly_limit;
-    if let Some(bot) = bot {
-        use qq_inner_core::engine::io::PortReply;
-        let action_bot = bot.clone();
-        host.onebot_action = Some(Arc::new(move |action, params| {
-            let bot = action_bot.clone();
-            Box::pin(async move {
-                match bot.call(&action, params).await {
-                    Ok(data) => PortReply::Ok(data),
-                    Err(error) => PortReply::Failed { code: error.code, uncertain: error.uncertain },
-                }
-            })
-        }));
-        host.onebot_connection = Some(Arc::new(move || {
-            let state = bot.state();
-            (state.connected, state.online, (!state.self_id.is_empty()).then(|| state.self_id.clone()))
-        }));
+    if let Some(c) = c {
+        let token = c.onebot_token.text.clone();
+        host.onebot_connect = Some((c.onebot.clone().into(), token.clone()));
     }
     if let Some(log) = log {
         host.audit = Some(Arc::new(move |plugin, target| {
@@ -188,12 +175,12 @@ fn plugin_factory_status(root: &Path, list: &Value, log: Option<Logger>, bot: Op
     (status, outcome.published)
 }
 
-fn load_plugin_batch(root: &Path, log: Logger, bot: Option<Arc<OneBot>>, model_hourly_limit: u32)
+fn load_plugin_batch(root: &Path, log: Logger, bot: Option<Arc<OneBot>>, c: &config::Config, model_hourly_limit: u32)
     -> Result<Option<qq_inner_core::engine::io::factory::PublishedPorts>> {
     let path = root.join("plugins/plugins.json");
     if !path.is_file() { return Ok(None); }
     let list: Value = serde_json::from_slice(&fs::read(path)?)?;
-    let (status, published) = plugin_factory_status(root, &list, Some(log), bot, model_hourly_limit);
+    let (status, published) = plugin_factory_status(root, &list, Some(log), bot, Some(c), model_hourly_limit);
     if let Some(error) = plugin_configuration_error(&status, &list) {
         anyhow::bail!("plugin batch rejected: {error}");
     }
@@ -236,7 +223,7 @@ async fn main() -> Result<()> {
     match cli.command {
         Command::Plugins { action: _, config, json: _ } => {
             let list: Value = serde_json::from_slice(&fs::read(&config)?)?;
-            let (mut status, _prepared) = plugin_factory_status(&root, &list, None, None, u32::MAX);
+            let (mut status, _prepared) = plugin_factory_status(&root, &list, None, None, None, u32::MAX);
             if let Some(error) = plugin_configuration_error(&status, &list) {
                 if let Some(fields) = error.as_object() {
                     status.as_object_mut().expect("status object").extend(fields.clone());
@@ -829,7 +816,7 @@ impl Runtime {
         );
         let reconnect = next.raw["onebot"] != self.raw["onebot"]
             || next.raw["onebotToken"] != self.raw["onebotToken"];
-        let plugin_ports = load_plugin_batch(root, self.log.clone(), Some(self.bot.clone()),
+        let plugin_ports = load_plugin_batch(root, self.log.clone(), Some(self.bot.clone()), &next.config,
             next.config.provider.requests_per_hour.round() as u32)?;
         let engine = self.engine.clone();
         let stop = engine.stop();
@@ -976,7 +963,7 @@ async fn run(root: PathBuf) -> Result<()> {
         let (bot, notices) = qq_inner_core::transport::new(c.onebot.clone(), c.onebot_token.text.clone());
         Some((Arc::new(bot), notices))
     } else { None };
-    let plugin_ports = load_plugin_batch(&root, log.clone(), initial_bot.as_ref().map(|(bot, _)| bot.clone()),
+    let plugin_ports = load_plugin_batch(&root, log.clone(), initial_bot.as_ref().map(|(bot, _)| bot.clone()), c,
         c.provider.requests_per_hour.round() as u32)?;
     let mut rt = Runtime::new_with_plugins(loaded, store, runtime_revision(&root)?, now, log, None,
         RuntimePlugins { ports: plugin_ports, initial_bot })?;

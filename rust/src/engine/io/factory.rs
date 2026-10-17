@@ -3,7 +3,7 @@
 //! it never names a Rust symbol to execute.
 use super::{
     adapters::{amemorix::AmemorixPort, model_http::HttpModel, null::NullDb,
-        onebot::{Action, Connection, OneBotAdapter}, sillytavern::SillyTavernPersona},
+        onebot::OneBotAdapter, sillytavern::SillyTavernPersona},
     plugin_list::{self, ActivationRequest}, ports::{ChatPort, MemoryPort, ModelPort, PersonaPort},
     types::{ChatAddress, ChatKind, MemorySubject, PortReply}, PortRegistry,
 };
@@ -13,18 +13,19 @@ use std::{collections::{HashMap, HashSet}, net::{TcpStream, ToSocketAddrs}, path
 
 pub type SecretResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 pub type HostAudit = Arc<dyn Fn(&str, &str) + Send + Sync>;
+#[cfg(test)]
+use super::adapters::onebot::{Action, Connection};
 
 pub struct HostServices {
     pub secret: SecretResolver,
-    pub onebot_action: Option<Action>,
-    pub onebot_connection: Option<Connection>,
+    pub onebot_connect: Option<(super::adapters::onebot::connect::ConnectConfig, String)>,
     pub audit: Option<HostAudit>,
     pub model_hourly_limit: u32,
 }
 
 impl HostServices {
     pub fn without_runtime(secret: SecretResolver) -> Self {
-        Self { secret, onebot_action: None, onebot_connection: None, audit: None,
+        Self { secret, onebot_connect: None, audit: None,
             model_hourly_limit: u32::MAX }
     }
 }
@@ -233,10 +234,9 @@ fn prepare_one(root: &Path, request: &ActivationRequest, host: &HostServices) ->
             }
         }
         ("onebot", "Chat", "InProcess") => {
-            let action = host.onebot_action.clone().ok_or("host_onebot_unavailable")?;
-            let connection = host.onebot_connection.clone().ok_or("host_onebot_unavailable")?;
-            Ok(PreparedPort::Chat { port: Arc::new(OneBotAdapter::new(&request.id, action, connection)
-                .map_err(|e| e.code)?) })
+            let (config, token) = host.onebot_connect.clone().ok_or("host_onebot_unavailable")?;
+            let port = OneBotAdapter::connect(&request.id, config, token).map_err(|e| e.code)?;
+            Ok(PreparedPort::Chat { port })
         }
         ("sillytavern", "Persona", "InProcess") => {
             let card_root = params["card_root"].as_str().ok_or("persona_root_missing")?;
