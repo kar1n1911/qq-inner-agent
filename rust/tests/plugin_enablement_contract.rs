@@ -1,9 +1,9 @@
 use anyhow::Result;
-use futures_util::future::BoxFuture;
+use futures_util::{future::BoxFuture, SinkExt, StreamExt};
 use qq_inner_core::{
     config::{defaults, merge, Config},
     engine::{
-        io::{factory::{self, HostServices}, plugin_list, Capabilities, ChatAddress, ChatKind, ChatPort, Command, CommandResult,
+        io::{adapters::onebot::connect::ConnectConfig, factory::{self, HostServices}, plugin_list, Capabilities, ChatAddress, ChatKind, ChatPort, Command, CommandResult,
             Incoming, IoError, PortKind, PortManifest, PortEvent, PortReply, PortState, Segment, Sender,
             TransportKind, VersionReq},
         orientation::{OrientationProvider, OrientationTransport},
@@ -13,12 +13,88 @@ use qq_inner_core::{
     transport::{OneBotError, State},
 };
 use serde_json::{json, Value};
-use std::{fs, path::PathBuf, sync::{Arc, Mutex}};
-use tokio::sync::mpsc;
+use std::{fs, path::PathBuf, sync::{atomic::{AtomicUsize, Ordering}, Arc, Mutex}};
+use tokio::{net::TcpListener, sync::mpsc, task::JoinHandle, time::{sleep, timeout, Duration}};
+use tokio_tungstenite::{
+    accept_hdr_async,
+    tungstenite::{handshake::server::{Request, Response}, Message},
+};
 
 const NOW: f64 = 1_700_000_000.;
 const CHAT: &str = "group:42";
 const REPLY: &str = "收到，我们继续。";
+const TOKEN: &str = "a+b &?";
+
+struct MockOneBot {
+    url: String,
+    sends: Arc<AtomicUsize>,
+    task: JoinHandle<()>,
+}
+impl Drop for MockOneBot {
+    fn drop(&mut self) { self.task.abort(); }
+}
+
+#[allow(clippy::result_large_err)]
+async fn mock_onebot() -> MockOneBot {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}/", listener.local_addr().unwrap());
+    let sends = Arc::new(AtomicUsize::new(0));
+    let counted = sends.clone();
+    let task = tokio::spawn(async move {
+        loop {
+            let (stream, _) = listener.accept().await.unwrap();
+            let socket = accept_hdr_async(stream, |request: &Request, response: Response| {
+                if request.uri().query() == Some("access_token=a%2Bb+%26%3F") {
+                    Ok(response)
+                } else {
+                    Err(tokio_tungstenite::tungstenite::http::Response::builder()
+                        .status(401).body(Some("unauthorized".into())).unwrap())
+                }
+            }).await;
+            let Ok(mut socket) = socket else { continue; };
+            let mut first_status = true;
+            while let Some(Ok(Message::Text(text))) = socket.next().await {
+                let request: Value = serde_json::from_str(&text).unwrap();
+                let data = match request["action"].as_str() {
+                    Some("get_login_info") => Some(json!({"user_id":999})),
+                    Some("get_status") if first_status => {
+                        first_status = false;
+                        Some(json!({"online":true}))
+                    }
+                    Some("send_group_msg") => {
+                        counted.fetch_add(1, Ordering::SeqCst);
+                        Some(json!({"message_id":"port-1"}))
+                    }
+                    _ => None,
+                };
+                if let Some(data) = data {
+                    let reply = json!({"echo":request["echo"],"status":"ok","retcode":0,"data":data});
+                    if socket.send(Message::Text(reply.to_string())).await.is_err() { break; }
+                }
+            }
+        }
+    });
+    MockOneBot { url, sends, task }
+}
+
+fn onebot_connect(mock: &MockOneBot) -> (ConnectConfig, String) {
+    (ConnectConfig {
+        url: mock.url.clone(), self_id: "999".into(), self_id_is_truthy: true,
+        heartbeat_seconds: 10.0, request_timeout_seconds: 0.15,
+        reconnect_max_seconds: 1.0, max_lost_seconds: 30.0,
+        degraded_probe_seconds: 1.0, forward_enabled: false,
+    }, TOKEN.into())
+}
+
+async fn wait_port_online(port: &dyn ChatPort) {
+    timeout(Duration::from_secs(15), async {
+        loop {
+            let state = port.state();
+            if state.connected && state.online { break; }
+            sleep(Duration::from_millis(10)).await;
+        }
+    }).await.expect("fixture OneBot port must connect");
+}
 
 struct Model;
 impl OrientationProvider for Model {
@@ -172,28 +248,21 @@ fn onebot_package(enabled: bool) -> PluginFixture {
 #[tokio::test]
 async fn enabled_list_preflights_publishes_and_its_chat_port_ingests() {
     let fixture = onebot_package(true);
+    let mock = mock_onebot().await;
     let preflight = plugin_list::preflight(&fixture.root, &fixture.list);
     assert_eq!(preflight["reason"], Value::Null, "enabled fixture must pass preflight: {preflight}");
-    let host_actions = Arc::new(Mutex::new(Vec::<String>::new()));
-    let called = host_actions.clone();
     let mut host = HostServices::without_runtime(Arc::new(|_| None));
-    host.onebot_action = Some(Arc::new(move |action, _params| {
-        let called = called.clone();
-        Box::pin(async move {
-            called.lock().unwrap().push(action.to_owned());
-            PortReply::Ok(json!({"message_id":"port-1"}))
-        })
-    }));
-    host.onebot_connection = Some(Arc::new(|| (true, true, None::<String>)));
+    host.onebot_connect = Some(onebot_connect(&mock));
     let outcome = factory::prepare(&fixture.root, &fixture.list, &host);
     let published = outcome.published.unwrap_or_else(|| panic!("enabled port must publish: {}", outcome.status));
     let port = published.onebot.expect("onebot ChatPort must be published");
+    wait_port_online(port.as_ref()).await;
     let h = Harness::new();
     h.ingest_plugin(port);
     let inbound = h.store.lock().unwrap().rows("SELECT chat,text FROM messages WHERE self=0", []).unwrap();
     assert_eq!(inbound.len(), 1, "factory-published ingress must reach the engine");
     h.finish().await;
-    assert_eq!(host_actions.lock().unwrap().len(), 1, "factory-published endpoint must deliver the reply");
+    assert_eq!(mock.sends.load(Ordering::SeqCst), 1, "factory-published endpoint must deliver the reply");
     assert!(h.built_in.sent.lock().unwrap().is_empty());
 }
 
@@ -229,25 +298,18 @@ async fn disabled_plugin_preserves_the_builtin_send_path() {
 #[tokio::test]
 async fn unbound_group_fallback_is_visible_and_sends_once() {
     let fixture = onebot_package(true);
-    let plugin_sends = Arc::new(Mutex::new(0_usize));
-    let counted = plugin_sends.clone();
+    let mock = mock_onebot().await;
     let mut host = HostServices::without_runtime(Arc::new(|_| None));
-    host.onebot_action = Some(Arc::new(move |_, _| {
-        let counted = counted.clone();
-        Box::pin(async move {
-            *counted.lock().unwrap() += 1;
-            PortReply::Ok(json!({"message_id":"unexpected-plugin-send"}))
-        })
-    }));
-    host.onebot_connection = Some(Arc::new(|| (true, true, None::<String>)));
+    host.onebot_connect = Some(onebot_connect(&mock));
     let published = factory::prepare(&fixture.root, &fixture.list, &host).published
         .expect("enabled plugin must publish before testing unbound fallback");
     assert!(published.onebot.is_some());
+    wait_port_online(published.onebot.as_ref().unwrap().as_ref()).await;
     let h = Harness::new();
     h.ingest_legacy(); // This group has never received inbound through the published port.
     h.finish().await;
     assert_eq!(h.built_in.sent.lock().unwrap().len(), 1);
-    assert_eq!(*plugin_sends.lock().unwrap(), 0);
+    assert_eq!(mock.sends.load(Ordering::SeqCst), 0);
     assert!(h.events.lock().unwrap().iter().any(|(_, details)|
         details["chat"] == CHAT && details["route"] == "built_in_fallback"
             && details["reason"] == "chat_port_unbound"),
