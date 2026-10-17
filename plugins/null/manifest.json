@@ -1,15 +1,14 @@
 {
   "name": "null",
-  "version": "TBD",
+  "version": "0.1.0",
   "core_api_version": {
     "major": 1,
     "min_minor": 0,
     "max_minor": null
   },
   "protocol": null,
-  "entry": "TBD",
-  "status": "placeholder",
-  "kind": "TBD",
+  "entry": null,
+  "kind": "Multiple",
   "transport": "InProcess",
   "capabilities": {
     "supported": [],
@@ -21,9 +20,7 @@
   "dependencies": [],
   "config_schema": [],
   "host_permissions": [],
-  "tbd": [
-    "kind: current null.rs contains Chat, Model, Db, Memory, External and Persona placeholders; one-manifest-per-kind rule requires split or a decided multi-kind format",
-    "version",
-    "protocol/entry for package discovery"
-  ]
+  "hot_reload": false,
+  "status": "skeleton",
+  "skeleton_reason": "One package has six port kinds; the one-manifest-one-kind contract cannot represent it. All six adapters explicitly fail."
 }

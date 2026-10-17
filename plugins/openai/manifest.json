@@ -1,6 +1,6 @@
 {
   "name": "openai",
-  "version": "TBD",
+  "version": "0.1.0",
   "core_api_version": {
     "major": 1,
     "min_minor": 0,
@@ -8,20 +8,20 @@
   },
   "protocol": {
     "name": "HTTP JSON",
-    "schema_version": "TBD",
-    "schema": "TBD",
+    "schema_version": "provider_api",
     "completion_path": "/v1/chat/completions",
     "models_path": "/v1/models"
   },
-  "entry": "TBD",
-  "status": "placeholder",
+  "entry": {
+    "type": "configured_http",
+    "base_url_param": "base_url"
+  },
   "kind": "Model",
   "transport": "Remote",
   "capabilities": {
     "supported": [
       "truncation_signal",
       "list_models",
-      "streaming",
       "text_completion",
       "json_mode"
     ],
@@ -32,13 +32,7 @@
       "context_window_tokens"
     ]
   },
-  "dependencies": [
-    {
-      "role": "remote_model_api",
-      "needed_for": "completion",
-      "required": true
-    }
-  ],
+  "dependencies": [],
   "config_schema": [
     {
       "key": "base_url",
@@ -72,13 +66,11 @@
   "host_permissions": [
     {
       "type": "http",
-      "origin": "TBD"
+      "origin": "configured:base_url"
     }
   ],
-  "tbd": [
-    "version",
-    "protocol and package entry",
-    "configured HTTP origin; runtime origin depends on base_url",
-    "context_window_tokens is user supplied or unknown"
+  "hot_reload": false,
+  "operations": [
+    "streaming_completion"
   ]
 }

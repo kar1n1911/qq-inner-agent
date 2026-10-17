@@ -1,6 +1,6 @@
 {
   "name": "a_memorix",
-  "version": "TBD",
+  "version": "0.1.0",
   "core_api_version": {
     "major": 1,
     "min_minor": 0,
@@ -8,48 +8,31 @@
   },
   "protocol": {
     "name": "gRPC",
-    "schema_version": "TBD",
+    "schema_version": "a_memorix.api.v1",
     "schema": [
       "rust/proto/a_memorix/api/v1/namespace.proto",
       "rust/proto/a_memorix/api/v1/memory.proto"
     ]
   },
-  "entry": "TBD",
-  "status": "placeholder",
+  "entry": {
+    "type": "configured_grpc",
+    "endpoint_param": "endpoint"
+  },
   "kind": "Memory",
   "transport": "Remote",
   "capabilities": {
     "supported": [
-      "upsert",
-      "forget",
-      "retrieve"
+      "text_retrieval"
     ],
     "unsupported": [
       "reset_scope"
     ],
     "unknown": [
-      "text_retrieval",
       "embeddings",
       "relation_extraction"
     ]
   },
-  "dependencies": [
-    {
-      "role": "grpc_service",
-      "needed_for": "memory_access",
-      "required": true
-    },
-    {
-      "role": "embedding_provider",
-      "needed_for": "semantic_retrieval",
-      "required": false
-    },
-    {
-      "role": "language_model",
-      "needed_for": "relation_extraction",
-      "required": false
-    }
-  ],
+  "dependencies": [],
   "config_schema": [
     {
       "key": "endpoint",
@@ -66,12 +49,17 @@
       "secret": true
     }
   ],
-  "host_permissions": [],
-  "tbd": [
-    "version",
-    "protocol schema version and standalone plugin packaging; Rust currently compiles A_memorix 2.0.0a4 proto sources",
-    "current Rust PortManifest requests no host permission, while the gRPC client dials directly; a host-enforced network permission and target policy are not yet defined",
-    "dynamic capabilities after refresh",
-    "Sidecar launch/packaging; current transport remains Remote"
-  ]
+  "host_permissions": [
+    {
+      "type": "grpc",
+      "endpoint": "configured:endpoint"
+    }
+  ],
+  "hot_reload": false,
+  "operations": [
+    "upsert",
+    "forget",
+    "retrieve"
+  ],
+  "enablement_requirement": "gRPC namespace capability probe must succeed and report text_retrieval"
 }

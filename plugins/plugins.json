@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "mode": "auto",
+  "plugins": [
+    {
+      "id": "onebot",
+      "directory": "onebot",
+      "enabled": false,
+      "params": {},
+      "bindings": {},
+      "secret_refs": {}
+    },
+    {
+      "id": "a_memorix",
+      "directory": "a_memorix",
+      "enabled": false,
+      "params": {},
+      "bindings": {},
+      "secret_refs": {}
+    },
+    {
+      "id": "openai",
+      "directory": "openai",
+      "enabled": false,
+      "params": {},
+      "bindings": {},
+      "secret_refs": {}
+    },
+    {
+      "id": "claude",
+      "directory": "claude",
+      "enabled": false,
+      "params": {},
+      "bindings": {},
+      "secret_refs": {}
+    },
+    {
+      "id": "sillytavern",
+      "directory": "sillytavern",
+      "enabled": false,
+      "params": {},
+      "bindings": {},
+      "secret_refs": {}
+    },
+    {
+      "id": "ollama",
+      "directory": "ollama",
+      "enabled": false,
+      "params": {},
+      "bindings": {},
+      "secret_refs": {}
+    }
+  ]
+}

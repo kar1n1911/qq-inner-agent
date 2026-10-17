@@ -1,26 +1,54 @@
 {
   "name": "sillytavern",
-  "version": "TBD",
-  "core_api_version": {"major": 1, "min_minor": 0, "max_minor": null},
+  "version": "0.1.0",
+  "core_api_version": {
+    "major": 1,
+    "min_minor": 0,
+    "max_minor": null
+  },
   "protocol": null,
-  "entry": "TBD",
-  "status": "placeholder",
+  "entry": {
+    "type": "built_in",
+    "adapter": "plugins/sillytavern/adapter.rs"
+  },
   "kind": "Persona",
   "transport": "InProcess",
   "capabilities": {
-    "supported": ["v1_read", "v2_read", "png_chara_read", "character_book_parse"],
-    "unsupported": ["v3_read", "character_book_injection", "post_history_instructions"],
+    "supported": [
+      "v1_read",
+      "v2_read",
+      "png_chara_read",
+      "character_book_parse"
+    ],
+    "unsupported": [
+      "v3_read",
+      "character_book_injection",
+      "post_history_instructions"
+    ],
     "unknown": []
   },
   "dependencies": [],
-  "host_permissions": [{"type": "read_file", "root": "TBD"}],
-  "config_schema": [
-    {"key": "card_root", "label": "Character card directory", "type": "string", "required": true, "secret": false},
-    {"key": "chat_card_bindings", "label": "Chat-to-card bindings", "type": "object", "required": true, "secret": false}
+  "host_permissions": [
+    {
+      "type": "read_file",
+      "root": "configured:card_root"
+    }
   ],
-  "tbd": [
-    "plugin version and package entry/discovery format",
-    "host-approved card root and chat binding persistence",
-    "runtime use requires explicit Engine::bind_persona_port; automatic discovery and binding are not wired"
-  ]
+  "config_schema": [
+    {
+      "key": "card_root",
+      "label": "Character card directory",
+      "type": "string",
+      "required": true,
+      "secret": false
+    },
+    {
+      "key": "chat_card_bindings",
+      "label": "Chat-to-card bindings",
+      "type": "object",
+      "required": true,
+      "secret": false
+    }
+  ],
+  "hot_reload": false
 }

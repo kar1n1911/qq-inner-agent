@@ -47,14 +47,17 @@ function pluginManifest(root, directory) {
   try { manifest = JSON.parse(fs.readFileSync(file, 'utf8')); }
   catch { return { state: 'unrecognized', reason: 'invalid_json' }; }
   const valid = manifest && manifest.name === directory && typeof manifest.version === 'string' && manifest.version !== 'TBD'
-    && ['Chat', 'Model', 'Db', 'Memory', 'External', 'Persona'].includes(manifest.kind)
+    && (['Chat', 'Model', 'Db', 'Memory', 'External', 'Persona'].includes(manifest.kind)
+      || manifest.status === 'skeleton' && manifest.kind === 'Multiple')
     && ['InProcess', 'Sidecar', 'Remote'].includes(manifest.transport)
     && manifest.core_api_version?.major === 1 && Number.isInteger(manifest.core_api_version?.min_minor)
     && Array.isArray(manifest.dependencies) && Array.isArray(manifest.host_permissions)
     && (Array.isArray(manifest.config_schema) || !!manifest.config_schema && typeof manifest.config_schema === 'object')
     && manifest.capabilities && (manifest.hot_reload === undefined || typeof manifest.hot_reload === 'boolean')
     && manifest.status !== 'placeholder' && !JSON.stringify(manifest).includes('"TBD"');
-  return valid ? { state: 'discovered', reason: null, manifest } : { state: 'unrecognized', reason: manifest?.status === 'placeholder' ? 'placeholder' : 'invalid_manifest' };
+  return valid ? { state: manifest.status === 'skeleton' ? 'skeleton' : 'discovered',
+    reason: manifest.status === 'skeleton' ? 'plugin_is_skeleton' : null, manifest }
+    : { state: 'unrecognized', reason: manifest?.status === 'placeholder' ? 'placeholder' : 'invalid_manifest' };
 }
 function pluginPublicList(root, list) {
   if (!Array.isArray(list?.plugins)) return null;
@@ -98,6 +101,10 @@ function pluginValidateList(root, list) {
       throw fail(422, 'Invalid plugin entry');
     ids.add(item.id);
     const { state, reason, manifest } = pluginManifest(root, item.directory);
+    if (state === 'skeleton') {
+      if (item.enabled) throw fail(422, `Plugin ${item.id}: plugin_is_skeleton`);
+      continue;
+    }
     if (state !== 'discovered') throw fail(422, `Plugin ${item.id}: ${reason}`);
     const fields = Array.isArray(manifest.config_schema) ? Object.fromEntries(manifest.config_schema.map(field => [field.key, field])) : manifest.config_schema;
     for (const [key, value] of Object.entries(item.params || {})) {
@@ -440,7 +447,8 @@ export function createDashboard({ root, settings, key, serviceControl, serviceSt
           const oldRunning = !!((observed?.effective_state === 'active' && observed.instanceRevision !== targetRevision)
             || (pending && record?.oldRevision && appliedRevision === record.oldRevision
               && record.oldActiveIds?.includes(id)));
-          const effective_state = alarm ? 'abnormal' : found.state !== 'discovered' ? 'unrecognized'
+          const effective_state = found.state === 'skeleton' ? 'skeleton'
+            : alarm ? 'abnormal' : found.state !== 'discovered' ? 'unrecognized'
             : item.enabled === false ? 'disabled' : hasEvidence ? observed.effective_state || 'unknown'
               : item.enabled === true && pending ? 'pending' : 'unknown';
           return [id, {

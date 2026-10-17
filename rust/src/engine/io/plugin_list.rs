@@ -11,6 +11,7 @@ struct Package {
     directory: String,
     manifest: Option<Value>,
     reason: Option<&'static str>,
+    skeleton: bool,
 }
 
 /// A validated instance request. References to secrets are passed through; secret values are
@@ -37,15 +38,17 @@ fn scan(root: &Path) -> BTreeMap<String, Package> {
             }
             let directory = entry.file_name().to_string_lossy().into_owned();
             let path = entry.path().join("manifest.json");
-            let (manifest, reason) = if !path.is_file() {
-                (None, Some("missing_manifest"))
+            let (manifest, reason, skeleton) = if !path.is_file() {
+                (None, Some("missing_manifest"), false)
             } else {
                 match fs::read(&path)
                     .ok()
                     .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
                 {
-                    Some(value) if valid_manifest(&directory, &value) => (Some(value), None),
-                    _ => (None, Some("invalid_manifest")),
+                    Some(value) if valid_manifest(&directory, &value) => (Some(value), None, false),
+                    Some(value) if value["status"] == "skeleton" && valid_skeleton(&directory, &value) =>
+                        (Some(value), Some("plugin_is_skeleton"), true),
+                    _ => (None, Some("invalid_manifest"), false),
                 }
             };
             packages.insert(
@@ -54,6 +57,7 @@ fn scan(root: &Path) -> BTreeMap<String, Package> {
                     directory,
                     manifest,
                     reason,
+                    skeleton,
                 },
             );
         }
@@ -62,6 +66,15 @@ fn scan(root: &Path) -> BTreeMap<String, Package> {
 }
 
 fn valid_manifest(directory: &str, value: &Value) -> bool {
+    valid_fields(directory, value, false) && value["status"] != "placeholder"
+        && value["status"] != "skeleton" && !contains_tbd(value)
+}
+
+fn valid_skeleton(directory: &str, value: &Value) -> bool {
+    valid_fields(directory, value, true) && !contains_tbd(value)
+}
+
+fn valid_fields(directory: &str, value: &Value, skeleton: bool) -> bool {
     let object = match value.as_object() {
         Some(object) => object,
         None => return false,
@@ -75,10 +88,10 @@ fn valid_manifest(directory: &str, value: &Value) -> bool {
     nonempty("name")
         && value["name"] == directory
         && nonempty("version")
-        && matches!(
+        && (matches!(
             value["kind"].as_str(),
             Some("Chat" | "Model" | "Db" | "Memory" | "External" | "Persona")
-        )
+        ) || skeleton && value["kind"] == "Multiple")
         && matches!(
             value["transport"].as_str(),
             Some("InProcess" | "Sidecar" | "Remote")
@@ -93,8 +106,6 @@ fn valid_manifest(directory: &str, value: &Value) -> bool {
         && value
             .get("capabilities")
             .is_some_and(|v| v.is_array() || v.is_object())
-        && value["status"] != "placeholder"
-        && !contains_tbd(value)
 }
 
 fn contains_tbd(value: &Value) -> bool {
@@ -158,6 +169,7 @@ fn valid_instance(manifest: &Value, entry: &Value, enabled: bool) -> bool {
         let correct_type = match field["type"].as_str() {
             Some("string") => value.is_string(),
             Some("number") => value.is_number(),
+            Some("integer") => value.as_u64().is_some(),
             Some("boolean") => value.is_boolean(),
             Some("object") => value.is_object(),
             Some("array") => value.is_array(),
@@ -237,9 +249,10 @@ fn resolve_inner(
         states.insert(
             name.clone(),
             json!({
-                "installed": package.manifest.is_some(), "effective": false,
+                "installed": package.manifest.is_some() && !package.skeleton, "effective": false,
                 "reason": package.reason.unwrap_or("not_enabled"),
-                "directory": package.directory
+                "directory": package.directory,
+                "status": if package.skeleton { "skeleton" } else { "available" }
             }),
         );
     }
@@ -278,6 +291,12 @@ fn resolve_inner(
             invalid = true;
             continue;
         };
+        if package.skeleton {
+            states.insert(id.to_owned(), json!({"installed":false,"effective":false,
+                "reason":"plugin_is_skeleton","status":"skeleton","directory":directory}));
+            if entry["enabled"] == true { invalid = true; }
+            continue;
+        }
         if let Some(reason) = package.reason {
             states.insert(
                 id.to_owned(),
