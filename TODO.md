@@ -860,6 +860,46 @@ let Some(port) = port else {
 **⚠️ 第 ② 步需要产品裁决**：删除内置后**是否还要发图**？
 - 若**要** → 必须先让 `onebot` 插件的 `ChatPort` 支持 media（**不能在 manifest 里改声明了事**）；
 - 若**暂时不要** → 明确记录"删除后媒体能力暂时不可用"，并标注恢复条件。
+
+#### ⭐ 裁决：**删除内置后仍然要发图** → 必须真实现 media（用户 2026-10-16）
+
+**用户裁决**：**要**（发图能力必须保留）。
+
+**这意味着前置条件 ② 不是"写一行备注"，而是【真实现】**。
+
+**实测现状（好消息：契约已经有了，适配器没做）**
+
+| 项 | 状态 | 证据 |
+| --- | --- | --- |
+| `Command::SendMedia { chat, media: MediaRef }` | ✅ **契约里已有** | `engine/io/types.rs` |
+| `Segment::Image { src, summary }` | ✅ **契约里已有** | 同上 |
+| **任何插件的 `Command::SendMedia` 实现** | ❌ **0 处** | `grep -rn "SendMedia" plugins/` **无输出** |
+| `onebot` 适配器 `command()` 处理的变体 | 只有 `Health` / `Send` / `Recall` | `plugins/onebot/adapter.rs:117/124/159` |
+| `Segment::Image` 在 onebot 里的用处 | **仅入站映射**（把收到的图片段转成 `Segment::Image`） | `adapter.rs:251` |
+
+**所以工作量是清楚的、有限的**：
+```
+① plugins/onebot/adapter.rs：实现 Command::SendMedia
+   → 把 MediaRef 映射成 NapCat 的 image 段（{"type":"image","data":{"file":...}}）
+   → 走 send_group_msg / send_private_msg
+② 实现【出站】的 Segment::Image（Command::Send 里带图）
+③ 实现之后，才能把 capabilities 的 media 从 unsupported 改成 supported
+   ⚠️ 顺序不能反 —— 先改声明就是造假
+④ 测试：发图真的出去（可观测：发出的 segment 内容 + 回来的 message_id）
+```
+
+**可参照的实现**：内置 `transport::send_media(chat, segment: Value)`
+（`rust/src/transport/mod.rs:245`）已经做了这些事：
+```
+· 检查连接状态（offline → Err("qq_offline")）
+· 解析 chat → group id（非法 → Err("invalid_chat")）
+· 校验 segment 字段
+· 走 send_group_msg
+```
+**⚠️ 参照它的行为，但不要照抄它的错误码形状** —— 端口层用 `PortReply::Failed{code, uncertain}`。
+
+**⚠️ 失败语义要注意**：发图**超时/断连**属于 `uncertain: true`（**可能已发出**），
+不能记为成功，也不能当作"一定没发" —— 这与之前定下的 outbound 事实完整性一致。
 ### 3.2 端口的**唯一定义位置**：`engine/io/`（用户 2026-10-12 指定）（原 X1） ✅ 已完成（`e53cdf5`）
 
 状态依据：六面类型、trait、注册表和路由集中于 `engine/io/`，P-5 边界测试已接入 CI（`e53cdf5`）。
