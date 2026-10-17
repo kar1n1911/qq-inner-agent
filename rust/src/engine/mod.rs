@@ -34,7 +34,7 @@ use serde_json::{json, Value};
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex, MutexGuard},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::{sync::watch, task::JoinHandle};
 
@@ -252,6 +252,7 @@ pub struct Engine {
     provider: Arc<dyn OrientationProvider>,
     transport: Arc<dyn EngineTransport>,
     io_chats: Mutex<HashMap<String, Arc<dyn io::ChatPort>>>,
+    unbound_fallback_alerts: Mutex<HashMap<String, (Instant, u64)>>,
     persona_bindings: Mutex<HashMap<String, PersonaBinding>>,
     options: Options,
     behavior_graph: Option<behavior::CompiledGraph>,
@@ -407,6 +408,7 @@ impl Engine {
             provider,
             transport,
             io_chats: Mutex::new(HashMap::new()),
+            unbound_fallback_alerts: Mutex::new(HashMap::new()),
             persona_bindings: Mutex::new(HashMap::new()),
             options,
             behavior_graph,
@@ -685,6 +687,36 @@ impl Engine {
         use io::types::{ChatAddress, ChatKind, Command, CommandResult, PortReply, Segment};
         let port = self.io_chats.lock().unwrap().get(chat).cloned();
         let Some(port) = port else {
+            let observation = {
+                let now = Instant::now();
+                let window = Duration::from_secs(300);
+                let mut alerts = self.unbound_fallback_alerts.lock().unwrap();
+                alerts.retain(|group, (last, _)| group == chat || now.duration_since(*last) < window);
+                match alerts.get_mut(chat) {
+                    Some((last, suppressed)) if now.duration_since(*last) < window => {
+                        *suppressed += 1;
+                        None
+                    }
+                    Some((last, suppressed)) => {
+                        let count = *suppressed;
+                        *last = now;
+                        *suppressed = 0;
+                        Some(count)
+                    }
+                    None => {
+                        alerts.insert(chat.to_owned(), (now, 0));
+                        Some(0)
+                    }
+                }
+            };
+            if let Some(suppressed) = observation {
+                (self.options.log)("chat_route_fallback", json!({
+                    "chat": chat,
+                    "route": "built_in_fallback",
+                    "reason": "chat_port_unbound",
+                    "suppressed_since_last": suppressed,
+                }));
+            }
             return self.transport.send(chat, text, face, reply_to, mention).await;
         };
         let (kind, id) = chat.split_once(':').ok_or_else(|| OneBotError {
