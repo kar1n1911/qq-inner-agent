@@ -794,6 +794,38 @@ WebSocket 断开 → 持续重连（退避到 reconnectMaxSeconds）
 5. audit-io 的根因 ②(入站网络 I/O 无预算、阻塞主循环 —— 与本次链路审计无重叠,是独立一条)。
 
 
+
+#### ⚠️ 插件**启用生效性**：`ChatPort` 出站路径实测（2026-10-16，用户提问触发）
+
+**用户问**：**onebot 插件是否能真的绕过原本内置的 onebot 代码、直接连 NapCat？**
+
+**实测结论（`rust/src/main.rs` / `engine/mod.rs`）**
+
+| 层面 | 实际情况 | 证据 |
+| --- | --- | --- |
+| **连接** | ❌ **不能绕过** —— 内置 `OneBot` **总是被构造并连接** | `main.rs:571` `OneBot::new(...)` |
+| **入站** | ✅ 插件优先 | `main.rs:574` `plugin_ports.onebot` 优先于 env |
+| **出站** | ⚠️ **有条件走 `ChatPort`** | `engine/mod.rs:681` `send_chat` |
+| **fallback** | 该 chat **未绑定 port 时退回内置** `transport.send` | 同上 `let Some(port) = port else { transport.send(...) }` |
+
+**`send_chat` 的真实逻辑**：
+```rust
+let port = self.io_chats.lock().unwrap().get(chat).cloned();
+let Some(port) = port else {
+    return self.transport.send(...).await;   // ← 无端口 → 内置 OneBot
+};
+// 有端口 → port.deliver(Command)
+```
+
+**而 `io_chats` 只在【入站经过该 port 时】才被填充**（`engine/mod.rs:678`）。
+
+**⚠️ 由此产生的三个事实**
+1. **"绕过内置连接"不成立** —— 内置 WebSocket 到 NapCat **一直存在**；
+2. **"出站走插件"成立，但以【该群已有入站经此 port】为前提**；
+3. ⚠️ **从未收到入站的群**（例如**主动话题首发**）→ **仍走内置 `transport.send`**。
+
+**❌ 缺口：以上三条没有任何测试覆盖** ——
+没有断言"启用插件后 `transport.send` 调用次数 = 0"，也没有断言"无绑定时 fallback 到内置"。
 ### 3.2 端口的**唯一定义位置**：`engine/io/`（用户 2026-10-12 指定）（原 X1） ✅ 已完成（`e53cdf5`）
 
 状态依据：六面类型、trait、注册表和路由集中于 `engine/io/`，P-5 边界测试已接入 CI（`e53cdf5`）。
