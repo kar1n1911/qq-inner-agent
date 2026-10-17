@@ -618,6 +618,10 @@ impl Runtime {
                     .unwrap_or_else(|| json!({})),
             )?,
         )?;
+        if let Some(port) = &onebot_io {
+            engine.set_chat_port(port.clone());
+            engine.bind_configured_chats()?;
+        }
         if let Some(ports) = &plugin_ports {
             for (address, port) in &ports.persona_bindings {
                 let chat = format!("{}:{}", address.kind.as_str(), address.id);
@@ -863,6 +867,10 @@ impl Runtime {
         }
         replacement.engine.sync_connection();
         replacement.engine.inherit_chats(self.engine.chats());
+        if let Some(port) = &replacement.onebot_io {
+            replacement.engine.set_chat_port(port.clone());
+            replacement.engine.bind_configured_chats()?;
+        }
         replacement.maintain(false)?;
         if reconnect {
             replacement.connect();
@@ -1146,6 +1154,40 @@ mod tests {
         rt.engine.ingest_notice(&unknown).unwrap();
         assert_eq!(rt.store.lock().unwrap().orientation_state("group:42").unwrap().unwrap().epoch, joined);
         assert!(!rt.engine.state("group:42").unwrap().pending);
+    }
+
+    #[tokio::test]
+    async fn configured_chat_binding_rejects_inbound_rebind_and_logs_it() {
+        use qq_inner_core::engine::io::{adapters::onebot::OneBotAdapter, ChatPort, PortEvent, PortReply};
+        let dir = Temp::new();
+        dir.config(json!({"onebot":{"selfId":"99"},"agent":{"allowedGroups":["42"]}}));
+        let loaded = config::load_with_env(&dir.0, |_| None).unwrap();
+        fs::create_dir_all(&loaded.config.data_dir).unwrap();
+        let logs = Arc::new(Mutex::new(Vec::<(String, Value)>::new()));
+        let recorded = logs.clone();
+        let log: Logger = Arc::new(move |event, data| recorded.lock().unwrap().push((event.into(), data)));
+        let rt = Runtime::new(loaded, Arc::new(Mutex::new(Store::in_memory().unwrap())),
+            runtime_revision(&dir.0).unwrap(), Arc::new(|| 1_700_000_000.125), log, None).unwrap();
+        let make_port = |name| -> Arc<OneBotAdapter> {
+            let action = Arc::new(|_, _| Box::pin(async { PortReply::Ok(Value::Null) })
+                as futures_util::future::BoxFuture<'static, PortReply<Value>>);
+            Arc::new(OneBotAdapter::new(name, action,
+                Arc::new(|| (true, true, Some("99".into())))).unwrap())
+        };
+        let primary: Arc<dyn ChatPort> = make_port("onebot");
+        rt.engine.set_chat_port(primary.clone());
+        rt.engine.bind_configured_chats().unwrap();
+        let other = make_port("other");
+        let event = json!({"post_type":"message","message_type":"group","group_id":42,
+            "user_id":7,"self_id":99,"message_id":123,"time":1_700_000_000,
+            "sender":{"nickname":"群友"},"message":"你好"});
+        let Some(PortEvent::Incoming(incoming)) = other.map_event(&event, 1_700_000_000.125).unwrap() else {
+            panic!("expected incoming message");
+        };
+        rt.engine.ingest_incoming(&incoming, other).unwrap();
+        assert!(Arc::ptr_eq(&primary, &rt.engine.chat_port_for("group:42").unwrap()));
+        assert!(logs.lock().unwrap().iter().any(|(name, value)| name == "chat_port_rebind_ignored"
+            && value["chat"] == "group:42" && value["bound"] == "onebot" && value["incoming"] == "other"));
     }
 
     #[tokio::test]

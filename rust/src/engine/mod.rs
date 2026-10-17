@@ -114,7 +114,7 @@ impl OrientationTransport for IdentityAdapter<'_> {
     }
     fn call<'a>(&'a self, action: &'a str, params: Value) -> BoxFuture<'a, Result<Value>> {
         Box::pin(async move {
-            let state = self.0.transport.state();
+            let state = self.0.connection_state();
             ensure!(
                 !*self.0.aborted.borrow() && state.connected && state.online,
                 "identity_transport_stopped"
@@ -251,6 +251,7 @@ pub struct Engine {
     pub orientation: GroupOrientation,
     provider: Arc<dyn OrientationProvider>,
     transport: Arc<dyn EngineTransport>,
+    chat_port: Mutex<Option<Arc<dyn io::ChatPort>>>,
     io_chats: Mutex<HashMap<String, Arc<dyn io::ChatPort>>>,
     unbound_fallback_alerts: Mutex<HashMap<String, (Instant, u64)>>,
     persona_bindings: Mutex<HashMap<String, PersonaBinding>>,
@@ -407,6 +408,7 @@ impl Engine {
             store,
             provider,
             transport,
+            chat_port: Mutex::new(None),
             io_chats: Mutex::new(HashMap::new()),
             unbound_fallback_alerts: Mutex::new(HashMap::new()),
             persona_bindings: Mutex::new(HashMap::new()),
@@ -431,6 +433,33 @@ impl Engine {
     }
     fn core(&self) -> MutexGuard<'_, Core> {
         self.core.lock().expect("engine core poisoned")
+    }
+    pub fn set_chat_port(&self, port: Arc<dyn io::ChatPort>) {
+        *self.chat_port.lock().unwrap() = Some(port);
+    }
+    pub fn bind_configured_chats(&self) -> Result<()> {
+        let Some(port) = self.chat_port.lock().unwrap().clone() else { return Ok(()); };
+        let mut chats = self.io_chats.lock().unwrap();
+        for id in &self.config.agent.allowed_groups {
+            let address = io::ChatAddress::new(io::ChatKind::Group, &port.manifest().name, id)?;
+            chats.insert(format!("group:{}", address.id), port.clone());
+        }
+        Ok(())
+    }
+    pub fn connection_state(&self) -> io::PortState {
+        if let Some(port) = self.chat_port.lock().unwrap().as_ref() {
+            return port.state();
+        }
+        let state = self.transport.state();
+        io::PortState {
+            connected: state.connected,
+            online: state.online,
+            self_id: (!state.self_id.is_empty()).then_some(state.self_id),
+            degraded: state.degraded.then(|| "transport_degraded".to_owned()),
+        }
+    }
+    pub fn chat_port_for(&self, chat: &str) -> Option<Arc<dyn io::ChatPort>> {
+        self.io_chats.lock().unwrap().get(chat).cloned()
     }
     /// Explicit opt-in binding; the default engine keeps its existing persona path.
     pub fn bind_persona_port(&self, chat: String, address: io::ChatAddress, port: Arc<dyn io::PersonaPort>) {
@@ -500,7 +529,7 @@ impl Engine {
         state.manual == ManualMode::Normal && !state.lost_onebot
     }
     pub fn sync_connection(&self) {
-        let degraded = self.transport.state().degraded;
+        let degraded = self.connection_state().degraded.is_some();
         let changed = {
             let _core = self.core();
             let mut state = self.participation.lock().unwrap();
@@ -677,7 +706,19 @@ impl Engine {
         s.pending = true;
         s.pause_done = false;
         s.due = now + a.debounce_seconds;
-        self.io_chats.lock().unwrap().insert(chat, port);
+        let rebound = {
+            let mut chats = self.io_chats.lock().unwrap();
+            match chats.get(&chat) {
+                Some(bound) if !Arc::ptr_eq(bound, &port) => Some(bound.manifest().name.clone()),
+                Some(_) => None,
+                None => { chats.insert(chat.clone(), port.clone()); None },
+            }
+        };
+        if let Some(bound) = rebound {
+            (self.options.log)("chat_port_rebind_ignored", json!({
+                "chat": chat, "bound": bound, "incoming": port.manifest().name,
+            }));
+        }
         Ok(())
     }
     async fn send_chat(
@@ -1033,7 +1074,7 @@ impl Engine {
                 );
                 return Ok(());
             }
-            let transport = self.transport.state();
+            let transport = self.connection_state();
             if !transport.connected || !transport.online {
                 return Ok(());
             }
@@ -1091,7 +1132,7 @@ impl Engine {
         let mut core = self.core();
         let now = self.now();
         let a = &self.config.agent;
-        let state = self.transport.state();
+        let state = self.connection_state();
         // The echo is normally ~2s behind the ACK. Read back only recent
         // unconfirmed sends after a short grace period; never resend on failure.
         core.outbound_readbacks.retain(|_, started| now - *started < 600.);
@@ -1126,7 +1167,7 @@ impl Engine {
             && state.online
             && !*self.aborted.borrow()
             && !core.self_identity_busy
-            && self.self_identity.due(&state.self_id, now)
+            && self.self_identity.due(state.self_id.as_deref().unwrap_or(""), now)
         {
             core.self_identity_busy = true;
             let engine = self.clone();
@@ -1142,7 +1183,7 @@ impl Engine {
         }
         // 入群/定时立即采集，不再等首次发言；安静群也会在下一轮 tick 获取资料。
         // 被动数据采集不受作息影响，只要求连接在线且引擎未停止。
-        let transport = self.transport.state();
+        let transport = self.connection_state();
         if a.observation.enabled
             && transport.connected
             && transport.online
@@ -1195,7 +1236,7 @@ impl Engine {
                 s.busy || s.pending || now - s.last_human <= a.active_window_seconds
             });
         }
-        let transport = self.transport.state();
+        let transport = self.connection_state();
         if !transport.connected || !transport.online || *self.aborted.borrow() {
             return Ok(());
         }
@@ -2567,7 +2608,7 @@ impl Engine {
                 db.assessment_status(chat, &t.id, "cancelled")?;
                 return Ok(());
             }
-            let transport = self.transport.state();
+            let transport = self.connection_state();
             if !transport.connected || !transport.online {
                 db.assessment_status(chat, &t.id, "cancelled")?;
                 anyhow::bail!("qq_offline");
@@ -2737,7 +2778,7 @@ impl Engine {
                 let core = self.core();
                 let db = self.db()?;
                 let now = self.now();
-                let transport = self.transport.state();
+                let transport = self.connection_state();
                 let counts = db.counts(chat, now)?;
                 // 首条已预留 pending；后续条只在闸门通过后预留。沿用 burst 配额豁免。
                 let reserved = if i == 0 { 1. } else { 0. };
