@@ -307,7 +307,7 @@ async fn main() -> Result<()> {
             } else {
                 String::new()
             };
-            let (bot, _notices) = qq_inner_core::transport::OneBot::new(c.onebot, token);
+            let (bot, _notices) = qq_inner_core::transport::new(c.onebot, token);
             match bot.check().await {
                 Ok(state) => {
                     println!(
@@ -568,7 +568,7 @@ impl Runtime {
         let (bot, notices) = if let Some((bot, notices)) = initial_bot {
             (bot, notices)
         } else {
-            let (bot, notices) = OneBot::new(c.onebot.clone(), c.onebot_token.text.clone());
+            let (bot, notices) = qq_inner_core::transport::new(c.onebot.clone(), c.onebot_token.text.clone());
             (existing_bot.unwrap_or_else(|| Arc::new(bot)), notices)
         };
         let onebot_io = if let Some(plugin) = plugin_ports.as_ref().and_then(|ports| ports.onebot.clone()) {
@@ -973,7 +973,7 @@ async fn run(root: PathBuf) -> Result<()> {
     })?));
     store.lock().unwrap().recover_deliveries()?;
     let initial_bot = if root.join("plugins/plugins.json").is_file() {
-        let (bot, notices) = OneBot::new(c.onebot.clone(), c.onebot_token.text.clone());
+        let (bot, notices) = qq_inner_core::transport::new(c.onebot.clone(), c.onebot_token.text.clone());
         Some((Arc::new(bot), notices))
     } else { None };
     let plugin_ports = load_plugin_batch(&root, log.clone(), initial_bot.as_ref().map(|(bot, _)| bot.clone()),

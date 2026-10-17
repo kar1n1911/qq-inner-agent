@@ -1,6 +1,6 @@
 #[path = "../../../../../plugins/null/adapter.rs"]
 pub mod null;
-#[path = "../../../../../plugins/onebot/adapter.rs"]
+#[path = "../../../../../plugins/onebot/mod.rs"]
 pub mod onebot;
 #[path = "../../../../../plugins/a_memorix/adapter.rs"]
 pub mod amemorix;

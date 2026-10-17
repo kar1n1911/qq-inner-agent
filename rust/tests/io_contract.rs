@@ -178,7 +178,7 @@ fn io_source_has_no_dependency_on_kernel_implementation() {
                 let paths: Vec<_> = source.lines().filter(|line| line.starts_with("#[path = ")).collect();
                 assert_eq!(paths, [
                     "#[path = \"../../../../../plugins/null/adapter.rs\"]",
-                    "#[path = \"../../../../../plugins/onebot/adapter.rs\"]",
+                    "#[path = \"../../../../../plugins/onebot/mod.rs\"]",
                     "#[path = \"../../../../../plugins/a_memorix/adapter.rs\"]",
                     "#[path = \"../../../../../plugins/claude/adapter.rs\"]",
                     "#[path = \"../../../../../plugins/model_http.rs\"]",

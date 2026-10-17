@@ -2,19 +2,31 @@
 //! the legacy transport implementation while preserving its ACK/error state.
 
 use super::{ports::ChatPort, types::*};
+use super::connect::{ConnectConfig, Notification, OneBot};
 use futures_util::future::BoxFuture;
 use serde_json::{json, Value};
-use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc;
+use std::sync::{Arc, Mutex, OnceLock, Weak};
+use tokio::{sync::{mpsc, watch}, task::JoinHandle};
 
 pub type Action = Arc<dyn Fn(String, Value) -> BoxFuture<'static, PortReply<Value>> + Send + Sync>;
 pub type Connection = Arc<dyn Fn() -> (bool, bool, Option<String>) + Send + Sync>;
 
+enum Backend {
+    Hosted { action: Action, connection: Connection },
+    Owned {
+        bot: OneBot,
+        notices: Mutex<Option<mpsc::UnboundedReceiver<Notification>>>,
+        shutdown: watch::Sender<bool>,
+        connection_task: JoinHandle<()>,
+        forward_task: Mutex<Option<JoinHandle<()>>>,
+    },
+}
+
 pub struct OneBotAdapter {
     manifest: PortManifest,
-    action: Action,
-    connection: Connection,
+    backend: Backend,
     sink: Mutex<Option<mpsc::Sender<PortEvent>>>,
+    self_ref: OnceLock<Weak<Self>>,
 }
 
 impl OneBotAdapter {
@@ -32,10 +44,44 @@ impl OneBotAdapter {
                 dependencies: vec![],
                 config_fields: vec![],
             },
-            action,
-            connection,
+            backend: Backend::Hosted { action, connection },
             sink: Mutex::new(None),
+            self_ref: OnceLock::new(),
         })
+    }
+
+    pub fn connect<C: Into<ConnectConfig>>(name: &str, config: C, token: String) -> Result<Arc<Self>, IoError> {
+        if name.is_empty() || name.contains(':') {
+            return Err(IoError::new("invalid_port_manifest"));
+        }
+        let runtime = tokio::runtime::Handle::try_current().map_err(|_| IoError::new("runtime_unavailable"))?;
+        let (bot, notices) = OneBot::new(config, token);
+        let (shutdown, signal) = watch::channel(false);
+        let running = bot.clone();
+        let connection_task = runtime.spawn(async move { running.run(signal).await });
+        let adapter = Arc::new(Self {
+            manifest: PortManifest {
+                name: name.into(), kind: PortKind::Chat, transport: TransportKind::InProcess,
+                core_api_version: VersionReq { major: 1, min_minor: 0, max_minor: None },
+                host_permissions: vec![], dependencies: vec![], config_fields: vec![],
+            },
+            backend: Backend::Owned { bot, notices: Mutex::new(Some(notices)), shutdown,
+                connection_task, forward_task: Mutex::new(None) },
+            sink: Mutex::new(None),
+            self_ref: OnceLock::new(),
+        });
+        let _ = adapter.self_ref.set(Arc::downgrade(&adapter));
+        Ok(adapter)
+    }
+
+    async fn action(&self, action: String, params: Value) -> PortReply<Value> {
+        match &self.backend {
+            Backend::Hosted { action: callback, .. } => callback(action, params).await,
+            Backend::Owned { bot, .. } => match bot.call(&action, params).await {
+                Ok(data) => PortReply::Ok(data),
+                Err(error) => PortReply::Failed { code: error.code, uncertain: error.uncertain },
+            },
+        }
     }
 
     /// Heartbeats are deliberately ignored; notices retain their own typed shape.
@@ -129,7 +175,8 @@ impl OneBotAdapter {
         if command.port() != self.manifest.name {
             return failed("wrong_port", false);
         }
-        let (connected, online, _) = (self.connection)();
+        let state = self.state();
+        let (connected, online) = (state.connected, state.online);
         if matches!(command, Command::Health { .. }) {
             return PortReply::Ok(CommandResult::Health(HealthInfo { connected, online }));
         }
@@ -169,7 +216,7 @@ impl OneBotAdapter {
                     ChatKind::Group => ("send_group_msg", json!({"group_id":id,"message":message,"auto_escape":true})),
                     ChatKind::Private => ("send_private_msg", json!({"user_id":id,"message":message,"auto_escape":true})),
                 };
-                match (self.action)(action.into(), params).await {
+                match self.action(action.into(), params).await {
                     PortReply::Ok(data) => match wire_string(&data["message_id"]) {
                         Some(message_id) => PortReply::Ok(CommandResult::Sent { message_id }),
                         None => failed("missing_ack_message_id", true),
@@ -196,7 +243,7 @@ impl OneBotAdapter {
                     ChatKind::Group => ("send_group_msg", json!({"group_id":id,"message":message,"auto_escape":true})),
                     ChatKind::Private => ("send_private_msg", json!({"user_id":id,"message":message,"auto_escape":true})),
                 };
-                match (self.action)(action.into(), params).await {
+                match self.action(action.into(), params).await {
                     PortReply::Ok(data) => match wire_string(&data["message_id"]) {
                         Some(message_id) => PortReply::Ok(CommandResult::Sent { message_id }),
                         None => failed("missing_ack_message_id", true),
@@ -208,7 +255,7 @@ impl OneBotAdapter {
             }
             Command::Recall { message_id, .. } => {
                 if message_id.is_empty() { return failed("invalid_message_id", false); }
-                match (self.action)("delete_msg".into(), json!({"message_id":message_id})).await {
+                match self.action("delete_msg".into(), json!({"message_id":message_id})).await {
                     PortReply::Ok(_) => PortReply::Ok(CommandResult::Ok),
                     PortReply::Failed { code, uncertain } => PortReply::Failed { code, uncertain },
                     PortReply::Unsupported { capability } => PortReply::Unsupported { capability },
@@ -216,6 +263,18 @@ impl OneBotAdapter {
                 }
             }
             _ => PortReply::Unsupported { capability: Capability::Custom("onebot_command_unimplemented".into()) },
+        }
+    }
+}
+
+impl Drop for OneBotAdapter {
+    fn drop(&mut self) {
+        if let Backend::Owned { shutdown, connection_task, forward_task, .. } = &self.backend {
+            shutdown.send_replace(true);
+            connection_task.abort();
+            if let Ok(mut task) = forward_task.lock() {
+                if let Some(task) = task.take() { task.abort(); }
+            }
         }
     }
 }
@@ -261,7 +320,13 @@ impl ChatPort for OneBotAdapter {
         Capabilities { mention: true, reply: true, media: true, notices: true, ..Capabilities::default() }
     }
     fn state(&self) -> PortState {
-        let (connected, online, self_id) = (self.connection)();
+        let (connected, online, self_id) = match &self.backend {
+            Backend::Hosted { connection, .. } => connection(),
+            Backend::Owned { bot, .. } => {
+                let state = bot.state();
+                (state.connected, state.online, Some(state.self_id))
+            }
+        };
         PortState { connected, online, self_id: self_id.filter(|id| !id.is_empty()),
             degraded: (connected && !online).then(|| "qq_offline".to_owned()) }
     }
@@ -271,7 +336,36 @@ impl ChatPort for OneBotAdapter {
     fn attach(&self, sink: mpsc::Sender<PortEvent>) -> Result<(), IoError> {
         let mut guard = self.sink.lock().map_err(|_| IoError::new("sink_poisoned"))?;
         if guard.is_some() { return Err(IoError::new("sink_already_attached")); }
+        let owned = match &self.backend {
+            Backend::Hosted { .. } => None,
+            Backend::Owned { notices, .. } => {
+                let runtime = tokio::runtime::Handle::try_current().map_err(|_| IoError::new("runtime_unavailable"))?;
+                let receiver = notices.lock().map_err(|_| IoError::new("notice_receiver_poisoned"))?
+                    .take().ok_or_else(|| IoError::new("notice_receiver_unavailable"))?;
+                let weak = self.self_ref.get().cloned().ok_or_else(|| IoError::new("adapter_unavailable"))?;
+                Some((runtime, receiver, weak))
+            }
+        };
         *guard = Some(sink);
+        drop(guard);
+        if let Some((runtime, mut notices, weak)) = owned {
+            let task = runtime.spawn(async move {
+                while let Some(notification) = notices.recv().await {
+                    let Notification::Event(frame) = notification else { continue; };
+                    let Some(adapter) = weak.upgrade() else { break; };
+                    let received_at = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH).map_or(0., |time| time.as_secs_f64());
+                    match adapter.map_event(&frame, received_at) {
+                        Ok(Some(event)) => { let _ = adapter.publish(event); }
+                        Ok(None) => {}
+                        Err(error) => eprintln!("onebot_event_rejected code={}", error.code),
+                    }
+                }
+            });
+            if let Backend::Owned { forward_task, .. } = &self.backend {
+                *forward_task.lock().map_err(|_| IoError::new("forward_task_poisoned"))? = Some(task);
+            }
+        }
         Ok(())
     }
 }

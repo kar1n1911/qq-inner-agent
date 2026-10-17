@@ -1,585 +1,42 @@
-//! OneBot v11 正向连接。通知采用单消费者 mpsc，状态与事件共用队列以保持顺序。
+//! Temporary kernel shim for the plugin-owned OneBot connection. Remove with the legacy transport path.
 pub mod provider;
 pub mod provider_transport;
 
-use crate::config::{js_string, truthy, Onebot};
-use crate::utils::{crypto::uuid_v4 as uuid, text::js_trim};
-use futures_util::{SinkExt, StreamExt};
+use crate::config::{js_string, Onebot};
+use crate::utils::text::js_trim;
 use serde_json::{json, Value};
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
-use tokio::{
-    sync::{mpsc, oneshot, watch},
-    time::{sleep, timeout, Instant},
-};
-use tokio_tungstenite::{
-    connect_async_with_config,
-    tungstenite::{protocol::WebSocketConfig, Message},
-};
+use tokio::sync::mpsc;
 
-#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
-#[error("{code}")]
-pub struct OneBotError {
-    pub code: String,
-    /// 不确定表示请求可能已经执行；上层绝不能因此自动重发消息。
-    pub uncertain: bool,
-}
-impl OneBotError {
-    fn new(code: impl Into<String>, uncertain: bool) -> Self {
+pub use crate::engine::io::adapters::onebot::connect::{ConnectConfig, Notification, OneBot, OneBotError, State};
+#[cfg(test)]
+use crate::engine::io::adapters::onebot::connect::backoff;
+#[cfg(test)]
+use std::time::Duration;
+#[cfg(test)]
+use tokio::time::Instant;
+#[cfg(test)]
+use tokio_tungstenite::tungstenite::Message;
+
+impl From<Onebot> for ConnectConfig {
+    fn from(value: Onebot) -> Self {
         Self {
-            code: code.into(),
-            uncertain,
+            url: value.url,
+            self_id: value.self_id.text,
+            self_id_is_truthy: value.self_id.is_truthy,
+            heartbeat_seconds: value.heartbeat_seconds,
+            request_timeout_seconds: value.request_timeout_seconds,
+            reconnect_max_seconds: value.reconnect_max_seconds,
+            max_lost_seconds: value.max_lost_seconds,
+            degraded_probe_seconds: value.degraded_probe_seconds,
+            forward_enabled: value.forward_enabled,
         }
     }
 }
-type Reply = Result<Value, OneBotError>;
-#[derive(Debug, Clone, Default)]
-pub struct State {
-    pub connected: bool,
-    pub online: bool,
-    pub self_id: String,
-    pub reconnects: u64,
-    pub degraded: bool,
+
+pub fn new(config: Onebot, token: String) -> (OneBot, mpsc::UnboundedReceiver<Notification>) {
+    OneBot::new(ConnectConfig::from(config), token)
 }
-#[derive(Debug, Clone)]
-pub enum Notification {
-    Status(String),
-    Event(Value),
-}
-struct Shared {
-    state: State,
-    outgoing: Option<mpsc::UnboundedSender<Message>>,
-    pending: HashMap<String, oneshot::Sender<Reply>>,
-    early: Vec<Value>,
-    lost_since: Option<Instant>,
-}
-#[derive(Clone)]
-pub struct OneBot {
-    config: Onebot,
-    token: String,
-    shared: Arc<Mutex<Shared>>,
-    notices: mpsc::UnboundedSender<Notification>,
-    lifecycle: Arc<tokio::sync::Mutex<()>>,
-}
-// future 被取消也要移除 echo；锁内删除决定响应/超时竞争的唯一赢家。
-struct PendingGuard {
-    shared: Arc<Mutex<Shared>>,
-    echo: String,
-}
-impl Drop for PendingGuard {
-    fn drop(&mut self) {
-        self.shared.lock().unwrap().pending.remove(&self.echo);
-    }
-}
-struct SessionGuard(OneBot);
-impl Drop for SessionGuard {
-    fn drop(&mut self) {
-        self.0.disconnect();
-    }
-}
-impl OneBot {
-    pub fn new(config: Onebot, token: String) -> (Self, mpsc::UnboundedReceiver<Notification>) {
-        let (notices, rx) = mpsc::unbounded_channel();
-        let state = State {
-            self_id: if config.self_id.is_truthy {
-                config.self_id.text.clone()
-            } else {
-                String::new()
-            },
-            ..State::default()
-        };
-        (
-            Self {
-                config,
-                token,
-                shared: Arc::new(Mutex::new(Shared {
-                    state,
-                    outgoing: None,
-                    pending: HashMap::new(),
-                    early: Vec::new(),
-                    lost_since: None,
-                })),
-                notices,
-                lifecycle: Arc::new(tokio::sync::Mutex::new(())),
-            },
-            rx,
-        )
-    }
-    pub fn state(&self) -> State {
-        self.refresh_loss();
-        self.shared.lock().unwrap().state.clone()
-    }
-    fn status(&self, code: &str) {
-        if !matches!(code, "connected" | "qq_offline") && self.refresh_loss() {
-            return;
-        }
-        let _ = self.notices.send(Notification::Status(code.into()));
-    }
-    fn refresh_loss(&self) -> bool {
-        let mut shared = self.shared.lock().unwrap();
-        if self.config.max_lost_seconds > 0.0
-            && shared.lost_since.is_some_and(|since| since.elapsed().as_secs_f64() >= self.config.max_lost_seconds)
-        {
-            shared.state.degraded = true;
-        }
-        shared.state.degraded
-    }
-    fn disconnect(&self) {
-        let mut s = self.shared.lock().unwrap();
-        if s.state.connected && s.lost_since.is_none() {
-            s.lost_since = Some(Instant::now());
-        }
-        s.state.connected = false;
-        s.state.online = false;
-        s.outgoing = None;
-        s.early.clear();
-        for (_, p) in s.pending.drain() {
-            let _ = p.send(Err(OneBotError::new("connection_lost", true)));
-        }
-    }
-    pub async fn call(&self, action: &str, params: Value) -> Reply {
-        let echo = uuid();
-        let (tx, mut rx) = oneshot::channel();
-        {
-            let mut s = self.shared.lock().unwrap();
-            let Some(out) = s.outgoing.clone() else {
-                return Err(OneBotError::new("not_connected", false));
-            };
-            s.pending.insert(echo.clone(), tx);
-            if out
-                .send(Message::Text(
-                    json!({"action":action,"params":params,"echo":echo}).to_string(),
-                ))
-                .is_err()
-            {
-                s.pending.remove(&echo);
-                return Err(OneBotError::new("send_failed", true));
-            }
-        }
-        let _guard = PendingGuard {
-            shared: self.shared.clone(),
-            echo: echo.clone(),
-        };
-        match timeout(self.request_timeout(), &mut rx).await {
-            Ok(result) => result.unwrap_or_else(|_| Err(OneBotError::new("connection_lost", true))),
-            Err(_) => {
-                let removed = self.shared.lock().unwrap().pending.remove(&echo).is_some();
-                if removed {
-                    Err(OneBotError::new("action_timeout", true))
-                } else {
-                    rx.await
-                        .unwrap_or_else(|_| Err(OneBotError::new("connection_lost", true)))
-                }
-            }
-        }
-    }
-    /// 高风险身份操作；调用方负责身份护栏、冷却及原值备份。
-    pub async fn set_group_card(&self, group_id: &str, card: &str) -> Reply {
-        self.call(
-            "set_group_card",
-            json!({"group_id":group_id,"user_id":self.state().self_id,"card":card}),
-        )
-        .await
-    }
-    pub async fn set_qq_profile(&self, nickname: &str) -> Reply {
-        self.call("set_qq_profile", json!({"nickname":nickname}))
-            .await
-    }
-    pub async fn set_qq_avatar(&self, file: &str) -> Reply {
-        self.call("set_qq_avatar", json!({"file":file})).await
-    }
-    /// NapCat 参数大小写为 longNick；与 get_stranger_info 的 long_nick 不同。
-    pub async fn set_signature(&self, text: &str) -> Reply {
-        self.call("set_self_longnick", json!({"longNick":text}))
-            .await
-    }
-    pub async fn send(&self, chat: &str, text: &str, face_id: Option<&str>) -> Reply {
-        self.send_targeted(chat, text, face_id, None, None).await
-    }
-    pub async fn send_targeted(
-        &self,
-        chat: &str,
-        text: &str,
-        face_id: Option<&str>,
-        reply_to: Option<&str>,
-        mention: Option<&str>,
-    ) -> Reply {
-        let s = self.state();
-        if !s.connected || !s.online {
-            return Err(OneBotError::new("qq_offline", false));
-        }
-        let (kind, id) = chat.split_once(':').unwrap_or(("", ""));
-        if !matches!(kind, "group" | "private")
-            || !id.starts_with(|c: char| ('1'..='9').contains(&c))
-            || !id.bytes().all(|b| b.is_ascii_digit())
-        {
-            return Err(OneBotError::new("invalid_chat", false));
-        }
-        if face_id
-            .is_some_and(|s| s.is_empty() || s.len() > 5 || !s.bytes().all(|b| b.is_ascii_digit()))
-        {
-            return Err(OneBotError::new("invalid_face", false));
-        }
-        let message = message_segments(chat, text, face_id, reply_to, mention);
-        // 数组文本段与 auto_escape 同时保留，模型生成的 CQ 码只能作为惰性文本。
-        let mut params = json!({"message":message,"auto_escape":true});
-        params[if kind == "group" {
-            "group_id"
-        } else {
-            "user_id"
-        }] = json!(id.parse::<f64>().unwrap_or(f64::INFINITY));
-        self.call(
-            if kind == "group" {
-                "send_group_msg"
-            } else {
-                "send_private_msg"
-            },
-            params,
-        )
-        .await
-    }
-    /// 素材专用发送：禁止 text/at 等段，原始上下文没有可进入输出的字段。
-    pub async fn send_media(&self, chat: &str, segment: Value) -> Reply {
-        let state = self.state();
-        if !state.connected || !state.online {
-            return Err(OneBotError::new("qq_offline", false));
-        }
-        let Some(id) = chat
-            .strip_prefix("group:")
-            .and_then(|id| id.parse::<u64>().ok())
-            .filter(|id| *id > 0)
-        else {
-            return Err(OneBotError::new("invalid_chat", false));
-        };
-        let valid = match segment["type"].as_str() {
-            Some("face") => segment["data"]["id"].as_str().is_some_and(|id| {
-                !id.is_empty() && id.len() <= 5 && id.bytes().all(|b| b.is_ascii_digit())
-            }),
-            Some("image") => segment["data"]["file"]
-                .as_str()
-                .is_some_and(|file| file.starts_with("file://")),
-            _ => false,
-        };
-        if !valid {
-            return Err(OneBotError::new("invalid_media_segment", false));
-        }
-        // 重建白名单字段；即使调用者附带昵称或旧正文也不会透传。
-        let data = if segment["type"] == "face" {
-            json!({"id":segment["data"]["id"]})
-        } else {
-            json!({"file":segment["data"]["file"]})
-        };
-        self.call("send_group_msg",json!({"group_id":id,"message":[{"type":segment["type"],"data":data}],"auto_escape":true})).await
-    }
-    pub fn forward_enabled(&self) -> bool {
-        self.config.forward_enabled
-    }
-    /// 安全闸门比“感兴趣”更靠前：仅允许已有消息引用，禁止构造正文或 file 段。
-    pub async fn send_forward(&self, chat: &str, nodes: Vec<Value>) -> Reply {
-        if !self.forward_enabled() {
-            return Err(OneBotError::new("forward_disabled", false));
-        }
-        if nodes.is_empty()
-            || nodes.iter().any(|node| {
-                let Some(fields) = node.as_object() else {
-                    return true;
-                };
-                fields
-                    .keys()
-                    .any(|key| !matches!(key.as_str(), "user_id" | "uin" | "id" | "message_id"))
-                    || !["user_id", "uin"]
-                        .iter()
-                        .any(|key| fields.contains_key(*key))
-                    || !["id", "message_id"]
-                        .iter()
-                        .any(|key| fields.contains_key(*key))
-                    || fields.iter().any(|(key, value)| {
-                        !reference_id(value, matches!(key.as_str(), "user_id" | "uin"))
-                    })
-            })
-        {
-            return Err(OneBotError::new("invalid_forward_nodes", false));
-        }
-        let (kind, id) = chat.split_once(':').unwrap_or(("", ""));
-        if !matches!(kind, "group" | "private") || !reference_id(&json!(id), true) {
-            return Err(OneBotError::new("invalid_chat", false));
-        }
-        let state = self.state();
-        if !state.connected || !state.online {
-            return Err(OneBotError::new("qq_offline", false));
-        }
-        let mut params =
-            json!({"message":[{"type":"forward","data":{"nodes":nodes}}],"auto_escape":true});
-        params[if kind == "group" {
-            "group_id"
-        } else {
-            "user_id"
-        }] = json!(id.parse::<u64>().unwrap());
-        self.call(
-            if kind == "group" {
-                "send_group_msg"
-            } else {
-                "send_private_msg"
-            },
-            params,
-        )
-        .await
-    }
-    /// forwardId 为桥返回的不透明标识，不套用消息整数 ID 的规则。
-    pub async fn get_forward_msg(&self, id: &str) -> Reply {
-        if !self.forward_enabled() {
-            return Err(OneBotError::new("forward_disabled", false));
-        }
-        if id.trim().is_empty() {
-            return Err(OneBotError::new("invalid_forward_id", false));
-        }
-        self.call("get_forward_msg", json!({"id":id})).await
-    }
-    fn request_timeout(&self) -> Duration {
-        Duration::from_secs_f64(self.config.request_timeout_seconds)
-    }
-    fn receive(&self, frame: Message) {
-        let Message::Text(text) = frame else {
-            return;
-        };
-        // JS length 计 UTF-16 单元，不是 UTF-8 字节，也不是 Unicode 码点。
-        if text.encode_utf16().count() > 1_000_000 {
-            return;
-        }
-        let Ok(data) = serde_json::from_str::<Value>(&text) else {
-            return;
-        };
-        if !data.is_object() && !data.is_array() {
-            return;
-        }
-        let mut s = self.shared.lock().unwrap();
-        if let Some(p) = data
-            .get("echo")
-            .filter(|v| !v.is_null())
-            .and_then(|v| s.pending.remove(&js_string(v)))
-        {
-            let retcode = data.get("retcode").map(js_number).unwrap_or(f64::NAN);
-            let result = if data["status"] == "ok" && retcode == 0.0 {
-                Ok(data["data"].clone())
-            } else {
-                Err(OneBotError::new(
-                    format!(
-                        "onebot_action_failed_{}",
-                        if retcode == 0.0 || retcode.is_nan() {
-                            "unknown".into()
-                        } else {
-                            retcode.to_string()
-                        }
-                    ),
-                    false,
-                ))
-            };
-            let _ = p.send(result);
-        } else if truthy(&data["post_type"]) {
-            if s.state.connected {
-                let _ = self.notices.send(Notification::Event(data));
-            } else if s.early.len() < 200 {
-                s.early.push(data);
-            }
-        }
-    }
-    async fn handshake(&self) -> Result<(), OneBotError> {
-        let login = self.call("get_login_info", json!({})).await?;
-        if !truthy(&login["user_id"]) {
-            return Err(OneBotError::new("missing_account", false));
-        }
-        let id = js_string(&login["user_id"]);
-        if self.config.self_id.is_truthy && id != self.config.self_id.text {
-            return Err(OneBotError::new("wrong_qq_account", false));
-        }
-        self.shared.lock().unwrap().state.self_id = id;
-        let status = self.call("get_status", json!({})).await?;
-        let mut s = self.shared.lock().unwrap();
-        s.state.online = status["online"] == true;
-        s.state.connected = true;
-        s.lost_since = None;
-        s.state.degraded = false;
-        let _ = self.notices.send(Notification::Status(
-            if s.state.online { "connected" } else { "qq_offline" }.into(),
-        ));
-        // 置位、状态通知和 early 补发在同一锁内完成，后来的事件不能插队。
-        for event in s.early.drain(..) {
-            let _ = self.notices.send(Notification::Event(event));
-        }
-        Ok(())
-    }
-    async fn session(&self, check_only: bool) -> Result<State, OneBotError> {
-        let _cleanup = SessionGuard(self.clone());
-        let parsed = ureq::get(&self.config.url)
-            .request_url()
-            .map_err(|_| OneBotError::new("connection_failed", false))?;
-        let mut url = parsed.as_url().clone();
-        if !self.token.is_empty() {
-            let pairs: Vec<_> = url
-                .query_pairs()
-                .filter(|(key, _)| key != "access_token")
-                .map(|(k, v)| (k.into_owned(), v.into_owned()))
-                .collect();
-            url.query_pairs_mut()
-                .clear()
-                .extend_pairs(pairs)
-                .append_pair("access_token", &self.token);
-        }
-        // 由应用按 JS 字符数忽略超限消息，不能让库的字节上限提前断开连接。
-        let ws_config = WebSocketConfig {
-            max_message_size: None,
-            max_frame_size: None,
-            ..WebSocketConfig::default()
-        };
-        let socket = timeout(
-            self.request_timeout(),
-            connect_async_with_config(url.as_str(), Some(ws_config), false),
-        )
-        .await;
-        let (mut ws, _) = match socket {
-            Err(_) => return Err(OneBotError::new("connect_timeout", false)),
-            Ok(Err(_)) => {
-                self.status("websocket_error");
-                return Err(OneBotError::new("connect_closed", false));
-            }
-            Ok(Ok(ws)) => ws,
-        };
-        let (tx, mut outgoing) = mpsc::unbounded_channel();
-        self.shared.lock().unwrap().outgoing = Some(tx);
-        let io = async {
-            loop {
-                tokio::select! {
-                    frame = ws.next() => match frame {
-                        Some(Ok(Message::Close(_))) | None => break,
-                        Some(Ok(frame)) => self.receive(frame),
-                        Some(Err(_)) => { self.status("websocket_error"); break; }
-                    },
-                    Some(packet) = outgoing.recv() => {
-                        if !matches!(timeout(self.request_timeout(), ws.send(packet.clone())).await, Ok(Ok(()))) {
-                            // 不打印底层错误；其中可能含带 token 的 URL。
-                            if let Message::Text(text) = packet {
-                                if let Ok(data) = serde_json::from_str::<Value>(&text) {
-                                    if let Some(p) = self.shared.lock().unwrap().pending.remove(&js_string(&data["echo"])) { let _ = p.send(Err(OneBotError::new("send_failed", true))); }
-                                }
-                            }
-                            self.status("websocket_error"); break;
-                        }
-                    }
-                }
-            }
-            if self.state().connected {
-                Ok(self.state())
-            } else {
-                Err(OneBotError::new("connection_lost", true))
-            }
-        };
-        let protocol = async {
-            self.handshake().await?;
-            if check_only {
-                return Ok(self.state());
-            }
-            let period = Duration::from_secs_f64(self.config.heartbeat_seconds);
-            let mut ticks = tokio::time::interval_at(Instant::now() + period, period);
-            ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            let mut checking = false;
-            let mut heartbeat = Box::pin(std::future::pending::<Reply>())
-                as std::pin::Pin<Box<dyn std::future::Future<Output = Reply> + Send>>;
-            loop {
-                tokio::select! {
-                    _ = ticks.tick() => if !checking {
-                        checking = true;
-                        heartbeat = Box::pin(self.call("get_status", json!({})));
-                    },
-                    result = &mut heartbeat, if checking => {
-                        checking = false;
-                        match result {
-                            Ok(s) => {
-                                let mut shared = self.shared.lock().unwrap();
-                                shared.state.online = s["online"] == true;
-                            },
-                            Err(_) => {
-                                self.shared.lock().unwrap().state.online = false;
-                                return Ok(self.state());
-                            }
-                        }
-                    }
-                }
-            }
-        };
-        let result = tokio::select! { result = io => result, result = protocol => result };
-        self.disconnect();
-        // 限时关闭，避免不响应的桥阻止停机或重连。
-        let _ = timeout(self.request_timeout(), ws.close(None)).await;
-        result
-    }
-    /// 单次校验，不重连；返回关闭前的鉴权/在线快照。
-    pub async fn check(&self) -> Result<State, OneBotError> {
-        let _lock = self.lifecycle.lock().await;
-        self.session(true).await
-    }
-    /// shutdown 为 true 或发送端被释放时退出；调用者应等待此 future 完成。
-    pub async fn run(&self, mut shutdown: watch::Receiver<bool>) {
-        let _lock = self.lifecycle.lock().await;
-        let mut delay = 1.0;
-        self.shared.lock().unwrap().lost_since = Some(Instant::now());
-        while !*shutdown.borrow() {
-            let degraded = self.refresh_loss();
-            let started = Instant::now();
-            tokio::select! {
-                _ = shutdown.changed() => break,
-                result = self.session(false) => if let Err(e) = result { self.status(&e.code); }
-            }
-            self.disconnect();
-            if *shutdown.borrow() {
-                break;
-            }
-            self.shared.lock().unwrap().state.reconnects += 1;
-            // JS 从会话尝试开始计时；严格超过 30 秒才重置，恰好 30 秒不重置。
-            let wait = if degraded || self.refresh_loss() {
-                Duration::from_secs_f64(self.config.degraded_probe_seconds)
-            } else { backoff(
-                &mut delay,
-                started.elapsed(),
-                self.config.reconnect_max_seconds,
-                rand::random(),
-            ) };
-            tokio::select! { _ = shutdown.changed() => break, _ = sleep(wait) => {} }
-        }
-        self.disconnect();
-    }
-}
-// OneBot 消息 ID 可为负数；QQ 用户 ID 必须为正整数。拒绝零、浮点数和非数字内容。
-fn reference_id(value: &Value, user: bool) -> bool {
-    let text = match value {
-        Value::String(s) => s.clone(),
-        Value::Number(n) if n.is_i64() || n.is_u64() => n.to_string(),
-        _ => return false,
-    };
-    let digits = if user {
-        text.as_str()
-    } else {
-        text.strip_prefix('-').unwrap_or(&text)
-    };
-    !digits.starts_with('0')
-        && !digits.is_empty()
-        && digits.bytes().all(|b| b.is_ascii_digit())
-        && if user {
-            text.parse::<u64>().is_ok()
-        } else {
-            text.parse::<i64>().is_ok()
-        }
-}
-fn backoff(delay: &mut f64, elapsed: Duration, max: f64, jitter: f64) -> Duration {
-    if elapsed > Duration::from_secs(30) {
-        *delay = 1.0;
-    }
-    let wait = Duration::from_secs_f64(*delay + jitter);
-    *delay = (*delay * 2.0).min(max);
-    wait
-}
+
 pub(crate) fn js_number(v: &Value) -> f64 {
     match v {
         Value::Null => 0.0,
@@ -671,14 +128,14 @@ mod tests {
     fn prolonged_loss_silences_failed_probes_and_zero_disables_degradation() {
         let mut config: Onebot = serde_json::from_value(crate::config::defaults()["onebot"].clone()).unwrap();
         config.max_lost_seconds = 1.0;
-        let (bot, mut notices) = OneBot::new(config.clone(), String::new());
+        let (bot, mut notices) = crate::transport::new(config.clone(), String::new());
         bot.shared.lock().unwrap().lost_since = Some(Instant::now() - Duration::from_secs(2));
         assert!(bot.state().degraded);
         bot.status("websocket_error");
         bot.status("connect_closed");
         assert!(notices.try_recv().is_err(), "degraded probes must not enqueue failure logs");
         config.max_lost_seconds = 0.0;
-        let (disabled, _) = OneBot::new(config, String::new());
+        let (disabled, _) = crate::transport::new(config, String::new());
         disabled.shared.lock().unwrap().lost_since = Some(Instant::now() - Duration::from_secs(2));
         assert!(!disabled.state().degraded);
     }
@@ -686,7 +143,7 @@ mod tests {
     async fn successful_handshake_restores_normal_connection_after_degradation() {
         let mut config: Onebot = serde_json::from_value(crate::config::defaults()["onebot"].clone()).unwrap();
         config.max_lost_seconds = 1.0;
-        let (bot, mut notices) = OneBot::new(config, String::new());
+        let (bot, mut notices) = crate::transport::new(config, String::new());
         bot.shared.lock().unwrap().lost_since = Some(Instant::now() - Duration::from_secs(2));
         assert!(bot.state().degraded);
         let (tx, mut outgoing) = mpsc::unbounded_channel();
@@ -709,7 +166,7 @@ mod tests {
     #[tokio::test]
     async fn send_failure_and_cancellation_clean_pending() {
         let c = serde_json::from_value(crate::config::defaults()["onebot"].clone()).unwrap();
-        let (bot, _) = OneBot::new(c, String::new());
+        let (bot, _) = crate::transport::new(c, String::new());
         let (tx, rx) = mpsc::unbounded_channel();
         drop(rx);
         bot.shared.lock().unwrap().outgoing = Some(tx);
