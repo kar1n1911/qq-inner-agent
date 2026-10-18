@@ -194,6 +194,12 @@ pub enum Fetch {
     GroupNotices { chat: ChatAddress },
     GroupMember { chat: ChatAddress, user: String },
     Stranger { port: String, user: String },
+    GroupInfo { chat: ChatAddress, no_cache: bool },
+    History { chat: ChatAddress, count: usize, before: Option<String> },
+    Members { chat: ChatAddress, no_cache: bool },
+    Login { port: String },
+    Message { port: String, message_id: String },
+    Forward { port: String, id: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

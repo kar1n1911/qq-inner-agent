@@ -85,23 +85,53 @@ impl EngineTransport for OneBot {
         ))
     }
 }
+// Keep the legacy transport for deployments without a primary ChatPort. Once a
+// port is present, every protocol action is resolved at the port boundary.
+struct RoutedTransport {
+    inner: Arc<dyn EngineTransport>,
+    chat_port: Arc<Mutex<Option<Arc<dyn io::ChatPort>>>>,
+}
+impl OrientationTransport for RoutedTransport {
+    fn self_id(&self) -> String {
+        match self.chat_port.lock().unwrap().as_ref() {
+            Some(port) => port.state().self_id.unwrap_or_default(),
+            None => self.inner.self_id(),
+        }
+    }
+    fn call<'a>(&'a self, action: &'a str, params: Value) -> BoxFuture<'a, Result<Value>> {
+        Box::pin(async move {
+            let port = self.chat_port.lock().unwrap().clone();
+            match port {
+                Some(port) => call_selected_chat_action(port, action, &params).await,
+                None => self.inner.call(action, params).await,
+            }
+        })
+    }
+}
+impl EngineTransport for RoutedTransport {
+    fn state(&self) -> TransportState {
+        let Some(port) = self.chat_port.lock().unwrap().clone() else { return self.inner.state(); };
+        let state = port.state();
+        TransportState { connected: state.connected, online: state.online,
+            self_id: state.self_id.unwrap_or_default(), reconnects: 0,
+            degraded: state.degraded.is_some() }
+    }
+    fn send_media<'a>(&'a self, chat: &'a str, segment: Value) -> BoxFuture<'a, std::result::Result<Value, OneBotError>> {
+        self.inner.send_media(chat, segment)
+    }
+    fn send<'a>(&'a self, chat: &'a str, text: &'a str, face: Option<&'a str>, reply_to: Option<&'a str>, mention: Option<&'a str>)
+        -> BoxFuture<'a, std::result::Result<Value, OneBotError>> {
+        self.inner.send(chat, text, face, reply_to, mention)
+    }
+}
 // 不依赖 trait upcasting（保持仓库 MSRV）；与 orientation 共用同一个传输实例。
-struct OrientationAdapter(Arc<dyn EngineTransport>, Arc<self_identity::Cache>, Clock,
-    Arc<Mutex<Option<Arc<dyn io::ChatPort>>>>);
+struct OrientationAdapter(Arc<dyn EngineTransport>, Arc<self_identity::Cache>, Clock);
 impl OrientationTransport for OrientationAdapter {
     fn self_id(&self) -> String {
         self.0.self_id()
     }
     fn call<'a>(&'a self, action: &'a str, params: Value) -> BoxFuture<'a, Result<Value>> {
-        Box::pin(async move {
-            let port = self.3.lock().unwrap().clone();
-            if let Some(port) = port {
-                if let Some(result) = call_selected_chat_action(port, action, &params).await? {
-                    return Ok(result);
-                }
-            }
-            self.0.call(action, params).await
-        })
+        self.0.call(action, params)
     }
     fn titled_members<'a>(&'a self, chat: &'a str) -> BoxFuture<'a, Vec<Value>> {
         Box::pin(async move {
@@ -134,12 +164,6 @@ impl OrientationTransport for IdentityAdapter<'_> {
                     .members(self.0.transport.as_ref(), &group, self.0.now())
                     .await;
             }
-            let port = self.0.chat_port.lock().unwrap().clone();
-            if let Some(port) = port {
-                if let Some(result) = call_selected_chat_action(port, action, &params).await? {
-                    return Ok(result);
-                }
-            }
             let result = self.0.transport.call(action, params).await?;
             Ok(result)
         })
@@ -162,8 +186,8 @@ fn required_protocol_id(params: &Value, key: &str) -> Result<String> {
 }
 async fn call_selected_chat_action(
     port: Arc<dyn io::ChatPort>, action: &str, params: &Value,
-) -> Result<Option<Value>> {
-    use io::types::{ChatAddress, ChatKind, Command, CommandResult, Fetch, PortReply};
+) -> Result<Value> {
+    use io::types::{ChatAddress, ChatKind, Command, CommandResult, Fetch, MediaRef, MediaSrc, PortReply};
     let name = port.manifest().name.clone();
     let command = match action {
         "_get_group_notice" => Command::Fetch {
@@ -181,16 +205,48 @@ async fn call_selected_chat_action(
             port: name.clone(),
             request: Fetch::Stranger { port: name.clone(), user: required_protocol_id(params, "user_id")? },
         },
+        "get_group_info" => Command::Fetch { port: name.clone(), request: Fetch::GroupInfo {
+            chat: ChatAddress::new(ChatKind::Group, &name, required_protocol_id(params, "group_id")?)?,
+            no_cache: params.get("no_cache").and_then(Value::as_bool).unwrap_or(false),
+        } },
+        "get_group_msg_history" => Command::Fetch { port: name.clone(), request: Fetch::History {
+            chat: ChatAddress::new(ChatKind::Group, &name, required_protocol_id(params, "group_id")?)?,
+            count: params.get("count").and_then(Value::as_u64).ok_or_else(|| anyhow::anyhow!("missing_count"))? as usize,
+            before: params.get("message_seq").map(|value| required_protocol_id(&json!({"message_seq":value}), "message_seq")).transpose()?,
+        } },
+        "get_group_member_list" => Command::Fetch { port: name.clone(), request: Fetch::Members {
+            chat: ChatAddress::new(ChatKind::Group, &name, required_protocol_id(params, "group_id")?)?,
+            no_cache: params.get("no_cache").and_then(Value::as_bool).unwrap_or(false),
+        } },
+        "get_login_info" => Command::Fetch { port: name.clone(), request: Fetch::Login { port: name.clone() } },
+        "get_msg" => Command::Fetch { port: name.clone(), request: Fetch::Message {
+            port: name.clone(), message_id: required_protocol_id(params, "message_id")?,
+        } },
+        "get_forward_msg" => Command::Fetch { port: name.clone(), request: Fetch::Forward {
+            port: name.clone(), id: required_protocol_id(params, "id")?,
+        } },
+        "set_group_card" => Command::SetGroupCard {
+            chat: ChatAddress::new(ChatKind::Group, &name, required_protocol_id(params, "group_id")?)?,
+            card: params.get("card").and_then(Value::as_str).ok_or_else(|| anyhow::anyhow!("missing_card"))?.to_owned(),
+        },
+        "set_qq_profile" => Command::SetProfile { port: name.clone(),
+            nickname: params.get("nickname").map(|value| value.as_str().ok_or_else(|| anyhow::anyhow!("invalid_nickname"))).transpose()?.map(str::to_owned),
+            signature: params.get("signature").map(|value| value.as_str().ok_or_else(|| anyhow::anyhow!("invalid_signature"))).transpose()?.map(str::to_owned),
+        },
+        "set_qq_avatar" => Command::SetAvatar { port: name.clone(), media: MediaRef {
+            source: MediaSrc::Opaque(params.get("file").and_then(Value::as_str)
+                .ok_or_else(|| anyhow::anyhow!("missing_file"))?.to_owned()), kind: "image".into(),
+        } },
         "set_self_longnick" => Command::SetLongNick {
             port: name,
             text: params.get("longNick").and_then(Value::as_str)
                 .ok_or_else(|| anyhow::anyhow!("missing_longNick"))?.to_owned(),
         },
-        _ => return Ok(None),
+        _ => anyhow::bail!("port_action_unavailable"),
     };
     match port.deliver(command).await {
-        PortReply::Ok(CommandResult::Fetched(value)) => Ok(Some(value)),
-        PortReply::Ok(CommandResult::Ok) => Ok(Some(json!({}))),
+        PortReply::Ok(CommandResult::Fetched(value)) => Ok(value),
+        PortReply::Ok(CommandResult::Ok) => Ok(json!({})),
         PortReply::Ok(_) => anyhow::bail!("invalid_chat_port_ack"),
         PortReply::Failed { code, uncertain } => anyhow::bail!("{code}; uncertain={uncertain}"),
         PortReply::Unsupported { capability } => anyhow::bail!("chat_port_unsupported: {capability:?}"),
@@ -458,6 +514,10 @@ impl Engine {
         let (aborted, signal) = watch::channel(false);
         let self_identity = Arc::new(self_identity::Cache::default());
         let chat_port = Arc::new(Mutex::new(None));
+        let transport: Arc<dyn EngineTransport> = Arc::new(RoutedTransport {
+            inner: transport,
+            chat_port: chat_port.clone(),
+        });
         let mut orientation = GroupOrientation::new(
             store.clone(),
             config.agent.clone(),
@@ -466,7 +526,6 @@ impl Engine {
                 transport.clone(),
                 self_identity.clone(),
                 options.now.clone(),
-                chat_port.clone(),
             )),
             options.now.clone(),
             signal,

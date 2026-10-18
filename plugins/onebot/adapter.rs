@@ -199,12 +199,46 @@ impl OneBotAdapter {
                         }
                         let Some(group_id) = numeric_id(&chat.id) else { return failed("invalid_chat", false); };
                         let Some(user_id) = numeric_id(&user) else { return failed("invalid_user", false); };
-                        ("get_group_member_info", json!({"group_id":group_id,"user_id":user_id}))
+                        ("get_group_member_info", json!({"group_id":group_id,"user_id":user_id,"no_cache":true}))
                     }
                     Fetch::Stranger { port, user } => {
                         if port != self.manifest.name { return failed("wrong_port", false); }
                         let Some(user_id) = numeric_id(&user) else { return failed("invalid_user", false); };
-                        ("get_stranger_info", json!({"user_id":user_id}))
+                        ("get_stranger_info", json!({"user_id":user_id,"no_cache":true}))
+                    }
+                    Fetch::GroupInfo { chat, no_cache } => {
+                        if chat.port != self.manifest.name || chat.kind != ChatKind::Group { return failed("invalid_chat", false); }
+                        let Some(group_id) = numeric_id(&chat.id) else { return failed("invalid_chat", false); };
+                        ("get_group_info", json!({"group_id":group_id,"no_cache":no_cache}))
+                    }
+                    Fetch::History { chat, count, before } => {
+                        if chat.port != self.manifest.name || chat.kind != ChatKind::Group { return failed("invalid_chat", false); }
+                        let Some(group_id) = numeric_id(&chat.id) else { return failed("invalid_chat", false); };
+                        if before.as_deref() == Some("") { return failed("invalid_message_seq", false); }
+                        let mut params = json!({"group_id":group_id,"count":count});
+                        if let Some(before) = before {
+                            params["message_seq"] = before.parse::<u64>().map_or_else(|_| json!(before), |number| json!(number));
+                        }
+                        ("get_group_msg_history", params)
+                    }
+                    Fetch::Members { chat, no_cache } => {
+                        if chat.port != self.manifest.name || chat.kind != ChatKind::Group { return failed("invalid_chat", false); }
+                        let Some(group_id) = numeric_id(&chat.id) else { return failed("invalid_chat", false); };
+                        ("get_group_member_list", json!({"group_id":group_id,"no_cache":no_cache}))
+                    }
+                    Fetch::Login { port } => {
+                        if port != self.manifest.name { return failed("wrong_port", false); }
+                        ("get_login_info", json!({}))
+                    }
+                    Fetch::Message { port, message_id } => {
+                        if port != self.manifest.name { return failed("wrong_port", false); }
+                        if message_id.is_empty() { return failed("invalid_message_id", false); }
+                        ("get_msg", json!({"message_id":message_id}))
+                    }
+                    Fetch::Forward { port, id } => {
+                        if port != self.manifest.name { return failed("wrong_port", false); }
+                        if id.is_empty() { return failed("invalid_forward_id", false); }
+                        ("get_forward_msg", json!({"id":id}))
                     }
                 };
                 match self.action(action.into(), params).await {
@@ -220,6 +254,42 @@ impl OneBotAdapter {
                     PortReply::Failed { code, uncertain } => PortReply::Failed { code, uncertain },
                     PortReply::Unsupported { capability } => PortReply::Unsupported { capability },
                     PortReply::Degraded { .. } => failed("degraded_long_nick_ack", true),
+                }
+            }
+            Command::SetGroupCard { chat, card } => {
+                if chat.port != self.manifest.name || chat.kind != ChatKind::Group { return failed("invalid_chat", false); }
+                let Some(group_id) = numeric_id(&chat.id) else { return failed("invalid_chat", false); };
+                let Some(user_id) = state.self_id.as_deref().and_then(numeric_id) else { return failed("missing_self_id", false); };
+                match self.action("set_group_card".into(), json!({"group_id":group_id,"user_id":user_id,"card":card})).await {
+                    PortReply::Ok(_) => PortReply::Ok(CommandResult::Ok),
+                    PortReply::Failed { code, uncertain } => PortReply::Failed { code, uncertain },
+                    PortReply::Unsupported { capability } => PortReply::Unsupported { capability },
+                    PortReply::Degraded { .. } => failed("degraded_group_card_ack", true),
+                }
+            }
+            Command::SetProfile { nickname, signature, .. } => {
+                if nickname.is_none() && signature.is_none() { return failed("empty_profile", false); }
+                let mut params = json!({});
+                if let Some(nickname) = nickname { params["nickname"] = json!(nickname); }
+                if let Some(signature) = signature { params["signature"] = json!(signature); }
+                match self.action("set_qq_profile".into(), params).await {
+                    PortReply::Ok(_) => PortReply::Ok(CommandResult::Ok),
+                    PortReply::Failed { code, uncertain } => PortReply::Failed { code, uncertain },
+                    PortReply::Unsupported { capability } => PortReply::Unsupported { capability },
+                    PortReply::Degraded { .. } => failed("degraded_profile_ack", true),
+                }
+            }
+            Command::SetAvatar { media, .. } => {
+                if media.kind != "image" { return failed("invalid_media", false); }
+                let data = match image_data(&media.source, None) {
+                    Ok(data) => data,
+                    Err(_) => return failed("invalid_media", false),
+                };
+                match self.action("set_qq_avatar".into(), json!({"file":data["file"]})).await {
+                    PortReply::Ok(_) => PortReply::Ok(CommandResult::Ok),
+                    PortReply::Failed { code, uncertain } => PortReply::Failed { code, uncertain },
+                    PortReply::Unsupported { capability } => PortReply::Unsupported { capability },
+                    PortReply::Degraded { .. } => failed("degraded_avatar_ack", true),
                 }
             }
             Command::Send { chat, segments, reply_to } => {
