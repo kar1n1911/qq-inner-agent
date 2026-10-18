@@ -1,6 +1,7 @@
 //! Neutral I/O aggregation. Legacy runtime call sites remain untouched at P1.
 
 pub mod adapters;
+pub mod availability;
 pub mod factory;
 pub mod ports;
 pub mod plugin_list;
@@ -10,6 +11,7 @@ pub mod types;
 
 use std::sync::Arc;
 
+pub use availability::*;
 pub use ports::{ChatPort, DbPort, ExternalPort, MemoryPort, ModelPort, PersonaPort};
 pub use registry::PortRegistry;
 pub use router::ChatRouter;

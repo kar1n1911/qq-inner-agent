@@ -377,6 +377,14 @@ fn iso(now: f64) -> String {
         .expect("valid clock")
         .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
+fn route_name(route: qq_inner_core::engine::io::InterfaceRoute) -> &'static str {
+    use qq_inner_core::engine::io::InterfaceRoute::*;
+    match route { Plugin => "plugin", BuiltIn => "built_in", None => "none" }
+}
+fn health_name(health: qq_inner_core::engine::io::InterfaceHealth) -> &'static str {
+    use qq_inner_core::engine::io::InterfaceHealth::*;
+    match health { Ready => "ready", Degraded => "degraded", Unknown => "unknown", Missing => "missing" }
+}
 fn logger(dir: PathBuf, now: Clock) -> Logger {
     let lock = Mutex::new(());
     Arc::new(move |event, data| {
@@ -470,6 +478,7 @@ struct Runtime {
     now: Clock,
     log: Logger,
     control: Option<Arc<Backend>>,
+    availability: Mutex<Vec<(String, String, String)>>,
 }
 struct RuntimePlugins {
     ports: Option<qq_inner_core::engine::io::factory::PublishedPorts>,
@@ -658,6 +667,7 @@ impl Runtime {
             last_alerted_plugin_revision: None,
             now,
             log,
+            availability: Mutex::new(Vec::new()),
         })
     }
     fn connect(&mut self) {
@@ -769,6 +779,63 @@ impl Runtime {
             (self.log)("port_event_rejected", json!({"kind":kind,"code":code,"error":message}));
         }
     }
+    fn interface_availability(
+        &self,
+        now: f64,
+        port_ingress: bool,
+        connection: &qq_inner_core::engine::io::PortState,
+        generation: &str,
+    ) -> Vec<qq_inner_core::engine::io::InterfaceAvailability> {
+        use qq_inner_core::engine::io::{
+            InterfaceAvailability, InterfaceHealth, InterfaceKind, InterfaceRoute, InterfaceScope,
+        };
+        let chat_route = if port_ingress { InterfaceRoute::Plugin } else { InterfaceRoute::BuiltIn };
+        let chat_health = if !port_ingress {
+            InterfaceHealth::Degraded
+        } else if connection.connected && connection.online {
+            InterfaceHealth::Ready
+        } else {
+            InterfaceHealth::Degraded
+        };
+        let model_route = if self.model_port.is_some() {
+            InterfaceRoute::Plugin
+        } else {
+            InterfaceRoute::BuiltIn
+        };
+        vec![
+            InterfaceAvailability::new(InterfaceKind::Chat, chat_route, chat_health,
+                InterfaceScope::Full, now, generation.to_owned()),
+            InterfaceAvailability::new(InterfaceKind::Model, model_route, InterfaceHealth::Unknown,
+                InterfaceScope::Full, now, generation.to_owned()),
+            InterfaceAvailability::new(InterfaceKind::Db, InterfaceRoute::BuiltIn,
+                InterfaceHealth::Ready, InterfaceScope::Full, now, generation.to_owned()),
+        ]
+    }
+    fn log_availability(&self, entries: &[qq_inner_core::engine::io::InterfaceAvailability]) {
+        let mut seen = self.availability.lock().unwrap();
+        for entry in entries {
+            let kind = entry.kind.as_str().to_owned();
+            let route = route_name(entry.route).to_owned();
+            let health = health_name(entry.health).to_owned();
+            let previous = seen.iter().find(|(known, _, _)| known == &kind)
+                .map(|(_, prior_route, prior_health)| json!({"route": prior_route, "health": prior_health}));
+            let unchanged = previous.as_ref().is_some_and(|prior| {
+                prior["route"].as_str() == Some(route.as_str())
+                    && prior["health"].as_str() == Some(health.as_str())
+            });
+            if unchanged { continue; }
+            (self.log)("external_interface_availability_changed", json!({
+                "kind": kind,
+                "previous": previous.unwrap_or(Value::Null),
+                "current": {"route": route, "health": health},
+                "generation": entry.generation,
+            }));
+            match seen.iter_mut().find(|(known, _, _)| known == &kind) {
+                Some(row) => { row.1 = route; row.2 = health; }
+                None => seen.push((kind, route, health)),
+            }
+        }
+    }
     fn status(&self, now: f64, pid: u32) -> Result<Value> {
         let c = &self.config;
         let active = self.engine.available(now)?;
@@ -780,6 +847,8 @@ impl Runtime {
         let bot = self.bot.state();
         let port_ingress = self.port_events.is_some();
         let connection = self.engine.connection_state();
+        let generation = self.applied.rsplit(':').next().unwrap_or_default().to_owned();
+        let availability = self.interface_availability(now, port_ingress, &connection, &generation);
         // JS status fields retain their types and seconds; runningRevision reports this live process.
         let mut status = json!({"updatedAt":iso(now), "pid":pid, "mode":mode(c),
             "runningRevision":qq_inner_core::update::REVISION,
@@ -794,6 +863,8 @@ impl Runtime {
             "reconnects":if port_ingress { Value::Null } else { json!(bot.reconnects) }, "activeChats":self.engine.chats().len(),
             "model":self.raw["provider"]["model"], "provider":if c.provider.io_port == "legacy" { &c.provider.kind } else { &c.provider.io_port }, "apiCallsThisRun":self.model_port.as_ref().map_or_else(|| self.provider.calls(), |p| p.calls()),
             "lastCycleAt":self.engine.last_cycle(), "lastError":self.engine.last_error()});
+        status["interfaceAvailability"] = serde_json::to_value(&availability)?;
+        self.log_availability(&availability);
         if port_ingress {
             if let Some(fault) = self.onebot_io.as_ref().and_then(|port| port.forwarding_fault()) {
                 status["ingressError"] = json!(fault);
@@ -1447,7 +1518,7 @@ mod tests {
             let mut reads = 0;
             while reader_running.load(std::sync::atomic::Ordering::Relaxed) {
                 let v: Value = serde_json::from_slice(&fs::read(&reader_file).unwrap()).unwrap();
-                assert_eq!(v.as_object().unwrap().len(), 23);
+                assert_eq!(v.as_object().unwrap().len(), 24);
                 assert_eq!(v["participation"]["effective"], "normal");
                 assert_eq!(v["runningRevision"], qq_inner_core::update::REVISION);
                 assert_eq!(v["prompts"]["source"], "builtin");
