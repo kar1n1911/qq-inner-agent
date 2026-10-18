@@ -2,7 +2,7 @@
 use futures_util::future::BoxFuture;
 use qq_inner_core::engine::io::{
     adapters::onebot::{Action, OneBotAdapter}, ChatPort, ChatAddress, Command,
-    CommandResult, PortEvent, PortReply, Segment,
+    CommandResult, OutboundEvidenceSource, PortEvent, PortReply, Segment,
 };
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
@@ -45,11 +45,13 @@ fn self_echo_without_message_type_or_message_array_maps_without_becoming_human_i
         "user_id":99,"group_id":10,"message_id":42,"time":100.,
         "raw_message":"sent","sender":{"user_id":99}
     }), 105.).unwrap().unwrap();
-    let PortEvent::Incoming(incoming) = event else { panic!("a self echo must map to Incoming") };
-    assert!(incoming.self_message);
-    assert_eq!(incoming.chat.to_string(), "group:onebot:10");
-    assert_eq!((incoming.ts, incoming.received_at), (100., 105.));
-    assert_eq!(incoming.segments, vec![Segment::Text("sent".into())]);
+    let PortEvent::OutboundEvidence(evidence) = event else { panic!("a self echo must map to outbound evidence") };
+    assert_eq!(evidence.source, OutboundEvidenceSource::MessageSent);
+    assert_eq!(evidence.chat.to_string(), "group:onebot:10");
+    assert_eq!(evidence.message_id, "42");
+    assert_eq!(evidence.sender_id, "99");
+    assert_eq!(evidence.text, "sent");
+    assert_eq!((evidence.server_ts, evidence.received_at), (100., 105.));
 }
 
 #[tokio::test]
