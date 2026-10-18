@@ -455,6 +455,7 @@ struct Runtime {
     _plugin_ports: Option<qq_inner_core::engine::io::factory::PublishedPorts>,
     bot: Arc<OneBot>,
     onebot_io: Option<Arc<qq_inner_core::engine::io::adapters::onebot::OneBotAdapter>>,
+    port_events: Option<mpsc::Receiver<qq_inner_core::engine::io::PortEvent>>,
     notices: mpsc::UnboundedReceiver<Notification>,
     engine: Arc<Engine>,
     connection: Option<JoinHandle<()>>,
@@ -473,6 +474,7 @@ struct Runtime {
 struct RuntimePlugins {
     ports: Option<qq_inner_core::engine::io::factory::PublishedPorts>,
     initial_bot: Option<(Arc<OneBot>, mpsc::UnboundedReceiver<Notification>)>,
+    port_events: Option<mpsc::Receiver<qq_inner_core::engine::io::PortEvent>>,
 }
 fn use_onebot_io(value: Option<&str>) -> bool {
     value == Some("1")
@@ -508,7 +510,7 @@ impl Runtime {
         existing_bot: Option<Arc<OneBot>>,
     ) -> Result<Self> {
         Self::new_with_plugins(loaded, store, applied, now, log, existing_bot,
-            RuntimePlugins { ports: None, initial_bot: None })
+            RuntimePlugins { ports: None, initial_bot: None, port_events: None })
     }
     fn new_with_plugins(
         loaded: config::Loaded,
@@ -519,7 +521,7 @@ impl Runtime {
         existing_bot: Option<Arc<OneBot>>,
         plugins: RuntimePlugins,
     ) -> Result<Self> {
-        let RuntimePlugins { ports: plugin_ports, initial_bot } = plugins;
+        let RuntimePlugins { ports: plugin_ports, initial_bot, port_events: reused_port_events } = plugins;
         // Record the bytes actually loaded, including startup edits during resource setup.
         let suffix = if plugin_ports.is_some() {
             applied.rsplit_once(':').map(|(_, hash)| format!(":{hash}")).unwrap_or_default()
@@ -605,9 +607,20 @@ impl Runtime {
                     .unwrap_or_else(|| json!({})),
             )?,
         )?;
+        let port_events = if let Some(port) = plugin_ports.as_ref().and_then(|ports| ports.onebot.as_ref()) {
+            if let Some(receiver) = reused_port_events {
+                engine.set_chat_port(port.clone());
+                engine.bind_configured_chats()?;
+                Some(receiver)
+            } else {
+                Some(engine.attach_primary_chat_port(port.clone(), 256)?)
+            }
+        } else { None };
+        if port_events.is_none() {
         if let Some(port) = &onebot_io {
             engine.set_chat_port(port.clone());
             engine.bind_configured_chats()?;
+        }
         }
         if let Some(ports) = &plugin_ports {
             for (address, port) in &ports.persona_bindings {
@@ -631,6 +644,7 @@ impl Runtime {
             _plugin_ports: plugin_ports,
             bot,
             onebot_io,
+            port_events,
             notices,
             engine,
             connection: None,
@@ -656,7 +670,7 @@ impl Runtime {
             self.next_backfill = Instant::now();
         }
         if !self.config.agent.backfill.enabled
-            || !self.bot.state().connected
+            || !self.engine.connection_state().connected
             || *self.abort.borrow()
             || self.backfill.as_ref().is_some_and(|task| !task.is_finished())
             || Instant::now() < self.next_backfill
@@ -676,6 +690,10 @@ impl Runtime {
     async fn notice(&mut self, notice: Notification) {
         match notice {
             Notification::Status(state) => {
+                if self.port_events.is_some() {
+                    (self.log)("onebot_legacy_diagnostic", json!({"state":state}));
+                    return;
+                }
                 self.engine.sync_connection();
                 (self.log)("onebot", json!({"state":state}));
                 // Both statuses are emitted by a successful handshake, including reconnects.
@@ -688,6 +706,7 @@ impl Runtime {
                 if let Some(control) = &self.control {
                     control.observe(&event);
                 }
+                if self.port_events.is_some() { return; }
                 if !self.engine.participates() { return; }
                 if let Some(adapter) = &self.onebot_io {
                     use qq_inner_core::engine::io::PortEvent;
@@ -733,6 +752,23 @@ impl Runtime {
             }
         }
     }
+    async fn port_event(&mut self, event: qq_inner_core::engine::io::PortEvent) {
+        use qq_inner_core::engine::io::PortEvent;
+        let kind = match &event {
+            PortEvent::Incoming(_) => "incoming",
+            PortEvent::Notice(_) => "notice",
+            PortEvent::OutboundEvidence(_) => "outbound_evidence",
+        };
+        let Some(port) = &self.onebot_io else {
+            (self.log)("port_event_rejected", json!({"kind":kind,"code":"chat_port_unavailable"}));
+            return;
+        };
+        if let Err(error) = self.engine.ingest_port_event(event, port.clone()).await {
+            let message = error.to_string();
+            let code = message.split([':', ' ']).next().unwrap_or("ingest_failed");
+            (self.log)("port_event_rejected", json!({"kind":kind,"code":code,"error":message}));
+        }
+    }
     fn status(&self, now: f64, pid: u32) -> Result<Value> {
         let c = &self.config;
         let active = self.engine.available(now)?;
@@ -742,6 +778,8 @@ impl Runtime {
                 .snapshot(now)?;
         drop(db);
         let bot = self.bot.state();
+        let port_ingress = self.port_events.is_some();
+        let connection = self.engine.connection_state();
         // JS status fields retain their types and seconds; runningRevision reports this live process.
         let mut status = json!({"updatedAt":iso(now), "pid":pid, "mode":mode(c),
             "runningRevision":qq_inner_core::update::REVISION,
@@ -749,11 +787,18 @@ impl Runtime {
             "appliedRevision":self.applied.split(':').next(),
             "reloading":self.reloading, "reloadError":self.reload_error,
             "scheduleActive":active, "activityRhythm":activity, "missing":config::readiness(c),
-            "onebotConnected":bot.connected, "qqOnline":bot.online, "selfId":bot.self_id,
+            "onebotConnected":connection.connected, "qqOnline":connection.online,
+            "selfId":if port_ingress { json!(connection.self_id) } else { json!(bot.self_id) },
+            "ingressSource":if port_ingress { "chat_port" } else { "legacy" },
             "participation":self.engine.participation_state(),
-            "reconnects":bot.reconnects, "activeChats":self.engine.chats().len(),
+            "reconnects":if port_ingress { Value::Null } else { json!(bot.reconnects) }, "activeChats":self.engine.chats().len(),
             "model":self.raw["provider"]["model"], "provider":if c.provider.io_port == "legacy" { &c.provider.kind } else { &c.provider.io_port }, "apiCallsThisRun":self.model_port.as_ref().map_or_else(|| self.provider.calls(), |p| p.calls()),
             "lastCycleAt":self.engine.last_cycle(), "lastError":self.engine.last_error()});
+        if port_ingress {
+            if let Some(fault) = self.onebot_io.as_ref().and_then(|port| port.forwarding_fault()) {
+                status["ingressError"] = json!(fault);
+            }
+        }
         if let Some(ports) = &self._plugin_ports {
             let revision = self.applied.rsplit(':').next().unwrap_or_default();
             status["pluginAppliedRevision"] = json!(revision);
@@ -817,8 +862,22 @@ impl Runtime {
         );
         let reconnect = next.raw["onebot"] != self.raw["onebot"]
             || next.raw["onebotToken"] != self.raw["onebotToken"];
-        let plugin_ports = load_plugin_batch(root, self.log.clone(), Some(self.bot.clone()), &next.config,
-            next.config.provider.requests_per_hour.round() as u32)?;
+        let plugin_list_changed = self.applied.rsplit_once(':').map(|(_, hash)| hash)
+            != revision.rsplit_once(':').map(|(_, hash)| hash);
+        let onebot_requested = root.join("plugins/plugins.json").is_file() && {
+            let list: Value = serde_json::from_slice(&fs::read(root.join("plugins/plugins.json"))?)?;
+            list["plugins"].as_array().is_some_and(|entries| entries.iter().any(|entry|
+                entry["id"] == "onebot" && entry["enabled"] == true))
+        };
+        let owned_ingress = self.port_events.is_some();
+        if (reconnect && (owned_ingress || onebot_requested))
+            || (plugin_list_changed && (owned_ingress || onebot_requested)) {
+            anyhow::bail!("plugin batch rejected: {}", json!({"code":"restart_required","id":"onebot"}));
+        }
+        let plugin_ports = if owned_ingress { None } else {
+            load_plugin_batch(root, self.log.clone(), Some(self.bot.clone()), &next.config,
+                next.config.provider.requests_per_hour.round() as u32)?
+        };
         let engine = self.engine.clone();
         let stop = engine.stop();
         tokio::pin!(stop);
@@ -829,6 +888,13 @@ impl Runtime {
                 _ = &mut stop => break,
                 _ = report.tick() => self.report()?,
                 Some(notice) = self.notices.recv() => self.notice(notice).await,
+                event = async { match &mut self.port_events {
+                    Some(receiver) => receiver.recv().await,
+                    None => std::future::pending().await,
+                }} => {
+                    if let Some(event) = event { self.port_event(event).await; }
+                    else { anyhow::bail!("chat_port_ingress_closed"); }
+                },
             }
         }
         self.drain_backfill().await;
@@ -841,6 +907,8 @@ impl Runtime {
                 return Ok(());
             }
         }
+        let plugin_ports = if owned_ingress { self._plugin_ports.take() } else { plugin_ports };
+        let port_events = if owned_ingress { self.port_events.take() } else { None };
         let mut replacement = Self::new_with_plugins(
             next,
             self.store.clone(),
@@ -848,7 +916,7 @@ impl Runtime {
             self.now.clone(),
             self.log.clone(),
             (!reconnect).then(|| self.bot.clone()),
-            RuntimePlugins { ports: plugin_ports, initial_bot: None },
+            RuntimePlugins { ports: plugin_ports, initial_bot: None, port_events },
         )?;
         if self.engine.manual_mode() != qq_inner_core::engine::ManualMode::Normal {
             replacement.engine.set_manual_mode(self.engine.manual_mode());
@@ -967,7 +1035,7 @@ async fn run(root: PathBuf) -> Result<()> {
     let plugin_ports = load_plugin_batch(&root, log.clone(), initial_bot.as_ref().map(|(bot, _)| bot.clone()), c,
         c.provider.requests_per_hour.round() as u32)?;
     let mut rt = Runtime::new_with_plugins(loaded, store, runtime_revision(&root)?, now, log, None,
-        RuntimePlugins { ports: plugin_ports, initial_bot })?;
+        RuntimePlugins { ports: plugin_ports, initial_bot, port_events: None })?;
     rt.engine.restore()?;
     (rt.log)(
         "started",
@@ -1042,6 +1110,13 @@ async fn run(root: PathBuf) -> Result<()> {
                     }
                 }
                 Some(notice) = rt.notices.recv() => rt.notice(notice).await,
+                event = async { match &mut rt.port_events {
+                    Some(receiver) => receiver.recv().await,
+                    None => std::future::pending().await,
+                }} => {
+                    if let Some(event) = event { rt.port_event(event).await; }
+                    else { anyhow::bail!("chat_port_ingress_closed"); }
+                },
                 _ = async { if let Some(connection) = &mut rt.connection { let _ = connection.await; } } => {
                     rt.connection = None;
                     (rt.log)("connection_loop_failed", json!({}));
@@ -1372,7 +1447,7 @@ mod tests {
             let mut reads = 0;
             while reader_running.load(std::sync::atomic::Ordering::Relaxed) {
                 let v: Value = serde_json::from_slice(&fs::read(&reader_file).unwrap()).unwrap();
-                assert_eq!(v.as_object().unwrap().len(), 22);
+                assert_eq!(v.as_object().unwrap().len(), 23);
                 assert_eq!(v["participation"]["effective"], "normal");
                 assert_eq!(v["runningRevision"], qq_inner_core::update::REVISION);
                 assert_eq!(v["prompts"]["source"], "builtin");

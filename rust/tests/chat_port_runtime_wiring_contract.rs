@@ -27,7 +27,6 @@ use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::{TcpListener, TcpStream}, sy
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 
 const BIN: &str = env!("CARGO_BIN_EXE_qq-inner-core");
-const CHAT: &str = "group:10";
 
 struct Root(PathBuf);
 impl Root {
@@ -50,7 +49,7 @@ impl Root {
                 "identity":{"enabled":false},"schedule":{"enabled":false},
                 "rhythm":{"enabled":false},"learning":{"enabled":false},
                 "threeLayerDecision":false,"sending":{"enabled":false},
-                "debounceSeconds":0,"minThinkIntervalSeconds":0,
+                "debounceSeconds":0,"minThinkIntervalSeconds":1,
                 "addressedProbability":1,"maxMessagesPerHour":100,
                 "activeWindowSeconds":600,"quietHours":null}
         }))?)?;

@@ -27,6 +27,7 @@ pub struct OneBotAdapter {
     manifest: PortManifest,
     backend: Backend,
     sink: Mutex<Option<mpsc::Sender<PortEvent>>>,
+    forward_fault: Mutex<Option<String>>,
     self_ref: OnceLock<Weak<Self>>,
 }
 
@@ -47,6 +48,7 @@ impl OneBotAdapter {
             },
             backend: Backend::Hosted { action, connection },
             sink: Mutex::new(None),
+            forward_fault: Mutex::new(None),
             self_ref: OnceLock::new(),
         })
     }
@@ -69,6 +71,7 @@ impl OneBotAdapter {
             backend: Backend::Owned { bot, notices: Mutex::new(Some(notices)), shutdown,
                 connection_task, forward_task: Mutex::new(None) },
             sink: Mutex::new(None),
+            forward_fault: Mutex::new(None),
             self_ref: OnceLock::new(),
         });
         let _ = adapter.self_ref.set(Arc::downgrade(&adapter));
@@ -217,6 +220,10 @@ impl OneBotAdapter {
         let guard = self.sink.lock().map_err(|_| IoError::new("sink_poisoned"))?;
         let sink = guard.as_ref().ok_or_else(|| IoError::new("sink_not_attached"))?;
         sink.try_send(event).map_err(|_| IoError::new("incoming_sink_unavailable"))
+    }
+
+    pub fn forwarding_fault(&self) -> Option<String> {
+        self.forward_fault.lock().ok().and_then(|fault| fault.clone())
     }
 
     async fn command(&self, command: Command) -> PortReply<CommandResult> {
@@ -535,7 +542,7 @@ impl ChatPort for OneBotAdapter {
                 Some((runtime, receiver, weak))
             }
         };
-        *guard = Some(sink);
+        *guard = Some(sink.clone());
         drop(guard);
         if let Some((runtime, mut notices, weak)) = owned {
             let task = runtime.spawn(async move {
@@ -545,7 +552,15 @@ impl ChatPort for OneBotAdapter {
                     let received_at = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH).map_or(0., |time| time.as_secs_f64());
                     match adapter.map_event(&frame, received_at) {
-                        Ok(Some(event)) => { let _ = adapter.publish(event); }
+                        Ok(Some(event)) => {
+                            if sink.send(event).await.is_err() {
+                                if let Ok(mut fault) = adapter.forward_fault.lock() {
+                                    *fault = Some("incoming_sink_closed".into());
+                                }
+                                eprintln!("onebot_ingress_failed code=incoming_sink_closed");
+                                break;
+                            }
+                        }
                         Ok(None) => {}
                         Err(error) => eprintln!("onebot_event_rejected code={}", error.code),
                     }

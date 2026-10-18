@@ -566,6 +566,21 @@ impl Engine {
     pub fn set_chat_port(&self, port: Arc<dyn io::ChatPort>) {
         *self.chat_port.lock().unwrap() = Some(port);
     }
+    pub fn attach_primary_chat_port(
+        &self,
+        port: Arc<dyn io::ChatPort>,
+        capacity: usize,
+    ) -> Result<tokio::sync::mpsc::Receiver<io::PortEvent>> {
+        anyhow::ensure!(capacity > 0, "invalid_chat_port_capacity");
+        for id in &self.config.agent.allowed_groups {
+            io::ChatAddress::new(io::ChatKind::Group, &port.manifest().name, id)?;
+        }
+        let (sink, receiver) = tokio::sync::mpsc::channel(capacity);
+        port.attach(sink).map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        self.set_chat_port(port);
+        self.bind_configured_chats()?;
+        Ok(receiver)
+    }
     pub fn bind_configured_chats(&self) -> Result<()> {
         let Some(port) = self.chat_port.lock().unwrap().clone() else { return Ok(()); };
         let mut chats = self.io_chats.lock().unwrap();
@@ -1428,6 +1443,35 @@ impl Engine {
                 let engine = self.clone();
                 let mut abort = self.aborted.subscribe();
                 core.tasks.push(tokio::spawn(async move {
+                    let primary_port = { engine.chat_port.lock().unwrap().clone() };
+                    if let Some(port) = primary_port {
+                        let port_name = port.manifest().name.clone();
+                        let expected_chat = match chat.split_once(':') {
+                            Some(("group", id)) => io::ChatAddress::new(io::ChatKind::Group, &port_name, id),
+                            Some(("private", id)) => io::ChatAddress::new(io::ChatKind::Private, &port_name, id),
+                            _ => Err(io::IoError::new("invalid_chat")),
+                        };
+                        let Ok(expected_chat) = expected_chat else {
+                            (engine.options.log)("outbound_reconciliation_failed", json!({"chat":chat,"message_id":message_id,"reason":"invalid_chat"}));
+                            return;
+                        };
+                        let result = tokio::select! { biased;
+                            _ = abort.changed() => return,
+                            result = tokio::time::timeout(std::time::Duration::from_secs(8),
+                                port.deliver(io::Command::Fetch { port: port_name.clone(), request: io::Fetch::OutboundEvidence { port: port_name, message_id: message_id.clone() } })) => result,
+                        };
+                        match result {
+                            Ok(io::PortReply::Ok(io::CommandResult::OutboundEvidence(evidence))) => {
+                                if let Err(error) = engine.reconcile_port_readback(&expected_chat, &message_id, evidence) {
+                                    (engine.options.log)("outbound_reconciliation_failed", json!({"chat":chat,"message_id":message_id,"reason":error.to_string()}));
+                                }
+                            }
+                            Ok(io::PortReply::Failed { code, .. }) => (engine.options.log)("outbound_reconciliation_failed", json!({"chat":chat,"message_id":message_id,"reason":code})),
+                            Ok(_) => (engine.options.log)("outbound_reconciliation_failed", json!({"chat":chat,"message_id":message_id,"reason":"invalid_port_readback"})),
+                            Err(_) => (engine.options.log)("outbound_reconciliation_timeout", json!({"chat":chat,"message_id":message_id,"reason":"get_msg_timeout"})),
+                        }
+                        return;
+                    }
                     let result = tokio::select! { biased;
                         _ = abort.changed() => return,
                         result = tokio::time::timeout(std::time::Duration::from_secs(8),
