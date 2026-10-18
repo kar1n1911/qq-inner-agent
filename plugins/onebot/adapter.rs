@@ -141,8 +141,9 @@ impl OneBotAdapter {
             Value::Array(parts) => parts.iter().map(map_segment).collect(),
             _ => return Err(IoError::new("invalid_message_segments")),
         };
+        let reply = reply_observation(payload);
         let sender = &event["sender"];
-        Ok(Some(PortEvent::Incoming(Incoming {
+        Ok(Some(PortEvent::Incoming(Box::new(Incoming {
             port: self.manifest.name.clone(),
             chat: ChatAddress::new(kind, &self.manifest.name, id)?,
             message_id,
@@ -160,9 +161,10 @@ impl OneBotAdapter {
                 is_robot: sender["is_robot"].as_bool(),
             },
             segments,
+            reply,
             self_message: sender_id == self_id,
             raw: Some(event.clone()),
-        })))
+        }))))
     }
 
     pub fn publish(&self, event: PortEvent) -> Result<(), IoError> {
@@ -184,6 +186,19 @@ impl OneBotAdapter {
             return failed("qq_offline", false);
         }
         match command {
+            Command::FetchForward { id, .. } => {
+                if id.trim().is_empty() { return failed("invalid_forward_id", false); }
+                match self.action("get_forward_msg".into(), json!({"id":id})).await {
+                    PortReply::Ok(data) => {
+                        let Some(nodes) = data.get("nodes").or_else(|| data.get("messages"))
+                            .and_then(Value::as_array) else { return failed("invalid_forward_response", false); };
+                        PortReply::Ok(CommandResult::Forward(nodes.iter().map(map_forward_node).collect()))
+                    }
+                    PortReply::Failed { code, uncertain } => PortReply::Failed { code, uncertain },
+                    PortReply::Unsupported { capability } => PortReply::Unsupported { capability },
+                    PortReply::Degraded { .. } => failed("degraded_forward_ack", false),
+                }
+            }
             Command::Fetch { request, .. } => {
                 let (action, params) = match request {
                     Fetch::GroupNotices { chat } => {
@@ -523,10 +538,103 @@ fn map_segment(segment: &Value) -> Segment {
         Some("reply") => wire_string(&data["id"]).map(|id| Segment::Reply { id }),
         Some("face") => wire_string(&data["id"]).map(|id| Segment::Face { id }),
         Some("image") => data["url"].as_str().or_else(|| data["file"].as_str())
-            .map(|s| Segment::Image { src: MediaSrc::Opaque(s.into()), summary: None }),
+            .map(|s| Segment::Image { src: MediaSrc::Opaque(s.into()), summary: data["summary"].as_str().map(str::to_owned) }),
         Some("forward") => Some(Segment::Forward { id: wire_string(&data["id"]), nodes: vec![] }),
+        Some("json") => card_segment(&data["data"]),
         _ => None,
     }.unwrap_or_else(|| Segment::Unknown { kind: segment["type"].as_str().unwrap_or("attachment").into() })
+}
+
+fn card_segment(data: &Value) -> Option<Segment> {
+    fn collect(value: &Value, fields: &mut Vec<String>) {
+        if let Some(object) = value.as_object() {
+            for key in ["title", "desc", "summary", "prompt"] {
+                if let Some(text) = object.get(key).and_then(Value::as_str) {
+                    let text = text.trim();
+                    if !text.is_empty() && !fields.iter().any(|field| field == text) {
+                        fields.push(text.to_owned());
+                    }
+                }
+            }
+            for child in object.values().filter(|value| value.is_object() || value.is_array()) {
+                collect(child, fields);
+            }
+        } else if let Some(array) = value.as_array() {
+            for child in array { collect(child, fields); }
+        }
+    }
+    let parsed;
+    let card = if let Some(raw) = data.as_str() {
+        parsed = serde_json::from_str::<Value>(raw).ok()?;
+        &parsed
+    } else { data };
+    let mut fields = Vec::new();
+    collect(card, &mut fields);
+    if fields.is_empty() { return None; }
+    Some(Segment::Card {
+        title: card.get("title").and_then(Value::as_str).map(str::to_owned),
+        desc: card.get("desc").and_then(Value::as_str).map(str::to_owned),
+        url: card.get("url").and_then(Value::as_str).map(str::to_owned),
+        display_text: format!("[卡片] {}", fields.join(" — ")),
+    })
+}
+
+fn map_forward_node(node: &Value) -> ForwardNode {
+    let node = if node["type"] == "node" { &node["data"] } else { node };
+    let content = node.get("content").or_else(|| node.get("message"));
+    let segments = match content {
+        Some(Value::String(text)) => vec![Segment::Text(text.clone())],
+        Some(Value::Array(parts)) => parts.iter().map(map_segment).collect(),
+        _ => vec![],
+    };
+    ForwardNode { sender: Sender {
+        id: wire_string(&node["user_id"]).unwrap_or_default(),
+        name: wire_string(&node["nickname"]).unwrap_or_default(),
+        card: None, role: None, title: None, is_robot: None,
+    }, segments }
+}
+
+fn reply_observation(payload: &Value) -> ReplyObservation {
+    fn valid(id: &str) -> bool {
+        !id.is_empty() && id.len() <= 256 && id.trim() == id && !id.chars().any(char::is_control)
+    }
+    let replies: Vec<_> = match payload {
+        Value::Array(parts) => parts.iter().filter(|part| part["type"] == "reply")
+            .map(|part| match part["data"].get("id") {
+                None | Some(Value::Null) => ReplyObservation::MissingId,
+                Some(Value::String(id)) if valid(id) => ReplyObservation::Target(id.clone()),
+                _ => ReplyObservation::InvalidId,
+            }).collect(),
+        Value::String(message) => {
+            let mut found = Vec::new();
+            let mut rest = message.as_str();
+            while let Some(start) = rest.find("[CQ:") {
+                rest = &rest[start + 4..];
+                let Some(end) = rest.find(']') else { break; };
+                let body = &rest[..end];
+                if body.split(',').next() == Some("reply") {
+                    let ids: Vec<_> = body.split(',').skip(1).filter_map(|field| field.split_once('='))
+                        .filter(|(name, _)| *name == "id").map(|(_, id)| id).collect();
+                    found.push(match ids.as_slice() {
+                        [] => ReplyObservation::MissingId,
+                        [id] => {
+                            let id = decode_cq(id);
+                            if valid(&id) { ReplyObservation::Target(id) } else { ReplyObservation::InvalidId }
+                        }
+                        _ => ReplyObservation::InvalidId,
+                    });
+                }
+                rest = &rest[end + 1..];
+            }
+            found
+        }
+        _ => Vec::new(),
+    };
+    match replies.as_slice() {
+        [] => ReplyObservation::NoReply,
+        [one] => one.clone(),
+        _ => ReplyObservation::InvalidId,
+    }
 }
 
 fn parse_cq_text(text: &str) -> Vec<Segment> {

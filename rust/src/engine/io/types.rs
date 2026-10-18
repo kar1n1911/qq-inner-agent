@@ -103,14 +103,23 @@ pub struct Incoming {
     pub received_at: f64,
     pub sender: Sender,
     pub segments: Vec<Segment>,
+    pub reply: ReplyObservation,
     pub self_message: bool,
     /// Adapter/audit use only. The kernel must not interpret this protocol JSON.
     pub raw: Option<Value>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum ReplyObservation {
+    NoReply,
+    Target(String),
+    MissingId,
+    InvalidId,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum PortEvent {
-    Incoming(Incoming),
+    Incoming(Box<Incoming>),
     Notice(Notice),
 }
 
@@ -183,6 +192,7 @@ pub enum Segment {
         title: Option<String>,
         desc: Option<String>,
         url: Option<String>,
+        display_text: String,
     },
     Unknown {
         kind: String,

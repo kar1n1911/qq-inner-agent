@@ -5,6 +5,7 @@ pub mod ocr;
 
 use crate::{
     config::{js_string, Agent},
+    engine::io::types::{MediaSrc, Segment},
     engine::policy,
     media::media_source::{Evidence, Override},
     persona::{affect, conversation},
@@ -84,14 +85,26 @@ impl Collector {
         agent: &Agent,
         now: f64,
     ) -> Result<Report> {
-        let mut report = Report::default();
         if !self.config.enabled {
-            return Ok(report);
+            return Ok(Report::default());
         }
         // 只采人类，排除自己的发送回显，避免自己学自己产生自我强化。
         let Some(m) = policy::normalize(event, self_id, agent, now) else {
-            return Ok(report);
+            return Ok(Report::default());
         };
+        ensure!(
+            m.chat.split_once(':').is_some_and(|(_, id)|
+                !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit())),
+            "invalid_media_chat"
+        );
+        store.enable_media()?;
+        let (_, key) = store.record_message(&serde_json::to_value(&m)?)?;
+        self.ingest_segments(store, &m, &key, &typed_segments(event), now)
+    }
+    pub fn ingest_segments(&self, store: &Store, m: &policy::Message, key: &str,
+        segments: &[Segment], now: f64) -> Result<Report> {
+        let mut report = Report::default();
+        if !self.config.enabled { return Ok(report); }
         ensure!(
             m.chat
                 .split_once(':')
@@ -99,13 +112,11 @@ impl Collector {
             "invalid_media_chat"
         );
         store.enable_media()?;
-        let (_, key) = store.record_message(&serde_json::to_value(&m)?)?;
-        let segments = segments(event);
         for (index, segment) in segments.iter().enumerate() {
-            if !matches!(segment["type"].as_str(), Some("image" | "face")) {
+            if !matches!(segment, Segment::Image { .. } | Segment::Face { .. }) {
                 continue;
             }
-            match self.collect(store, &m, &key, segment, index) {
+            match self.collect(store, m, key, segment, index) {
                 Ok(true) => report.collected += 1,
                 Ok(false) => {}
                 // 不记录可能含凭据的临时 URL；错误码和消息 id 足以定位失败。
@@ -119,10 +130,10 @@ impl Collector {
         for row in store.rows("SELECT message_id FROM media_stages WHERE chat=? AND message_id IN (SELECT message_key FROM messages WHERE chat=? ORDER BY ts DESC,rowid DESC LIMIT 24)",params![m.chat,m.chat])? {
             store.record_media_stage(&m.chat,row["message_id"].as_str().unwrap(),now,&self.config.classification)?;
         }
-        store.record_media_stage(&m.chat, &key, now, &self.config.classification)?;
+        store.record_media_stage(&m.chat, key, now, &self.config.classification)?;
         Ok(report)
     }
-    fn collect(&self, store: &Store, m: &policy::Message, key: &str, s: &Value, index: usize) -> Result<bool> {
+    fn collect(&self, store: &Store, m: &policy::Message, key: &str, s: &Segment, index: usize) -> Result<bool> {
         let tx = store.immediate()?;
         if store
             .first(
@@ -133,16 +144,16 @@ impl Collector {
         {
             return Ok(false);
         }
-        let kind = s["type"].as_str().unwrap();
-        let (hash, file, bytes, content) = if kind == "face" {
-            let id = js_string(&s["data"]["id"]);
+        let kind = if matches!(s, Segment::Face { .. }) { "face" } else { "image" };
+        let (hash, file, bytes, content) = if let Segment::Face { id } = s {
             ensure!(
                 !id.is_empty() && id.len() <= 5 && id.bytes().all(|b| b.is_ascii_digit()),
                 "invalid_face"
             );
-            (sha256(format!("face:{id}").as_bytes()), id, 0, None)
+            (sha256(format!("face:{id}").as_bytes()), id.clone(), 0, None)
         } else {
-            let data = read_image(s, self.config.max_file_bytes, self.config.timeout_seconds)?;
+            let Segment::Image { src, .. } = s else { unreachable!() };
+            let data = read_image_source(src, self.config.max_file_bytes, self.config.timeout_seconds)?;
             let hash = sha256(&data);
             let ext = if data.starts_with(b"\x89PNG\r\n\x1a\n") {
                 "png"
@@ -349,6 +360,36 @@ fn segments(event: &Value) -> Vec<Value> {
     });
     result
 }
+
+/// Keep segment positions, including non-media parts, for media_receipts.
+pub fn typed_segments(event: &Value) -> Vec<Segment> {
+    segments(event).iter().map(|segment| {
+        let data = &segment["data"];
+        match segment["type"].as_str() {
+            Some("image") => Segment::Image {
+                src: MediaSrc::Opaque(data["url"].as_str().filter(|value| !value.is_empty())
+                    .or_else(|| data["file"].as_str()).unwrap_or("").to_owned()),
+                summary: data["summary"].as_str().map(str::to_owned),
+            },
+            Some("face") => Segment::Face { id: js_string(&data["id"]) },
+            _ => Segment::Unknown { kind: data["type"].as_str().unwrap_or("other").to_owned() },
+        }
+    }).collect()
+}
+
+pub fn capture_face_frequency(store: &Store, chat: &str, id: &str, segments: &[Segment]) -> Result<()> {
+    if !chat.starts_with("group:") { return Ok(()); }
+    let Some(key) = store.resolve_message_key(chat, id)? else {
+        store.execute("INSERT INTO message_identity_audit(kind,table_name,chat,raw_id,detail,created) VALUES('unresolved_reference','humanize_faces',?,?,'capture has no unique stored message',strftime('%s','now'))", rusqlite::params![chat,id])?;
+        return Ok(());
+    };
+    let has_face = segments.iter().any(|segment| match segment {
+        Segment::Face { id } => !id.is_empty() && id.len() <= 5 && id.bytes().all(|byte| byte.is_ascii_digit()),
+        _ => false,
+    });
+    store.execute("INSERT OR IGNORE INTO humanize_faces VALUES(?,?,?)", rusqlite::params![chat,key,has_face])?;
+    Ok(())
+}
 impl Store {
     pub fn enable_media(&self) -> Result<()> {
         let tx = self.immediate()?;
@@ -492,6 +533,13 @@ pub fn read_image(segment: &Value, max_bytes: u64, timeout_seconds: u64) -> Resu
         .filter(|s| !s.is_empty())
         .or_else(|| segment["data"]["file"].as_str())
         .ok_or_else(|| anyhow::anyhow!("missing_file"))?;
+    read_image_source(&MediaSrc::Opaque(source.to_owned()), max_bytes, timeout_seconds)
+}
+pub fn read_image_source(source: &MediaSrc, max_bytes: u64, timeout_seconds: u64) -> Result<Vec<u8>> {
+    let source = match source {
+        MediaSrc::Url(source) | MediaSrc::LocalPath(source) | MediaSrc::Opaque(source) => source,
+    };
+    ensure!(!source.is_empty(), "missing_file");
     let reader: Box<dyn Read> = if source.starts_with("http://") || source.starts_with("https://") {
         Box::new(
             ureq::AgentBuilder::new()

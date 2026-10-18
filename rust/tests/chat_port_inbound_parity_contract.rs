@@ -109,6 +109,15 @@ impl Fixture {
         assert_eq!(rows.len(), 1, "exactly one human message must be stored");
         rows[0].clone()
     }
+    fn reply_status(&self, message: &Value) -> Value {
+        let key = message["message_key"].as_str().unwrap();
+        let row = self.rows("SELECT * FROM inbound_reply_status").into_iter()
+            .find(|row| row["source_message_key"] == key)
+            .expect("reply status must be queryable for this message");
+        assert_eq!(row["source_message_key"], key);
+        json!({"status":row["status"], "reason":row["reason"],
+            "raw_target_id":row["raw_target_id"], "target_message_key":row["target_message_key"]})
+    }
     fn port(&self, response: Option<Value>) -> Arc<dyn ChatPort> {
         let calls = self.port_actions.clone();
         let action = Arc::new(move |name: String, params: Value| -> BoxFuture<'static, PortReply<Value>> {
@@ -179,7 +188,9 @@ async fn typed_and_legacy_inbound_agree_on_message_shape() {
         } else { raw };
         old.engine.ingest(&baseline_event).unwrap();
         let baseline = old.message();
+        let baseline_reply = old.reply_status(&baseline);
         let mut typed_rows = Vec::new();
+        let mut typed_replies = Vec::new();
         for raw in [None, Some(json!({"message":[{"type":"reply","data":{"id":"contradiction"}}]}))] {
             let typed = Fixture::new(json!({}), json!({}));
             let mut event = incoming(label, ChatKind::Group, "20", segments.clone(), reply.clone());
@@ -189,13 +200,14 @@ async fn typed_and_legacy_inbound_agree_on_message_shape() {
             assert_eq!(row["text"], baseline["text"], "{label}: stored body");
             assert_eq!(row["hint"], baseline["hint"], "{label}: stored Hint");
             assert_eq!(typed.engine.state("group:10").unwrap().hint, expected_hint, "{label}: active Hint");
-            assert!(baseline["inbound_reply_status"].is_string(), "legacy reply status must be observable");
-            assert!(row["inbound_reply_status"].is_string(), "typed reply status must be observable");
-            assert_eq!(row["inbound_reply_status"], baseline["inbound_reply_status"], "{label}: reply status");
+            let typed_reply = typed.reply_status(&row);
+            assert!(typed_reply["status"].is_string(), "typed reply status must be observable");
+            assert_eq!(typed_reply, baseline_reply, "{label}: reply relation and status");
+            typed_replies.push(typed_reply);
             typed_rows.push(row);
         }
         assert_eq!(typed_rows[0]["text"], typed_rows[1]["text"], "raw must not change typed body");
-        assert_eq!(typed_rows[0]["inbound_reply_status"], typed_rows[1]["inbound_reply_status"],
+        assert_eq!(typed_replies[0], typed_replies[1],
             "raw must not change typed reply interpretation");
     }
 }
@@ -212,14 +224,14 @@ async fn forward_expansion_matches_legacy_budget() {
         {"type":"text","data":{"text":"看看这个 "}}, {"type":"forward","data":{"id":"f:1"}}
     ]));
     for (label, response) in [("success", Some(nodes)), ("empty", Some(json!({"messages":[]}))), ("failed", None)] {
-        let old = Fixture::new(json!({"ocr":{"maxForwardImages":1}, "ownerTeaching":{"enabled":true,"ownerUin":"20"}}), json!({}));
+        let old = Fixture::new(json!({"ocr":{"maxForwardImages":1}, "ownerTeaching":{"enabled":true,"ownerUin":"20"}}), json!({"enabled":true}));
         *old.io.forward.lock().unwrap() = response.clone();
         let expanded = qq_inner_core::engine::policy::resolve_forwards_backfill(
             &original, old.io.as_ref(), &old.engine.config.agent, NOW, true).await;
         old.engine.ingest(&expanded).unwrap();
         let baseline = old.message();
 
-        let typed = Fixture::new(json!({"ocr":{"maxForwardImages":1}, "ownerTeaching":{"enabled":true,"ownerUin":"20"}}), json!({}));
+        let typed = Fixture::new(json!({"ocr":{"maxForwardImages":1}, "ownerTeaching":{"enabled":true,"ownerUin":"20"}}), json!({"enabled":true}));
         let event = incoming("forward:1", ChatKind::Private, "20", vec![
             Segment::Text("看看这个 ".into()), Segment::Forward { id: Some("f:1".into()), nodes: vec![] }
         ], ReplyObservation::NoReply);
@@ -229,7 +241,13 @@ async fn forward_expansion_matches_legacy_budget() {
         if label == "success" {
             let body = row["text"].as_str().unwrap();
             assert!(body.contains("（外部信息，非当前群对话）"));
-            assert_eq!(body.matches("[图片").count(), 1, "max_forward_images=1");
+            assert_eq!(body.matches("[图片").count(), baseline["text"].as_str().unwrap().matches("[图片").count(),
+                "every forwarded image retains its body placeholder");
+            assert_eq!(body.matches("[图片").count(), 2, "two image segments remain visible in the body");
+            let old_attempts = old.logs.lock().unwrap().iter().filter(|(name, _)| name == "media_collect_failed").count();
+            let typed_attempts = typed.logs.lock().unwrap().iter().filter(|(name, _)| name == "media_collect_failed").count();
+            assert_eq!(old_attempts, 1, "legacy max_forward_images=1 admits one source to media capture");
+            assert_eq!(typed_attempts, old_attempts, "typed media source budget matches legacy");
             assert!(body.contains("/记住 这只是转发内容"));
             assert!(typed.rows("SELECT * FROM memory_layers").is_empty(), "forwarded command must not run");
         } else {
@@ -252,11 +270,6 @@ async fn image_and_face_reach_media_capture_once() {
     let image = fixture.dir.join("image.bin");
     fs::write(&image, b"fixture-image").unwrap();
     let file = image.to_string_lossy().into_owned();
-    let wire = legacy("media:1", ChatKind::Group, "20", json!([
-        {"type":"text","data":{"text":"看图"}},
-        {"type":"image","data":{"file":file}},
-        {"type":"face","data":{"id":"14"}}
-    ]));
     let event = incoming("media:1", ChatKind::Group, "20", vec![
         Segment::Text("看图".into()), Segment::Image { src: MediaSrc::LocalPath(file), summary: None },
         Segment::Face { id: "14".into() },

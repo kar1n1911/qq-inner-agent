@@ -745,110 +745,115 @@ impl Engine {
                 "reason":if confirmed { "matched" } else { "no_matching_unconfirmed_ack" }}));
         Ok(confirmed)
     }
-    /// Opt-in P2 ingress. Protocol JSON remains inside the adapter; the same
-    /// pending-chat cycle and send gates used by `ingest` handle the reply.
+    /// Existing synchronous entry accepts only already-resolved forwards.
     pub fn ingest_incoming(&self, incoming: &io::types::Incoming, port: Arc<dyn io::ChatPort>) -> Result<()> {
-        use io::types::{ChatKind, Segment};
-        if !self.participates() { return Ok(()); }
-        if incoming.self_message {
-            if let Some(raw) = &incoming.raw { self.reconcile_outbound_event(raw, incoming.received_at)?; }
-            return Ok(());
+        ensure!(!incoming.segments.iter().any(|segment| matches!(segment,
+            io::Segment::Forward { id: Some(_), nodes } if nodes.is_empty())), "incoming_forward_unresolved");
+        self.ingest_incoming_resolved(incoming, port, &[])
+    }
+
+    /// The async boundary performs protocol fetches before the shared, synchronous ingest.
+    pub async fn ingest_port_incoming(self: &Arc<Self>, mut incoming: io::Incoming,
+        port: Arc<dyn io::ChatPort>) -> Result<()> {
+        use io::{Command, CommandResult, PortReply, Segment};
+        let mut failures = Vec::new();
+        if !incoming.self_message {
+            for segment in &mut incoming.segments {
+                let Segment::Forward { id: Some(id), nodes } = segment else { continue; };
+                if !nodes.is_empty() { continue; }
+                let port_name = port.manifest().name.clone();
+                match port.deliver(Command::FetchForward { port: port_name, id: id.clone() }).await {
+                    PortReply::Ok(CommandResult::Forward(fetched)) => *nodes = fetched,
+                    PortReply::Ok(_) => failures.push("invalid_forward_response"),
+                    PortReply::Failed { .. } => failures.push("forward_fetch_failed"),
+                    PortReply::Unsupported { .. } => failures.push("forward_unsupported"),
+                    PortReply::Degraded { .. } => failures.push("forward_degraded"),
+                }
+            }
         }
-        ensure!(incoming.chat.port == incoming.port, "wrong_incoming_port");
-        ensure!(incoming.ts.is_finite() && incoming.ts > 0. && incoming.received_at.is_finite() && incoming.received_at > 0., "invalid_incoming_time");
+        let engine = self.clone();
+        tokio::task::spawn_blocking(move || engine.ingest_incoming_resolved(&incoming, port, &failures))
+            .await.map_err(|error| anyhow::anyhow!("ingest_task_failed: {error}"))?
+    }
+
+    fn ingest_incoming_resolved(&self, incoming: &io::Incoming, port: Arc<dyn io::ChatPort>,
+        forward_failures: &[&str]) -> Result<()> {
+        use io::{ChatKind, Segment};
+        if !self.participates() { return Ok(()); }
+        ensure!(!incoming.self_message, "typed_outbound_evidence_unimplemented");
+        ensure!(incoming.chat.port == incoming.port && port.manifest().name == incoming.port, "wrong_incoming_port");
+        ensure!(incoming.ts.is_finite() && incoming.ts > 0. && incoming.received_at.is_finite()
+            && incoming.received_at > 0., "invalid_incoming_time");
         ensure!(incoming.self_id == self.transport.self_id(), "wrong_self_id");
         let a = &self.config.agent;
         if a.ignored_users.contains(&incoming.sender.id) { return Ok(()); }
         let chat = format!("{}:{}", incoming.chat.kind.as_str(), incoming.chat.id);
-        if !policy::allowed(&chat, a) { return Ok(()); }
-        ensure!(port.manifest().name == incoming.port, "wrong_incoming_port");
+        let authorized = crate::persona::owner_teaching::authorized(a, &chat, &incoming.sender.id);
+        if !policy::allowed(&chat, a) && !(incoming.chat.kind == ChatKind::Private
+            && a.owner_teaching.enabled && authorized) { return Ok(()); }
         let mut text = String::new();
+        let mut command_text = String::new();
+        let mut media_segments = Vec::new();
         let mut at_self = false;
         let mut at_other = false;
+        let mut forward_images = 0usize;
         for segment in &incoming.segments {
             match segment {
-                Segment::Text(part) => text.push_str(part),
+                Segment::Text(part) => { text.push_str(part); command_text.push_str(part); media_segments.push(segment.clone()); }
                 Segment::Mention { id } => {
                     at_self |= id == &incoming.self_id;
                     at_other |= id != &incoming.self_id && id != "all";
                     text.push_str(&format!(" [@{id}] "));
+                    media_segments.push(segment.clone());
                 }
-                Segment::Reply { .. } => text.push_str(" [reply] "),
-                Segment::Face { id } => text.push_str(&format!(" [QQface:{id}] ")),
-                _ => anyhow::bail!("incoming_segment_unimplemented"),
+                Segment::Reply { .. } => { text.push_str(" [reply] "); media_segments.push(segment.clone()); }
+                Segment::Face { id } if !id.is_empty() && id.len() <= 5 && id.bytes().all(|byte| byte.is_ascii_digit()) => {
+                    text.push_str(&format!(" [QQface:{id}] "));
+                    media_segments.push(segment.clone());
+                }
+                Segment::Face { .. } => { text.push_str(" [face] "); media_segments.push(segment.clone()); }
+                Segment::Image { .. } => { text.push_str(" [image] "); media_segments.push(segment.clone()); }
+                Segment::Card { display_text, .. } => { text.push_str(display_text); media_segments.push(segment.clone()); }
+                Segment::Forward { nodes, .. } if !nodes.is_empty() => {
+                    if let Some((forward_text, images)) = policy::typed_forward_text(nodes,
+                        a.max_input_chars as usize, a.ocr.max_forward_images) {
+                        let remaining = (a.max_input_chars as usize).saturating_sub(text.chars().count());
+                        text.push_str(&policy::clip_forward(&forward_text, remaining));
+                        media_segments.push(Segment::Unknown { kind: "resolved_forward_text".into() });
+                        for image in images.into_iter().take(a.ocr.max_forward_images.saturating_sub(forward_images)) {
+                            media_segments.push(image);
+                            forward_images += 1;
+                        }
+                    } else {
+                        text.push_str(" [forward] ");
+                        media_segments.push(segment.clone());
+                    }
+                }
+                Segment::Forward { .. } => { text.push_str(" [forward] "); media_segments.push(segment.clone()); }
+                Segment::Unknown { kind } => {
+                    text.push_str(&format!(" [{}] ", crate::utils::text::clip_chars(kind, 24)));
+                    media_segments.push(segment.clone());
+                }
             }
         }
         let text = crate::utils::text::clip_chars(crate::utils::text::js_trim(&text), a.max_input_chars as usize);
         if text.is_empty() { return Ok(()); }
-        // Owner commands, media capture, and notice handling remain on the
-        // legacy path until their neutral contracts exist; never half-process.
-        ensure!(!text.trim_start().starts_with('/'), "incoming_command_unimplemented");
-        let now = self.now();
         let identity = self.self_identity.identity(&incoming.self_id, &chat);
         let named = policy::named(&text, a.aliases.iter().map(String::as_str))
             || policy::named(&text, [&identity.nickname, &identity.card].into_iter().map(String::as_str));
-        let hint = if incoming.chat.kind == ChatKind::Private || at_self || named {
-            Hint::SelfChat
-        } else if at_other { Hint::Other } else { Hint::Open };
-        let m = policy::Message {
-            chat: chat.clone(), id: incoming.message_id.clone(),
-            sender: incoming.sender.id.clone(),
-            name: crate::utils::text::clip_chars(&incoming.sender.name, 80),
-            text, ts: incoming.ts, is_self: false, hint,
+        let hint = if incoming.chat.kind == ChatKind::Private || at_self || named { Hint::SelfChat }
+            else if at_other { Hint::Other } else { Hint::Open };
+        let message = policy::Message { chat, id: incoming.message_id.clone(), sender: incoming.sender.id.clone(),
+            name: crate::utils::text::clip_chars(&incoming.sender.name, 80), text,
+            ts: incoming.ts, is_self: false, hint };
+        let reply = match &incoming.reply {
+            io::ReplyObservation::NoReply => crate::store::ReplyInput::NoReply,
+            io::ReplyObservation::Target(id) => crate::store::ReplyInput::Target(id.clone()),
+            io::ReplyObservation::MissingId => crate::store::ReplyInput::MissingId,
+            io::ReplyObservation::InvalidId => crate::store::ReplyInput::InvalidId,
         };
-        let mut value = serde_json::to_value(&m)?;
-        value["received_at"] = json!(incoming.received_at);
-        let reply = incoming.raw.as_ref().map(policy::inbound_reply).unwrap_or_else(|| {
-            incoming.segments.iter().find_map(|segment| match segment {
-                Segment::Reply { id } => Some(crate::store::ReplyInput::Target(id.clone())),
-                _ => None,
-            }).unwrap_or(crate::store::ReplyInput::NoReply)
-        });
-        let mut core = self.core();
-        let state = if now - m.ts > a.active_window_seconds {
-            None
-        } else {
-            core.state(&chat, a.max_active_chats)
-        };
-        let (inserted, key) = self.db()?.record_inbound_message(&value, reply)?;
-        if !inserted { return Ok(()); }
-        value["message_key"] = json!(key);
-        if a.identity.enabled && incoming.chat.kind == ChatKind::Group {
-            self.db()?.ensure_orientation(&chat, now)?;
-        }
-        self.orientation.observe(&chat)?;
-        let db = self.db()?;
-        if a.topic_lifecycle.learning.enabled {
-            if let Some(stage) = decision::replied_topic_stage(&db, &key, &self.media_config.classification)? {
-                db.learn_topic_reply(&key, now, stage)?;
-            }
-        }
-        if a.learning.enabled { LayeredMemory::new(&db).capture(&value, now, &a.memory)?; }
-        let Some(s) = state else { return Ok(()); };
-        db.observe(&value, now)?;
-        s.version += 1;
-        s.last_human = now;
-        if m.hint == Hint::SelfChat { s.addressed_id = Some(m.id.clone()); }
-        else if !s.pending { s.addressed_id = None; }
-        s.last_id = key;
-        if !(s.pending && s.hint == Hint::SelfChat) { s.hint = m.hint; }
-        s.pending = true;
-        s.pause_done = false;
-        s.due = now + a.debounce_seconds;
-        let rebound = {
-            let mut chats = self.io_chats.lock().unwrap();
-            match chats.get(&chat) {
-                Some(bound) if !Arc::ptr_eq(bound, &port) => Some(bound.manifest().name.clone()),
-                Some(_) => None,
-                None => { chats.insert(chat.clone(), port.clone()); None },
-            }
-        };
-        if let Some(bound) = rebound {
-            (self.options.log)("chat_port_rebind_ignored", json!({
-                "chat": chat, "bound": bound, "incoming": port.manifest().name,
-            }));
-        }
-        Ok(())
+        self.ingest_projected(message, incoming.received_at, reply, command_text,
+            media_segments, false, Some(port), forward_failures)
     }
     async fn send_chat(
         &self, chat: &str, text: &str, face: Option<&str>,
@@ -983,7 +988,6 @@ impl Engine {
             let ts = crate::transport::js_number(&event["time"]);
             return self.notice_group_joined(&chat, if ts == 0. || ts.is_nan() { now } else { ts });
         }
-        let mut core = self.core();
         // 感知与值班解耦：离岗仍记录、观察和学习，是否发言由回复路径检查。
         let message = if backfill {
             policy::normalize_backfill(event, &self_id, a, now)
@@ -1000,10 +1004,7 @@ impl Engine {
         ) {
             m.hint = Hint::SelfChat;
         }
-        let mut value = serde_json::to_value(&m)?;
-        value["received_at"] = json!(now);
         let reply = policy::inbound_reply(event);
-        // 指令先去重再执行；命中后不 capture、不触发普通回复或常规学习。
         let raw = if let Some(s) = event["message"].as_str() {
             s.to_owned()
         } else {
@@ -1018,6 +1019,19 @@ impl Engine {
                 })
                 .unwrap_or_default()
         };
+        self.ingest_projected(m, now, reply, raw, crate::media::typed_segments(event),
+            backfill, None, &[])
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn ingest_projected(&self, m: policy::Message, received_at: f64,
+        reply: crate::store::ReplyInput, raw: String, segments: Vec<io::Segment>,
+        backfill: bool, port: Option<Arc<dyn io::ChatPort>>, forward_failures: &[&str]) -> Result<()> {
+        let a = &self.config.agent;
+        let now = self.now();
+        let mut core = self.core();
+        let mut value = serde_json::to_value(&m)?;
+        value["received_at"] = json!(received_at);
         // 身份外显自动执行；回退命令仍严格限定主人本人私聊。
         if !backfill
             && a.identity.enabled
@@ -1031,6 +1045,7 @@ impl Engine {
                 return Ok(());
             }
             db.mark_handled(&m.chat, &key, true)?;
+            if let Some(port) = &port { self.bind_ingress_chat(&m.chat, port); }
             if core.identity_busy || !core.identity_commands.is_empty() {
                 core.teaching_replies
                     .push((m.chat, "身份更新正在处理，请稍后再试".into()));
@@ -1053,6 +1068,7 @@ impl Engine {
                 return Ok(());
             }
             db.mark_handled(&m.chat, &key, true)?;
+            if let Some(port) = &port { self.bind_ingress_chat(&m.chat, port); }
             core.teaching_commands.push((m.chat, m.sender, raw));
             return Ok(());
         }
@@ -1075,14 +1091,17 @@ impl Engine {
             return Ok(());
         }
         value["message_key"] = json!(key);
+        for reason in forward_failures {
+            (self.options.log)("forward_fetch_failed", json!({"chat":m.chat,"message_key":key,"reason":reason}));
+        }
         if let Some(worker) = &self.ocr {
-            worker.enqueue(&m.chat, &key, event, now);
+            worker.enqueue_segments(&m.chat, &key, &segments, now);
         }
         if a.emoji.learn_frequency {
-            crate::persona::humanize::capture(&*self.db()?, &m.chat, &key, event)?;
+            crate::media::capture_face_frequency(&*self.db()?, &m.chat, &m.id, &segments)?;
         }
         if let Some(collector) = &self.collector {
-            let report = collector.ingest(&*self.db()?, event, &self_id, a, now)?;
+            let report = collector.ingest_segments(&*self.db()?, &m, &key, &segments, now)?;
             for code in report.failures {
                 (self.options.log)("media_collect_failed", json!({"chat":m.chat,"message_key":key,"raw_id":m.id,"reason":"segment_collection_failed","code":code}));
             }
@@ -1121,7 +1140,23 @@ impl Engine {
         s.pending = true;
         s.pause_done = false;
         s.due = now + a.debounce_seconds;
+        if let Some(port) = &port { self.bind_ingress_chat(&m.chat, port); }
         Ok(())
+    }
+    fn bind_ingress_chat(&self, chat: &str, port: &Arc<dyn io::ChatPort>) {
+        let rebound = {
+            let mut chats = self.io_chats.lock().unwrap();
+            match chats.get(chat) {
+                Some(bound) if !Arc::ptr_eq(bound, port) => Some(bound.manifest().name.clone()),
+                Some(_) => None,
+                None => { chats.insert(chat.to_owned(), port.clone()); None },
+            }
+        };
+        if let Some(bound) = rebound {
+            (self.options.log)("chat_port_rebind_ignored", json!({
+                "chat":chat,"bound":bound,"incoming":port.manifest().name,
+            }));
+        }
     }
     pub fn restore(&self) -> Result<()> {
         let mut core = self.core();
@@ -1515,7 +1550,7 @@ impl Engine {
                     engine.core().teaching_replies.push((chat, reply));
                     return;
                 }
-                let result = engine.transport.send(&chat, &reply, None, None, None).await;
+                let result = engine.send_chat(&chat, &reply, None, None, None).await;
                 let finish = engine.db().and_then(|db| match result {
                     Ok(sent) => db.finish_delivery(&delivery, "sent", sent.get("message_id")),
                     Err(e) => db.finish_delivery(

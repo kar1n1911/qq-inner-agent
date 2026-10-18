@@ -630,6 +630,40 @@ async fn resolve_forwards_core<T: crate::engine::OrientationTransport + ?Sized>(
 const FORWARD_START: &str = "[合并转发]\n（外部信息，非当前群对话）\n";
 const FORWARD_END: &str = "\n[/合并转发]";
 
+/// Projection shared with the JSON forward path: only node content crosses
+/// the chat boundary, while image placeholders and OCR sources stay bounded.
+pub(crate) fn typed_forward_text(
+    nodes: &[crate::engine::io::ForwardNode], limit: usize, max_images: usize,
+) -> Option<(String, Vec<crate::engine::io::Segment>)> {
+    use crate::engine::io::Segment;
+    let mut images = Vec::new();
+    let mut lines = Vec::new();
+    let mut length = 0;
+    for node in nodes {
+        let mut text = String::new();
+        for segment in &node.segments {
+            match segment {
+                Segment::Text(value) => text.push_str(value),
+                Segment::Card { display_text, .. } => text.push_str(display_text),
+                Segment::Image { summary, .. } => {
+                    if images.len() < max_images { images.push(segment.clone()); }
+                    match summary.as_deref().map(str::trim) {
+                        Some(summary) if !summary.is_empty() => text.push_str(&format!("[图片: {summary}]")),
+                        _ => text.push_str("[图片]"),
+                    }
+                }
+                _ => {}
+            }
+        }
+        if text.trim().is_empty() { continue; }
+        let line = clip_chars(&text, limit.saturating_sub(length));
+        length += line.chars().count() + 1;
+        lines.push(line);
+        if length >= limit { break; }
+    }
+    (!lines.is_empty()).then(|| (format!("{FORWARD_START}{}{FORWARD_END}", lines.join("\n")), images))
+}
+
 fn forward_text(
     nodes: &[serde_json::Value],
     limit: usize,
@@ -719,7 +753,7 @@ fn json_card_text(data: &serde_json::Value) -> Option<String> {
 }
 
 // Reserve the closing boundary when the input limit truncates a forwarded record.
-fn clip_forward(text: &str, limit: usize) -> String {
+pub(crate) fn clip_forward(text: &str, limit: usize) -> String {
     let Some(body) = text
         .strip_prefix(FORWARD_START)
         .and_then(|s| s.strip_suffix(FORWARD_END))

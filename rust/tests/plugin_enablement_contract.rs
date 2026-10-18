@@ -205,6 +205,7 @@ impl Harness {
             sender: Sender { id: "7".into(), name: "群友".into(), card: None,
                 role: None, title: None, is_robot: None },
             segments: vec![Segment::Mention { id: "999".into() }, Segment::Text("哈哈".into())],
+            reply: qq_inner_core::engine::io::ReplyObservation::NoReply,
             self_message: false, raw: None,
         }, port).unwrap();
     }

@@ -347,7 +347,7 @@ pub fn build(settings: &Settings) -> Result<Box<dyn Engine>> {
 struct Job {
     chat: String,
     id: String,
-    images: Vec<Value>,
+    images: Vec<crate::engine::io::MediaSrc>,
     created: f64,
 }
 /// A bounded dedicated blocking task; ingest only submits, never waits for OCR.
@@ -384,7 +384,7 @@ impl Worker {
                     let mut hashes = Vec::new();
                     for segment in job.images {
                         if cancelled.load(Ordering::Acquire) { return Ok(()); }
-                        let bytes = super::read_image(&segment, settings.max_bytes, settings.timeout_seconds)?;
+                        let bytes = super::read_image_source(&segment, settings.max_bytes, settings.timeout_seconds)?;
                         if cancelled.load(Ordering::Acquire) { return Ok(()); }
                         hashes.push(sha256(&bytes));
                         outputs.push(engine.recognize(&bytes)?);
@@ -417,11 +417,16 @@ impl Worker {
     pub(crate) fn stop(&self) {
         self.stopped.store(true, Ordering::Release);
     }
+    #[cfg(test)]
     pub(crate) fn enqueue(&self, chat: &str, id: &str, event: &Value, created: f64) {
-        let images: Vec<_> = super::segments(event)
-            .into_iter()
-            .filter(|s| s["type"] == "image")
-            .collect();
+        self.enqueue_segments(chat, id, &super::typed_segments(event), created);
+    }
+    pub(crate) fn enqueue_segments(&self, chat: &str, id: &str,
+        segments: &[crate::engine::io::Segment], created: f64) {
+        let images: Vec<_> = segments.iter().filter_map(|segment| match segment {
+            crate::engine::io::Segment::Image { src, .. } => Some(src.clone()),
+            _ => None,
+        }).collect();
         if images.is_empty() {
             return;
         }
