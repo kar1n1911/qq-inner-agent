@@ -187,10 +187,11 @@ async fn media_send_routes_by_port_binding() {
     bound_image.engine.bind_configured_chats().unwrap();
     bound_image.engine.send_media_to(CHAT, image()).await.unwrap();
     assert_eq!(bound_image.transport.media.lock().unwrap().len(), 0);
-    let commands = image_port.commands.lock().unwrap();
-    assert_eq!(commands.len(), 1);
-    assert!(matches!(&commands[0], Command::SendMedia { chat, .. } if chat == &address()));
-    drop(commands);
+    {
+        let commands = image_port.commands.lock().unwrap();
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(&commands[0], Command::SendMedia { chat, .. } if chat == &address()));
+    }
 
     let bound_face = fixture();
     let face_port = Port::new(false);
@@ -199,11 +200,12 @@ async fn media_send_routes_by_port_binding() {
     bound_face.engine.send_media_to(CHAT, face()).await.unwrap();
     assert_eq!(bound_face.transport.media.lock().unwrap().len(), 0);
     assert_eq!(*bound_face.transport.text.lock().unwrap(), 0);
-    let commands = face_port.commands.lock().unwrap();
-    assert_eq!(commands.len(), 1);
-    assert!(matches!(&commands[0], Command::Send { chat, segments, .. }
-        if chat == &address() && matches!(segments.as_slice(), [Segment::Face { id }] if id == "14")));
-    drop(commands);
+    {
+        let commands = face_port.commands.lock().unwrap();
+        assert_eq!(commands.len(), 1);
+        assert!(matches!(&commands[0], Command::Send { chat, segments, .. }
+            if chat == &address() && matches!(segments.as_slice(), [Segment::Face { id }] if id == "14")));
+    }
 
     let unbound = fixture();
     let unbound_port = Port::new(false);

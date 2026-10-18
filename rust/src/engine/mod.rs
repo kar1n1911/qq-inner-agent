@@ -805,6 +805,15 @@ impl Engine {
             .await.map_err(|error| anyhow::anyhow!("ingest_task_failed: {error}"))?
     }
 
+    pub async fn ingest_port_event(self: &Arc<Self>, event: io::PortEvent,
+        port: Arc<dyn io::ChatPort>) -> Result<()> {
+        match event {
+            io::PortEvent::Incoming(incoming) => self.ingest_port_incoming(*incoming, port).await,
+            io::PortEvent::Notice(notice) => self.ingest_notice(&notice),
+            io::PortEvent::OutboundEvidence(evidence) => self.ingest_outbound_evidence(evidence).map(|_| ()),
+        }
+    }
+
     fn ingest_incoming_resolved(&self, incoming: &io::Incoming, port: Arc<dyn io::ChatPort>,
         forward_failures: &[&str]) -> Result<()> {
         use io::{ChatKind, Segment};
@@ -884,6 +893,83 @@ impl Engine {
         self.ingest_projected(message, incoming.received_at, reply, command_text,
             media_segments, false, Some(port), forward_failures)
     }
+    pub async fn send_media_to(&self, chat: &str, segment: Value) -> std::result::Result<Value, OneBotError> {
+        self.send_media_to_recorded(chat, segment, None).await
+    }
+
+    async fn send_media_to_recorded(&self, chat: &str, segment: Value, delivery: Option<&str>)
+        -> std::result::Result<Value, OneBotError> {
+        use io::{ChatAddress, ChatKind, Command, CommandResult, MediaRef, MediaSrc, PortReply, Segment};
+        let result = async {
+            let kind = segment.get("type").and_then(Value::as_str);
+            let data = segment.get("data");
+            let (kind, data) = match (kind, data) {
+                (Some("image" | "face"), Some(Value::Object(data))) => (kind.unwrap(), data),
+                _ => return Err(OneBotError { code: "unsupported_media_segment".into(), uncertain: false }),
+            };
+            let value = data.get(if kind == "image" { "file" } else { "id" })
+                .and_then(Value::as_str).filter(|value| !value.is_empty())
+                .ok_or_else(|| OneBotError { code: "unsupported_media_segment".into(), uncertain: false })?;
+            let port = self.chat_port_for(chat);
+            let Some(port) = port else {
+                if self.chat_port.lock().unwrap().is_some() {
+                    (self.options.log)("chat_route_unbound", json!({
+                        "chat":chat,"reason":"chat_port_unbound","uncertain":false,
+                    }));
+                    return Err(OneBotError { code: "chat_port_unbound".into(), uncertain: false });
+                }
+                return self.transport.send_media(chat, segment).await;
+            };
+            let (chat_kind, id) = chat.split_once(':').ok_or_else(|| OneBotError {
+                code: "invalid_chat".into(), uncertain: false,
+            })?;
+            let chat_kind = match chat_kind {
+                "group" => ChatKind::Group,
+                "private" => ChatKind::Private,
+                _ => return Err(OneBotError { code: "invalid_chat".into(), uncertain: false }),
+            };
+            let address = ChatAddress::new(chat_kind, &port.manifest().name, id).map_err(|error| OneBotError {
+                code: error.code, uncertain: false,
+            })?;
+            let command = if kind == "image" {
+                let source = if value.starts_with("http://") || value.starts_with("https://") {
+                    MediaSrc::Url(value.to_owned())
+                } else {
+                    MediaSrc::Opaque(value.to_owned())
+                };
+                Command::SendMedia { chat: address, media: MediaRef { kind: "image".into(), source } }
+            } else {
+                Command::Send { chat: address, segments: vec![Segment::Face { id: value.to_owned() }], reply_to: None }
+            };
+            match port.deliver(command).await {
+                PortReply::Ok(CommandResult::Sent { message_id }) => Ok(json!({"message_id":message_id})),
+                PortReply::Failed { code, uncertain } => Err(OneBotError { code, uncertain }),
+                PortReply::Unsupported { .. } => Err(OneBotError { code: "media_unsupported".into(), uncertain: false }),
+                _ => Err(OneBotError { code: "invalid_media_ack".into(), uncertain: true }),
+            }
+        }.await;
+        if let Err(error) = &result {
+            self.core().last_error = Some(error.code.clone());
+            (self.options.log)("media_send_failed", json!({
+                "chat":chat,"code":error.code,"uncertain":error.uncertain,
+            }));
+            let recorded = (|| -> Result<()> {
+                let db = self.db()?;
+                let delivery = match delivery {
+                    Some(id) => id.to_owned(),
+                    None => db.delivery(chat, false, self.now())?,
+                };
+                db.finish_delivery(&delivery, if error.uncertain { "uncertain" } else { "failed" }, None)
+            })();
+            if let Err(record_error) = recorded {
+                (self.options.log)("media_delivery_record_failed", json!({
+                    "chat":chat,"code":error.code,"error":record_error.to_string(),
+                }));
+            }
+        }
+        result
+    }
+
     async fn send_chat(
         &self, chat: &str, text: &str, face: Option<&str>,
         reply_to: Option<&str>, mention: Option<&str>,
@@ -1290,44 +1376,35 @@ impl Engine {
             self.db()?.finish_delivery(&delivery, "failed", None)?;
             return Ok(());
         }
-        let sent = self.transport.send_media(chat, segment).await;
+        let sent = self.send_media_to_recorded(chat, segment, Some(&delivery)).await;
         let _core = self.core();
         let db = self.db()?;
-        match sent {
-            Ok(sent) => {
-                db.finish_delivery(&delivery, "sent", sent.get("message_id"))?;
-                let id = sent
-                    .get("message_id")
-                    .filter(|v| !v.is_null())
-                    .map(js_string)
-                    .unwrap_or(delivery);
-                let now = self.now();
-                let message_key = db.record_distinct_message(&json!({"chat":chat,"id":id,"sender":self.transport.self_id(),"name":a.name.text,"text":"","ts":now,"self":true}))?;
-                db.execute(
-                    "INSERT OR IGNORE INTO media_pending VALUES(?,?,?,?,?,?,?,?)",
-                    rusqlite::params![
-                        chat,
-                        message_key,
-                        selection.candidate.source_chat,
-                        selection.candidate.hash,
-                        selection.bucket,
-                        now,
-                        serde_json::to_string(&selection.classification)?,
-                        selection.wild as i32
-                    ],
-                )?;
-                (self.options.log)(
-                    "media_sent",
-                    json!({"chat":chat,"hash":selection.candidate.hash}),
-                );
-            }
-            Err(e) => {
-                db.finish_delivery(
-                    &delivery,
-                    if e.uncertain { "uncertain" } else { "failed" },
-                    None,
-                )?;
-            }
+        if let Ok(sent) = sent {
+            db.finish_delivery(&delivery, "sent", sent.get("message_id"))?;
+            let id = sent
+                .get("message_id")
+                .filter(|v| !v.is_null())
+                .map(js_string)
+                .unwrap_or(delivery);
+            let now = self.now();
+            let message_key = db.record_distinct_message(&json!({"chat":chat,"id":id,"sender":self.transport.self_id(),"name":a.name.text,"text":"","ts":now,"self":true}))?;
+            db.execute(
+                "INSERT OR IGNORE INTO media_pending VALUES(?,?,?,?,?,?,?,?)",
+                rusqlite::params![
+                    chat,
+                    message_key,
+                    selection.candidate.source_chat,
+                    selection.candidate.hash,
+                    selection.bucket,
+                    now,
+                    serde_json::to_string(&selection.classification)?,
+                    selection.wild as i32
+                ],
+            )?;
+            (self.options.log)(
+                "media_sent",
+                json!({"chat":chat,"hash":selection.candidate.hash}),
+            );
         }
         Ok(())
     }
