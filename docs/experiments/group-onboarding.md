@@ -148,6 +148,24 @@ Authorization: Bearer <token>
 3. **被拦的源不要硬抓**，走 RSSHub 或官方 API；
 4. ntfy 的 topic 与 token 都是凭据：当前只绑回环；实验机若在别的机器，绑 Tailscale 地址或前置 TLS。
 
+### 1.3 部署拓扑：全部在同一台 VM（用户 2026-10-18 决定）
+
+实验实例与现有部署**同机共存**，因此有三条硬约束：
+
+| 约束 | 内容 |
+| --- | --- |
+| 路径隔离 | 实验实例用独立 `--root`（`~/lab/group-onboarding`），自己的 `storage.directory`、控制套接字与 `.runtime`，不得指向生产的 `data/` |
+| 白名单必须互斥 | 两实例连**同一个 NapCat**（`ws://127.0.0.1:3001`），都会收到全部事件；隔离只靠 `allowedGroups`。**实验群不得出现在生产 `allowedGroups` 里，生产群也不得出现在实验配置里**，否则同一句话会被两个实例各回一次 |
+| 端口不冲突 | 生产占用 `5097`/`5098`/`39337`（dashboard）与 `3000`/`3001`（NapCat），ntfy 占 `2586`。实验实例默认**不启动 dashboard**，只看 `status.json` 与控制套接字；若确需 dashboard，另分配端口 |
+
+ntfy 只绑回环即可：机器人都在这台 VM 上，不需要对外暴露，也不需要 TLS。
+
+实验实例启动方式（待群和账号确定后填配置）：
+
+```bash
+qq-inner-core --root ~/lab/group-onboarding start
+```
+
 ### 2. 简历摄入（Word / PDF / 纯文本，不假设 JSON）
 
 **输入不预设格式**。实际会拿到 `.docx`、`.pdf`，也可能有 `.doc`、`.txt`、`.md`。
