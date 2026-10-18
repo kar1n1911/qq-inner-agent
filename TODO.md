@@ -1612,6 +1612,21 @@ participation: Mutex::new(Participation::default()),   // 启动时恒为 Normal
 - **只有 `manual` 需要跨重启** —— 两者的持久化需求不同，不要一起处理。
 
 
+### 5.4 上线当前代码的三个阻塞（2026-10-18 实测） ⏸ 必须先解决
+
+启用插件时撞出来的，全部是**部署侧**问题，不是插件逻辑问题：
+
+| # | 现象 | 证据 | 处置 |
+| --- | --- | --- | --- |
+| 1 | **生产跑的是旧二进制** | `rust/target/release/qq-inner-core` 时间戳为 10-14，比本轮所有改动都早；状态里没有 `ingressSource`/`interfaceAvailability` | 重新构建 release；本轮已构建过，但被下面两条挡住 |
+| 2 | **新二进制要求数据库迁移** | 启动即 `database migration required; run ./agent update full`（`store.rs:31`、`update.rs:231`） | 迁移不可逆，必须先备份 `data/agent.sqlite`，再执行 `./agent update full` |
+| 3 | **被禁用的插件也能阻断启动** | 清单里所有插件 `enabled: false`，启动仍报 `plugin_activation_failed: ollama` 并进入重启循环 | `plugin_configuration_error` 只应让**启用**的插件阻断启动；需修策略 + 测试 |
+
+**已回滚两次**：旧二进制 + 原 `plugins.json`，服务 `active`、连接恢复。
+
+**上线顺序（建议）**：修第 3 条（不碰生产）→ 备份数据库 → 第 2 条迁移 → 用最小清单只启用 onebot 验证（第 1 条）→ 再走 §3.13 的删除。
+
+
 ## 6. 学习与记忆
 
 ### 6.1 §15 跨群共享学习（原 I7） 🟡 部分完成
