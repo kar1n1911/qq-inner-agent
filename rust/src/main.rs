@@ -195,7 +195,7 @@ fn plugin_configuration_error(status: &Value, list: &Value) -> Option<Value> {
     }
     status["plugins"].as_array()?.iter().find_map(|entry| {
         let selected = list["plugins"].as_array().is_some_and(|items| items.iter().any(|item| {
-            item["id"] == entry["id"]
+            item["id"] == entry["id"] && item["enabled"] == true
         }));
         if !selected { return None; }
         if entry["reason"] == "preflight_pending" || entry["effective_state"] == "active" || entry["effective_state"] == "degraded"
@@ -1207,6 +1207,25 @@ async fn run(root: PathBuf) -> Result<()> {
 mod tests {
     use super::*;
     use std::process::{Command as Process, Stdio};
+    #[test]
+    fn disabled_plugin_activation_failure_does_not_block_startup() {
+        let status = json!({"plugins":[{"id":"ollama","directory":"ollama",
+            "reason":"backend_unavailable","effective_state":"inactive"}]});
+        let list = json!({"schema_version":1,"mode":"auto","plugins":[
+            {"id":"ollama","enabled":false}]});
+        assert_eq!(plugin_configuration_error(&status, &list), None);
+    }
+
+    #[test]
+    fn enabled_plugin_activation_failure_still_blocks_startup() {
+        let status = json!({"plugins":[{"id":"ollama","directory":"ollama",
+            "reason":"backend_unavailable","effective_state":"inactive"}]});
+        let list = json!({"schema_version":1,"mode":"auto","plugins":[
+            {"id":"ollama","enabled":true}]});
+        assert_eq!(plugin_configuration_error(&status, &list), Some(json!({
+            "code":"plugin_activation_failed","id":"ollama","directory":"ollama"})));
+    }
+
     #[test]
     fn onebot_io_path_is_explicit_and_defaults_to_legacy() {
         assert!(!use_onebot_io(None));
