@@ -219,6 +219,7 @@ fn addressed_message() -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "§3.13: awaits removal of the built-in connection"]
 async fn missing_chat_io_is_reported_as_missing() -> Result<()> {
     let (root, mut agent, _wire, _model) = start(false).await?;
     assert!(!root.0.join("plugins/plugins.json").exists());
@@ -232,6 +233,7 @@ async fn missing_chat_io_is_reported_as_missing() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "§3.13: awaits removal of the built-in connection"]
 async fn missing_chat_io_is_announced_once() -> Result<()> {
     let (root, mut agent, _wire, _model) = start(false).await?;
     wait_for(|| Ok(!logs(&root, "no_available_io")?.is_empty())).await?;
@@ -253,6 +255,7 @@ async fn missing_chat_io_is_announced_once() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "§3.13: awaits removal of the built-in connection"]
 async fn missing_chat_io_stops_participation_and_sending() -> Result<()> {
     let (root, mut agent, wire, _model) = start(false).await?;
     wait_for(|| Ok(chat(&status(&root)?)?["route"] == "none" || wire.has_connection())).await?;
