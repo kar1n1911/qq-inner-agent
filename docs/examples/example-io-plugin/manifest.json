@@ -1,0 +1,20 @@
+{
+  "name": "example_echo",
+  "version": "0.1.0",
+  "core_api_version": { "major": 1, "min_minor": 0, "max_minor": null },
+  "protocol": null,
+  "entry": { "type": "built_in", "adapter": "plugins/example_echo/adapter.rs" },
+  "kind": "Chat",
+  "transport": "InProcess",
+  "capabilities": {
+    "supported": ["mention", "reply"],
+    "unsupported": ["media", "forward", "group_card", "profile", "avatar",
+      "signature", "member_title", "member_role", "is_robot", "history",
+      "group_info", "members"],
+    "unknown": []
+  },
+  "dependencies": [],
+  "config_schema": [],
+  "host_permissions": [],
+  "hot_reload": false
+}
