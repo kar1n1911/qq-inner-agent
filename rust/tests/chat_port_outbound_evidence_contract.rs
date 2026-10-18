@@ -114,7 +114,8 @@ fn sent_frame() -> Value {
         "self_id":99, "user_id":99, "sender":{"user_id":99,"nickname":"Bot"},
         "message_id":ACK, "time":NOW+1., "raw_message":BODY, "message":BODY})
 }
-fn adapter(answer: Value) -> (Arc<OneBotAdapter>, Arc<Mutex<Vec<(String, Value)>>>) {
+type Calls = Arc<Mutex<Vec<(String, Value)>>>;
+fn adapter(answer: Value) -> (Arc<OneBotAdapter>, Calls) {
     let calls = Arc::new(Mutex::new(Vec::new()));
     let recorded = calls.clone();
     let action = Arc::new(move |name: String, params: Value| -> BoxFuture<'static, PortReply<Value>> {

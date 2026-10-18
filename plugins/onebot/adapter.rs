@@ -2,6 +2,7 @@
 //! the legacy transport implementation while preserving its ACK/error state.
 
 use super::{ports::ChatPort, types::*};
+use super::types::OutboundEvidence as PortOutboundEvidence;
 use super::connect::{ConnectConfig, Notification, OneBot};
 use futures_util::future::BoxFuture;
 use serde_json::{json, Value};
@@ -86,6 +87,10 @@ impl OneBotAdapter {
 
     /// Heartbeats are deliberately ignored; notices retain their own typed shape.
     pub fn map_event(&self, event: &Value, received_at: f64) -> Result<Option<PortEvent>, IoError> {
+        if event["post_type"] == "message_sent" {
+            return self.map_outbound_evidence(event, received_at, OutboundEvidenceSource::MessageSent)
+                .map(|evidence| Some(PortEvent::OutboundEvidence(evidence)));
+        }
         if event["post_type"] != "message" && event["post_type"] != "message_sent" {
             if event["post_type"] == "meta_event" { return Ok(None); }
             if event["post_type"] != "notice" { return Err(IoError::new("incoming_event_unimplemented")); }
@@ -167,6 +172,47 @@ impl OneBotAdapter {
         }))))
     }
 
+    fn map_outbound_evidence(&self, event: &Value, received_at: f64,
+        source: OutboundEvidenceSource) -> Result<PortOutboundEvidence, IoError> {
+        if !received_at.is_finite() || received_at <= 0. {
+            return Err(IoError::new("invalid_received_at"));
+        }
+        let connected_self_id = self.state().self_id;
+        let self_id = match source {
+            OutboundEvidenceSource::MessageSent => {
+                let frame_self_id = wire_string(&event["self_id"])
+                    .ok_or_else(|| IoError::new("missing_self_id"))?;
+                if connected_self_id.as_deref().is_some_and(|id| id != frame_self_id) {
+                    return Err(IoError::new("invalid_self_echo_sender"));
+                }
+                frame_self_id
+            }
+            OutboundEvidenceSource::Readback => connected_self_id
+                .ok_or_else(|| IoError::new("missing_self_id"))?,
+        };
+        let legacy = outbound_evidence(event, &self_id, source == OutboundEvidenceSource::Readback)
+            .ok_or_else(|| IoError::new("invalid_outbound_evidence"))?;
+        let (kind, id) = legacy.chat.split_once(':')
+            .ok_or_else(|| IoError::new("invalid_outbound_evidence"))?;
+        let kind = match kind {
+            "group" => ChatKind::Group,
+            "private" => ChatKind::Private,
+            _ => return Err(IoError::new("invalid_outbound_evidence")),
+        };
+        if id.is_empty() || legacy.message_id.is_empty() {
+            return Err(IoError::new("invalid_outbound_evidence"));
+        }
+        Ok(PortOutboundEvidence {
+            chat: ChatAddress::new(kind, &self.manifest.name, id)?,
+            message_id: legacy.message_id,
+            sender_id: self_id,
+            text: legacy.text,
+            server_ts: legacy.server_ts,
+            received_at,
+            source,
+        })
+    }
+
     pub fn publish(&self, event: PortEvent) -> Result<(), IoError> {
         let guard = self.sink.lock().map_err(|_| IoError::new("sink_poisoned"))?;
         let sink = guard.as_ref().ok_or_else(|| IoError::new("sink_not_attached"))?;
@@ -186,6 +232,25 @@ impl OneBotAdapter {
             return failed("qq_offline", false);
         }
         match command {
+            Command::Fetch { request: Fetch::OutboundEvidence { port, message_id }, .. } => {
+                if port != self.manifest.name { return failed("wrong_port", false); }
+                if message_id.is_empty() { return failed("invalid_message_id", false); }
+                match self.action("get_msg".into(), json!({"message_id":message_id})).await {
+                    PortReply::Ok(data) => {
+                        let received_at = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH).map_or(0., |time| time.as_secs_f64());
+                        match self.map_outbound_evidence(&data, received_at, OutboundEvidenceSource::Readback) {
+                            Ok(evidence) if evidence.message_id == message_id =>
+                                PortReply::Ok(CommandResult::OutboundEvidence(evidence)),
+                            Ok(_) => failed("readback_identity_mismatch", false),
+                            Err(error) => PortReply::Failed { code: error.code, uncertain: false },
+                        }
+                    }
+                    PortReply::Failed { code, uncertain } => PortReply::Failed { code, uncertain },
+                    PortReply::Unsupported { capability } => PortReply::Unsupported { capability },
+                    PortReply::Degraded { .. } => failed("degraded_fetch_ack", false),
+                }
+            }
             Command::FetchForward { id, .. } => {
                 if id.trim().is_empty() { return failed("invalid_forward_id", false); }
                 match self.action("get_forward_msg".into(), json!({"id":id})).await {
@@ -250,6 +315,7 @@ impl OneBotAdapter {
                         if message_id.is_empty() { return failed("invalid_message_id", false); }
                         ("get_msg", json!({"message_id":message_id}))
                     }
+                    Fetch::OutboundEvidence { .. } => unreachable!("handled before generic fetch"),
                     Fetch::Forward { port, id } => {
                         if port != self.manifest.name { return failed("wrong_port", false); }
                         if id.is_empty() { return failed("invalid_forward_id", false); }

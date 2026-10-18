@@ -745,6 +745,35 @@ impl Engine {
                 "reason":if confirmed { "matched" } else { "no_matching_unconfirmed_ack" }}));
         Ok(confirmed)
     }
+    pub fn ingest_outbound_evidence(&self, evidence: io::OutboundEvidence) -> Result<bool> {
+        ensure!(evidence.source == io::OutboundEvidenceSource::MessageSent, "invalid_outbound_evidence_source");
+        self.confirm_port_outbound_evidence(&evidence)
+    }
+    pub fn reconcile_port_readback(&self, expected_chat: &io::ChatAddress,
+        expected_message_id: &str, evidence: io::OutboundEvidence) -> Result<bool> {
+        ensure!(evidence.source == io::OutboundEvidenceSource::Readback, "invalid_outbound_evidence_source");
+        if &evidence.chat != expected_chat || evidence.message_id != expected_message_id {
+            (self.options.log)("outbound_reconciliation_failed", json!({
+                "chat":format!("{}:{}", evidence.chat.kind.as_str(), evidence.chat.id),
+                "message_id":evidence.message_id,"source":"get_msg","reason":"get_msg_identity_mismatch"
+            }));
+            return Ok(false);
+        }
+        self.confirm_port_outbound_evidence(&evidence)
+    }
+    fn confirm_port_outbound_evidence(&self, evidence: &io::OutboundEvidence) -> Result<bool> {
+        let chat = format!("{}:{}", evidence.chat.kind.as_str(), evidence.chat.id);
+        let source = match evidence.source {
+            io::OutboundEvidenceSource::MessageSent => "message_sent",
+            io::OutboundEvidenceSource::Readback => "get_msg",
+        };
+        let confirmed = self.db()?.reconcile_outbound(&chat, &evidence.message_id,
+            &evidence.sender_id, &evidence.text, evidence.server_ts, evidence.received_at)?;
+        (self.options.log)(if confirmed { "outbound_confirmed" } else { "outbound_reconciliation_failed" },
+            json!({"chat":chat,"message_id":evidence.message_id,"source":source,
+                "reason":if confirmed { "matched" } else { "no_matching_unconfirmed_ack" }}));
+        Ok(confirmed)
+    }
     /// Existing synchronous entry accepts only already-resolved forwards.
     pub fn ingest_incoming(&self, incoming: &io::types::Incoming, port: Arc<dyn io::ChatPort>) -> Result<()> {
         ensure!(!incoming.segments.iter().any(|segment| matches!(segment,
@@ -780,7 +809,7 @@ impl Engine {
         forward_failures: &[&str]) -> Result<()> {
         use io::{ChatKind, Segment};
         if !self.participates() { return Ok(()); }
-        ensure!(!incoming.self_message, "typed_outbound_evidence_unimplemented");
+        if incoming.self_message { return Ok(()); }
         ensure!(incoming.chat.port == incoming.port && port.manifest().name == incoming.port, "wrong_incoming_port");
         ensure!(incoming.ts.is_finite() && incoming.ts > 0. && incoming.received_at.is_finite()
             && incoming.received_at > 0., "invalid_incoming_time");

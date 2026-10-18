@@ -705,6 +705,7 @@ impl Runtime {
                     let outcome = tokio::task::spawn_blocking(move || match port_event {
                         PortEvent::Incoming(incoming) => engine.ingest_incoming(&incoming, adapter),
                         PortEvent::Notice(notice) => engine.ingest_notice(&notice),
+                        PortEvent::OutboundEvidence(evidence) => engine.ingest_outbound_evidence(evidence).map(|_| ()),
                     }).await;
                     match outcome {
                         Ok(Ok(())) => {}

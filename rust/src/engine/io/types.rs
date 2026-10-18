@@ -121,6 +121,25 @@ pub enum ReplyObservation {
 pub enum PortEvent {
     Incoming(Box<Incoming>),
     Notice(Notice),
+    OutboundEvidence(OutboundEvidence),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum OutboundEvidenceSource {
+    MessageSent,
+    Readback,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OutboundEvidence {
+    pub chat: ChatAddress,
+    /// Protocol ID used to match an acknowledged delivery, not the internal message_key.
+    pub message_id: String,
+    pub sender_id: String,
+    pub text: String,
+    pub server_ts: f64,
+    pub received_at: f64,
+    pub source: OutboundEvidenceSource,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -209,6 +228,7 @@ pub enum Fetch {
     Members { chat: ChatAddress, no_cache: bool },
     Login { port: String },
     Message { port: String, message_id: String },
+    OutboundEvidence { port: String, message_id: String },
     Forward { port: String, id: String },
 }
 
@@ -339,6 +359,7 @@ pub struct HealthInfo {
 pub enum CommandResult {
     Sent { message_id: String },
     Fetched(serde_json::Value),
+    OutboundEvidence(OutboundEvidence),
     History(Vec<Incoming>),
     Forward(Vec<ForwardNode>),
     Members(Vec<MemberInfo>),
