@@ -88,6 +88,41 @@ ensure!(incoming.self_id == self.transport.self_id(), "wrong_self_id");
 - `grep "\.raw" engine` 为空：内核不读 `Incoming.raw`；
 - `grep "tool_calls"` 在 `io/types.rs` 之外为空：模型插件返回的工具调用不会被执行。
 
+## 历史：这套 I/O 系统是怎么长出来的
+
+| 时间 | 提交 | 发生了什么 |
+| --- | --- | --- |
+| 2026-10-13 | `cc60acf` | 加入可选的 OneBot ChatPort；`Runtime.onebot_io` 从一开始就是 `Option<Arc<OneBotAdapter>>`，因为旁路在 `main.rs` 里直接 `OneBotAdapter::new` |
+| 2026-10-15 | `81491f3` | 插件工厂落地；`PublishedPorts` 首次定义就带 `model: Option<Arc<HttpModel>>`、`onebot: Option<Arc<OneBotAdapter>>`、`persona_bindings: Vec<(ChatAddress, Arc<SillyTavernPersona>)>` |
+| 之后 | `e419045` | 为插件页扩展"实测能力"，继续沿用具体字段 |
+| 本轮 | `6035b80` | 运行时接线需要读 sink 溢出，新增 `port.forwarding_fault()`——内核又直接调了一个插件专有方法 |
+
+设计原意其实相反。`docs/working/io-port-plan.md` §6.0 明确写过：
+
+> 上一版把每个面写成**恰好一个实例**（`chat: Arc<dyn ChatPort>`）。但通讯面现实中会**同时**跑 OneBot(QQ) + 微信 + TG + Discord。
+> ……公共访问入口仍暴露路由器，**不能把 `&dyn ChatPort` 的单实例形状固化为引擎契约**。
+
+### 成因链
+
+1. **端口 trait 被中立化了**：六面契约、P-5"零依赖叶子"、`io_source_has_no_dependency_on_kernel_implementation` 都在约束"插件不得反向依赖内核"。
+2. **工厂是闭集**：`prepare_one` 用 `match (directory, kind, transport)` 匹配固定描述符（onebot / sillytavern / ollama / openai / claude / a_memorix），`PreparedPort` 是具体类型的枚举。这是阶段性选择——统一 Sidecar 协议（`TODO.md` 3.12 方案 B）至今未开工。
+3. **发布类型镜像了闭集**：`PublishedPorts` 直接把 `PreparedPort` 的具体类型搬出来，还附带 `model_instance`、`model_kind`、`persona_bindings`、`sidecars` 这些**没有中立载体**的数据。没有规则要求发布面必须是 `dyn`。
+4. **运行时反向消费插件专有数据**：`apiCallsThisRun` 读 `model.calls()`，sink 溢出读 `onebot.forwarding_fault()`。一旦读了，耦合就固化了。
+
+### 为什么 CI 边界没发现
+
+`io_source_has_no_dependency_on_kernel_implementation` 检查的是**依赖方向**（`crate::`、`super::super`、`include!`、`#[path]`），不是**抽象程度**。
+而 `factory.rs` 与 `adapters/` 同属 `engine/io`，`use super::adapters::onebot::OneBotAdapter` 完全合法；适配器本来就是 `engine/io` 模块树的一部分。
+换句话说：**边界测的是"插件不能看内核"，没测"内核不能看具体插件"**。P-5 只写了前半个方向。
+
+### 这对修复意味着什么
+
+F1 不是"把字段改成 `dyn`"就完了：
+
+- `PublishedPorts` 还承载了 persona 绑定、模型实例名/种类、sidecar 子进程——这些必须先有中立载体（放进 `PortRegistry` 或元数据表），否则改成 `dyn` 只是把问题挪个位置；
+- `calls()` 应由内核计数（请求发出即计数），而不是读插件内部计数器；
+- `forwarding_fault()` 应成为中立的端口诊断字段（例如 `PortState.reason` 或独立的 `diagnostics()`），而不是 onebot 专有方法。
+
 ## 修复建议（按优先级）
 
 1. **F1**：运行时与 `PublishedPorts` 改为 `Arc<dyn ChatPort>` / `Arc<dyn ModelPort>`；`forwarding_fault()`、`calls()` 改为内核侧计数或中立诊断字段，不再调用插件专有方法。
