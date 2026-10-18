@@ -766,8 +766,9 @@ WebSocket 断开 → 持续重连（退避到 reconnectMaxSeconds）
 **`main` 的约定**：只保留这条指针；实验结论稳定后，按计划里的"不合并策略"分步回灌，
 schema 变更单独评审，不与行为改动同一个提交。
 
-**前置（主线上就要解决）**：§2.20 的 `agent.topicLifecycle` 默认关闭且 `config.json` 未覆盖；
-不适配这个开关，话题反馈学习在实验群里也不会累积。
+**环境前提（在实验实例里解决，不动主线）**：实验环境是一套独立实例——独立 `--root`、独立
+`config.json` 与 `data/`、真实存在的 ≥3 人群、三份简历文件。`agent.topicLifecycle` 与冷场阈值
+都在**实验实例的配置**里设置；主线的 `config.json` 与 `allowedGroups` **一行不改**。
 
 ## 3. 端口与插件
 
