@@ -88,6 +88,66 @@
 **唯一的例外是安全阈值**：如果现有行为在二人群里已经产生过度侵入（例如反复提已结束的话题），
 应当按既有闸门修正，而不是为了"保持行为一致"放任——实验记录必须同时注明当时的行为配置。
 
+### 1.2 推送通道与数据源（2026-10-18 已配置）
+
+#### ntfy（lab 实例）
+
+| 项 | 值 |
+| --- | --- |
+| 运行方式 | systemd **用户**服务 `ntfy-lab.service`（`systemctl --user`，不碰系统级） |
+| 监听 | `127.0.0.1:2586`（仅本机） |
+| 鉴权 | `auth-default-access: deny-all`，admin 用户 + Bearer token |
+| 缓存 | 12 小时，支持 `?since=<id>` 断线续传 |
+| 凭据 | `~/lab/ntfy/credentials.txt`（权限 600）。**topic / token / 密码都不写进本文件，也不入仓库** |
+| 验证 | 匿名发布返回 403；带 token 发布 200；订阅返回 `event=message` 的 JSON |
+
+订阅方式（机器人侧）：
+
+```text
+GET http://127.0.0.1:2586/<topic>/json?since=<last-id>
+Authorization: Bearer <token>
+```
+
+只处理 `event == "message"`；`open` / `keepalive` / `message_delete` 忽略。
+
+部署踩过的两个坑，记下来避免重复：
+
+- Docker 需要 docker 组权限，当前用户没有，因此改用官方静态二进制；
+- `pkill -f "ntfy serve"` 会匹配执行它的 shell 自身，连会话一起杀掉；停服务请用 `systemctl --user stop`。
+
+#### 数据源（实测，2026-10-18）
+
+**拉取侧**
+
+| 源 | 状态 | 备注 |
+| --- | --- | --- |
+| GitHub API / Search | 200 | 未认证 **60 次/小时**；加 token 提到 5000/小时 |
+| Hacker News（Algolia API） | 200 | JSON，无需鉴权 |
+| arXiv API | 200 | Atom，适合论文类话题 |
+| Lobsters / Ars Technica / Product Hunt | 200 | 标准 RSS/Atom |
+| 36kr / 少数派 / V2EX | 200 | 中文源，RSS |
+| 阮一峰周刊 | 200 | Atom |
+| Bilibili 热门 API | 200 | JSON，偶尔需要 UA/Referer |
+| BBC News | 200 | 通用新闻 RSS |
+
+**不可用 / 需中转**
+
+| 源 | 状态 | 处理 |
+| --- | --- | --- |
+| Reddit JSON | 403 | 需要 OAuth 或 RSSHub |
+| 知乎 | 403 | 需要登录态或 RSSHub，不建议硬抓 |
+| Solidot RSS | 000 | 不可达，放弃或换镜像 |
+
+**推送侧**：任何能发 HTTP 的实体都可以推（自建脚本、推荐服务、n8n/IFTTT/Zapier、其他 bot）。
+知道 topic 与 token 才推得进来。
+
+#### 实现前的限制
+
+1. **GitHub 未认证 60/小时**，定时抓取容易打满；实现时 token 放配置存储；
+2. **RSS 解析需要新增依赖**（`feed-rs` 或 `quick-xml`），属新增依赖，需单独评审；
+3. **被拦的源不要硬抓**，走 RSSHub 或官方 API；
+4. ntfy 的 topic 与 token 都是凭据：当前只绑回环；实验机若在别的机器，绑 Tailscale 地址或前置 TLS。
+
 ### 2. 简历摄入（Word / PDF / 纯文本，不假设 JSON）
 
 **输入不预设格式**。实际会拿到 `.docx`、`.pdf`，也可能有 `.doc`、`.txt`、`.md`。
