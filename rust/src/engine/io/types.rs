@@ -190,6 +190,13 @@ pub enum Segment {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Fetch {
+    GroupNotices { chat: ChatAddress },
+    GroupMember { chat: ChatAddress, user: String },
+    Stranger { port: String, user: String },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Command {
     Send {
         chat: ChatAddress,
@@ -205,6 +212,14 @@ pub enum Command {
     Recall {
         port: String,
         message_id: String,
+    },
+    Fetch {
+        port: String,
+        request: Fetch,
+    },
+    SetLongNick {
+        port: String,
+        text: String,
     },
     FetchHistory {
         chat: ChatAddress,
@@ -258,6 +273,8 @@ impl Command {
             | Self::FetchGroupInfo { chat }
             | Self::SetGroupCard { chat, .. } => &chat.port,
             Self::Recall { port, .. }
+            | Self::Fetch { port, .. }
+            | Self::SetLongNick { port, .. }
             | Self::FetchForward { port, .. }
             | Self::FetchFriendList { port }
             | Self::FetchGroupList { port }
@@ -305,6 +322,7 @@ pub struct HealthInfo {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum CommandResult {
     Sent { message_id: String },
+    Fetched(serde_json::Value),
     History(Vec<Incoming>),
     Forward(Vec<ForwardNode>),
     Members(Vec<MemberInfo>),

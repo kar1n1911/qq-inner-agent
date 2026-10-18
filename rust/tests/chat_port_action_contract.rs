@@ -98,11 +98,13 @@ async fn long_nick_is_a_typed_command() {
     let text = "一句新的个性签名";
     let (port, calls) = adapter(PortReply::Ok(json!({})));
     let reply = port.deliver(Command::SetLongNick { port: "onebot".into(), text: text.into() }).await;
-    let calls = calls.lock().unwrap();
-    assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].0, "set_self_longnick");
-    assert_eq!(calls[0].1["longNick"], text);
-    assert!(matches!(reply, PortReply::Ok(CommandResult::Ok)));
+    {
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "set_self_longnick");
+        assert_eq!(calls[0].1["longNick"], text);
+        assert!(matches!(reply, PortReply::Ok(CommandResult::Ok)));
+    }
 
     let (port, calls) = adapter(PortReply::Failed { code: "action_timeout".into(), uncertain: true });
     let reply = port.deliver(Command::SetLongNick { port: "onebot".into(), text: text.into() }).await;

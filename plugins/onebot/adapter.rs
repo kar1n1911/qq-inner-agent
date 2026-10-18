@@ -184,6 +184,44 @@ impl OneBotAdapter {
             return failed("qq_offline", false);
         }
         match command {
+            Command::Fetch { request, .. } => {
+                let (action, params) = match request {
+                    Fetch::GroupNotices { chat } => {
+                        if chat.port != self.manifest.name || chat.kind != ChatKind::Group {
+                            return failed("invalid_chat", false);
+                        }
+                        let Some(group_id) = numeric_id(&chat.id) else { return failed("invalid_chat", false); };
+                        ("_get_group_notice", json!({"group_id":group_id}))
+                    }
+                    Fetch::GroupMember { chat, user } => {
+                        if chat.port != self.manifest.name || chat.kind != ChatKind::Group {
+                            return failed("invalid_chat", false);
+                        }
+                        let Some(group_id) = numeric_id(&chat.id) else { return failed("invalid_chat", false); };
+                        let Some(user_id) = numeric_id(&user) else { return failed("invalid_user", false); };
+                        ("get_group_member_info", json!({"group_id":group_id,"user_id":user_id}))
+                    }
+                    Fetch::Stranger { port, user } => {
+                        if port != self.manifest.name { return failed("wrong_port", false); }
+                        let Some(user_id) = numeric_id(&user) else { return failed("invalid_user", false); };
+                        ("get_stranger_info", json!({"user_id":user_id}))
+                    }
+                };
+                match self.action(action.into(), params).await {
+                    PortReply::Ok(data) => PortReply::Ok(CommandResult::Fetched(data)),
+                    PortReply::Failed { code, uncertain } => PortReply::Failed { code, uncertain },
+                    PortReply::Unsupported { capability } => PortReply::Unsupported { capability },
+                    PortReply::Degraded { .. } => failed("degraded_fetch_ack", false),
+                }
+            }
+            Command::SetLongNick { text, .. } => {
+                match self.action("set_self_longnick".into(), json!({"longNick":text})).await {
+                    PortReply::Ok(_) => PortReply::Ok(CommandResult::Ok),
+                    PortReply::Failed { code, uncertain } => PortReply::Failed { code, uncertain },
+                    PortReply::Unsupported { capability } => PortReply::Unsupported { capability },
+                    PortReply::Degraded { .. } => failed("degraded_long_nick_ack", true),
+                }
+            }
             Command::Send { chat, segments, reply_to } => {
                 let id = match numeric_id(&chat.id) {
                     Some(id) => id,

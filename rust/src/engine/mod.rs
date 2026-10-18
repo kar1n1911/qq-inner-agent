@@ -86,13 +86,22 @@ impl EngineTransport for OneBot {
     }
 }
 // 不依赖 trait upcasting（保持仓库 MSRV）；与 orientation 共用同一个传输实例。
-struct OrientationAdapter(Arc<dyn EngineTransport>, Arc<self_identity::Cache>, Clock);
+struct OrientationAdapter(Arc<dyn EngineTransport>, Arc<self_identity::Cache>, Clock,
+    Arc<Mutex<Option<Arc<dyn io::ChatPort>>>>);
 impl OrientationTransport for OrientationAdapter {
     fn self_id(&self) -> String {
         self.0.self_id()
     }
     fn call<'a>(&'a self, action: &'a str, params: Value) -> BoxFuture<'a, Result<Value>> {
-        self.0.call(action, params)
+        Box::pin(async move {
+            let port = self.3.lock().unwrap().clone();
+            if let Some(port) = port {
+                if let Some(result) = call_selected_chat_action(port, action, &params).await? {
+                    return Ok(result);
+                }
+            }
+            self.0.call(action, params).await
+        })
     }
     fn titled_members<'a>(&'a self, chat: &'a str) -> BoxFuture<'a, Vec<Value>> {
         Box::pin(async move {
@@ -125,9 +134,67 @@ impl OrientationTransport for IdentityAdapter<'_> {
                     .members(self.0.transport.as_ref(), &group, self.0.now())
                     .await;
             }
+            let port = self.0.chat_port.lock().unwrap().clone();
+            if let Some(port) = port {
+                if let Some(result) = call_selected_chat_action(port, action, &params).await? {
+                    return Ok(result);
+                }
+            }
             let result = self.0.transport.call(action, params).await?;
             Ok(result)
         })
+    }
+}
+fn required_protocol_id(params: &Value, key: &str) -> Result<String> {
+    let value = params.get(key).ok_or_else(|| anyhow::anyhow!("missing_{key}"))?;
+    let id = match value {
+        Value::String(id) => id.clone(),
+        Value::Number(number) if number.is_i64() || number.is_u64() => number.to_string(),
+        Value::Number(number) => {
+            let number = number.as_f64().ok_or_else(|| anyhow::anyhow!("invalid_{key}"))?;
+            ensure!(number.is_finite() && number > 0. && number.fract() == 0., "invalid_{key}");
+            number.to_string()
+        }
+        _ => anyhow::bail!("invalid_{key}"),
+    };
+    ensure!(!id.is_empty(), "invalid_{key}");
+    Ok(id)
+}
+async fn call_selected_chat_action(
+    port: Arc<dyn io::ChatPort>, action: &str, params: &Value,
+) -> Result<Option<Value>> {
+    use io::types::{ChatAddress, ChatKind, Command, CommandResult, Fetch, PortReply};
+    let name = port.manifest().name.clone();
+    let command = match action {
+        "_get_group_notice" => Command::Fetch {
+            port: name.clone(),
+            request: Fetch::GroupNotices { chat: ChatAddress::new(
+                ChatKind::Group, &name, required_protocol_id(params, "group_id")?)? },
+        },
+        "get_group_member_info" => Command::Fetch {
+            port: name.clone(),
+            request: Fetch::GroupMember { chat: ChatAddress::new(
+                ChatKind::Group, &name, required_protocol_id(params, "group_id")?)?,
+                user: required_protocol_id(params, "user_id")? },
+        },
+        "get_stranger_info" => Command::Fetch {
+            port: name.clone(),
+            request: Fetch::Stranger { port: name.clone(), user: required_protocol_id(params, "user_id")? },
+        },
+        "set_self_longnick" => Command::SetLongNick {
+            port: name,
+            text: params.get("longNick").and_then(Value::as_str)
+                .ok_or_else(|| anyhow::anyhow!("missing_longNick"))?.to_owned(),
+        },
+        _ => return Ok(None),
+    };
+    match port.deliver(command).await {
+        PortReply::Ok(CommandResult::Fetched(value)) => Ok(Some(value)),
+        PortReply::Ok(CommandResult::Ok) => Ok(Some(json!({}))),
+        PortReply::Ok(_) => anyhow::bail!("invalid_chat_port_ack"),
+        PortReply::Failed { code, uncertain } => anyhow::bail!("{code}; uncertain={uncertain}"),
+        PortReply::Unsupported { capability } => anyhow::bail!("chat_port_unsupported: {capability:?}"),
+        PortReply::Degraded { missing, .. } => anyhow::bail!("chat_port_degraded: {missing:?}"),
     }
 }
 pub type Clock = Arc<dyn Fn() -> f64 + Send + Sync>;
@@ -245,15 +312,16 @@ impl Core {
     }
 }
 type PersonaBinding = (io::ChatAddress, Arc<dyn io::PersonaPort>);
+type UnboundRouteAlerts = HashMap<(String, &'static str), (Instant, u64)>;
 pub struct Engine {
     pub config: Config,
     pub store: Arc<Mutex<Store>>,
     pub orientation: GroupOrientation,
     provider: Arc<dyn OrientationProvider>,
     transport: Arc<dyn EngineTransport>,
-    chat_port: Mutex<Option<Arc<dyn io::ChatPort>>>,
+    chat_port: Arc<Mutex<Option<Arc<dyn io::ChatPort>>>>,
     io_chats: Mutex<HashMap<String, Arc<dyn io::ChatPort>>>,
-    unbound_fallback_alerts: Mutex<HashMap<String, (Instant, u64)>>,
+    unbound_fallback_alerts: Mutex<UnboundRouteAlerts>,
     persona_bindings: Mutex<HashMap<String, PersonaBinding>>,
     options: Options,
     behavior_graph: Option<behavior::CompiledGraph>,
@@ -389,6 +457,7 @@ impl Engine {
             .then(|| crate::media::Collector::new(&config.data_dir, collection));
         let (aborted, signal) = watch::channel(false);
         let self_identity = Arc::new(self_identity::Cache::default());
+        let chat_port = Arc::new(Mutex::new(None));
         let mut orientation = GroupOrientation::new(
             store.clone(),
             config.agent.clone(),
@@ -397,6 +466,7 @@ impl Engine {
                 transport.clone(),
                 self_identity.clone(),
                 options.now.clone(),
+                chat_port.clone(),
             )),
             options.now.clone(),
             signal,
@@ -408,7 +478,7 @@ impl Engine {
             store,
             provider,
             transport,
-            chat_port: Mutex::new(None),
+            chat_port,
             io_chats: Mutex::new(HashMap::new()),
             unbound_fallback_alerts: Mutex::new(HashMap::new()),
             persona_bindings: Mutex::new(HashMap::new()),
@@ -728,12 +798,15 @@ impl Engine {
         use io::types::{ChatAddress, ChatKind, Command, CommandResult, PortReply, Segment};
         let port = self.io_chats.lock().unwrap().get(chat).cloned();
         let Some(port) = port else {
+            let has_primary = self.chat_port.lock().unwrap().is_some();
+            let event = if has_primary { "chat_route_unbound" } else { "chat_route_fallback" };
+            let key = (chat.to_owned(), event);
             let observation = {
                 let now = Instant::now();
                 let window = Duration::from_secs(300);
                 let mut alerts = self.unbound_fallback_alerts.lock().unwrap();
-                alerts.retain(|group, (last, _)| group == chat || now.duration_since(*last) < window);
-                match alerts.get_mut(chat) {
+                alerts.retain(|(group, _), (last, _)| group == chat || now.duration_since(*last) < window);
+                match alerts.get_mut(&key) {
                     Some((last, suppressed)) if now.duration_since(*last) < window => {
                         *suppressed += 1;
                         None
@@ -745,18 +818,27 @@ impl Engine {
                         Some(count)
                     }
                     None => {
-                        alerts.insert(chat.to_owned(), (now, 0));
+                        alerts.insert(key, (now, 0));
                         Some(0)
                     }
                 }
             };
             if let Some(suppressed) = observation {
-                (self.options.log)("chat_route_fallback", json!({
-                    "chat": chat,
-                    "route": "built_in_fallback",
-                    "reason": "chat_port_unbound",
-                    "suppressed_since_last": suppressed,
-                }));
+                if has_primary {
+                    (self.options.log)("chat_route_unbound", json!({
+                        "chat": chat, "reason": "chat_port_unbound", "uncertain": false,
+                        "suppressed_since_last": suppressed,
+                    }));
+                } else {
+                    (self.options.log)("chat_route_fallback", json!({
+                        "chat": chat, "route": "built_in_fallback", "reason": "chat_port_unbound",
+                        "suppressed_since_last": suppressed,
+                    }));
+                }
+            }
+            if has_primary {
+                self.core().last_error = Some("chat_port_unbound".into());
+                return Err(OneBotError { code: "chat_port_unbound".into(), uncertain: false });
             }
             return self.transport.send(chat, text, face, reply_to, mention).await;
         };
