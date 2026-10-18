@@ -1341,6 +1341,32 @@ X4  内核 / 行为分离 + 可重排 ← 怎么组装
 **验收标准**：**待 A 落地后再定**（B 的接口形态依赖 A 的工厂形态）。
 
 
+### 3.13 删除内置 OneBot 连接（收口） ⏸ 待启用验证后执行
+
+**目标**：插件接管后，删掉内置连接与 `transport` 垫片，让"一条连接"成为唯一形态。
+
+#### 已裁决
+
+| 事项 | 决定（用户 2026-10-18） |
+| --- | --- |
+| 删除后的回滚 | **接受二进制回滚**：切回已验证的旧二进制 + 重启（部署配置动作，不改源码）；不再要求只改 `plugins.json` |
+| 无插件时的行为 | **启动但停止参与**，状态报 `no_available_io`（可查询、限频），绝不尝试发送 |
+
+#### 顺序
+
+1. 先补"缺失态"：chat `route=none` / `health=missing` + `no_available_io`（当前可用性投影只区分 plugin 与 built_in）；
+2. 启用 Owned 插件并实机验证（双 WS 下同帧只入库一次、一次回复一个 action），失败按 `plugins.json` 回滚；
+3. 先改消费者（`main` 内置构造与通知消费、`control` 的 `contacts.list`）再删生产者；
+4. 去掉 `RoutedTransport` 的 `send`/`send_media` 委托与无端口回退，改为明确缺失错误；
+5. 最后删垫片内容。**不能整文件删 `transport/mod.rs`**——它还声明 `provider`/`provider_transport`，属 §3.14。
+
+#### 测试影响
+
+`chat_port_runtime_wiring_contract` 现在断言"启用时两条 WS"，删除后需由测试作者另写"一条插件 WS"的目标断言；
+`interface_availability_contract`、`plugin_enablement_contract` 的 fallback 断言要区分过渡版与删除版。
+`onebot_mock` 的协议行为测试保留并指向插件实现；`engine_parity` 迁移夹具、不降低检出能力。
+
+
 ## 4. 框架与可视化
 
 ### 4.1 内核 / 行为分离：把整个系统变成一个更自由的框架（原 X4） 🟡 部分完成
